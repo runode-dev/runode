@@ -86,6 +86,8 @@ pub(crate) struct Peers {
     /// `run_until_idle` 不因空闲返回（给的时限是 `Duration::MAX`），交接时告诉新宿主。
     #[cfg(unix)]
     pub(crate) stay: bool,
+    /// 开出来、还没记进看板库的任务会话有几个（`Shared::begin_launch` 记上）。
+    pub(crate) launching: usize,
 }
 
 /// 宿主走到哪一步了。
@@ -118,6 +120,7 @@ impl Default for Peers {
             scheduled: false,
             #[cfg(unix)]
             stay: false,
+            launching: 0,
         }
     }
 }

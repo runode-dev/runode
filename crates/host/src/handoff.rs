@@ -34,8 +34,13 @@ pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
 
 /// 旧宿主（默认期限下）从收到新宿主的 `ClientMsg::Handoff` 到不再接受 `HandoffReady`、回滚，最多
 /// 这么久，由 `give` 的各段期限加 `DEFAULT_DEADLINE` 得出。新宿主这之后才回 `HandoffReady` 只会被回滚，拉起新宿主的一方等结果时要比它宽。
-pub const GIVE_READY_WINDOW: Duration =
-    give::PREPARE_TIMEOUT.checked_add(give::DETACH_TIMEOUT).unwrap().checked_add(DEFAULT_DEADLINE).unwrap();
+pub const GIVE_READY_WINDOW: Duration = give::LAUNCH_WAIT
+    .checked_add(give::PREPARE_TIMEOUT)
+    .unwrap()
+    .checked_add(give::DETACH_TIMEOUT)
+    .unwrap()
+    .checked_add(DEFAULT_DEADLINE)
+    .unwrap();
 
 /// 新宿主从准备回 `HandoffReady`（`TakeOverOptions::on_ready` 被调用）到 `Host::take_over` 返回，
 /// 最多这么久：等旧宿主的 `Commit`、它没提交就断开时再等它退出完，以及失败时交回各个 PTY。

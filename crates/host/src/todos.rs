@@ -9,6 +9,8 @@
 //! 只有拿着会话的宿主改看板：开始交出会话或者要退出（`Peers::phase` 不是 `Phase::Serving`）以后不改库、
 //! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
 //! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
+//!
+//! 开任务的会话从开出来到记进库都算在 `Peers::launching` 里（`Shared::begin_launch`）。
 
 mod auto_done;
 mod check;
@@ -58,6 +60,9 @@ pub(crate) struct Todos {
     /// 触发定时（到点的和手动的）从判断要不要让路到加上任务、占住命令都拿着它，同一个定时不会被两处同时
     /// 触发、各开一张。拿着它时只拿别的锁、不等命令跑完；别处拿着别的锁时不拿它。
     firing: Mutex<()>,
+    /// 测试拿住它时，开任务停在开好会话之后、记进库之前。
+    #[cfg(test)]
+    launch_gate: Mutex<()>,
 }
 
 /// 任务用的会话，看板第 `generation` 次变了以后读到的。
@@ -128,6 +133,18 @@ impl Drop for Claim<'_> {
     }
 }
 
+/// `Shared::begin_launch` 记上的一个正在开的任务会话，丢掉时减掉。创建和丢掉时都要拿 `peers`，不能拿着 `registry`。
+struct Launching<'a> {
+    shared: &'a Shared,
+}
+
+impl Drop for Launching<'_> {
+    fn drop(&mut self) {
+        self.shared.peers().launching -= 1;
+        self.shared.peers_changed.notify_all();
+    }
+}
+
 impl Todos {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -165,6 +182,18 @@ impl Todos {
 
     fn firing(&self) -> MutexGuard<'_, ()> {
         self.firing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// 拿住期间开任务停在开好会话之后、记进库之前。
+    #[cfg(test)]
+    pub(crate) fn hold_launch(&self) -> MutexGuard<'_, ()> {
+        self.launch_gate.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// 任务 `id` 在库里记的开始时刻。
+    #[cfg(all(test, unix))]
+    pub(crate) fn started(&self, id: &str) -> Option<u64> {
+        self.with_db(|db| db.todo_by_id(id)).unwrap().unwrap().started
     }
 
     /// 在库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
@@ -217,6 +246,17 @@ impl Shared {
     /// 能不能改看板：正在交出会话或者要退出了的宿主不改，见模块文档。
     fn todos_writable(&self) -> Result<(), String> {
         crate::refusal(&self.peers()).map_or(Ok(()), |why| Err(why.into()))
+    }
+
+    /// 要开一个任务会话：开出来到记进库都拿着返回的守卫。已经不开新会话（`crate::refusal`）时报错，
+    /// 和记上在同一把锁里，交接开始以后不会再记上。
+    fn begin_launch(&self) -> Result<Launching<'_>, String> {
+        let mut peers = self.peers();
+        if let Some(why) = crate::refusal(&peers) {
+            return Err(why.into());
+        }
+        peers.launching += 1;
+        Ok(Launching { shared: self })
     }
 
     /// 看板变了：叫醒定时的线程，告诉问过 `ListTodos` 的连接。
@@ -743,10 +783,14 @@ impl Shared {
         if !cwd.is_dir() {
             return Err(format!("{} is not a directory", cwd.display()));
         }
+        let _launching = self.begin_launch()?;
         let session = self.spawn_with(SpawnOptions::headless(Some(cwd)), &[]).map_err(|err| format!("{err:#}"))?;
         if let Some(command) = command {
             let command = resume_command_line(&command, &runode_terminal::pty::default_shell());
-            self.deliver(session, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes()));
+            if !self.deliver(session, Inbox::TypeAtPrompt(format!("{command}\r").into_bytes())) {
+                self.kill(session);
+                return Err(format!("the session for todo {id} ended before the agent could resume"));
+            }
         }
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, None, false)) {
             self.kill(session);
@@ -793,6 +837,13 @@ impl Shared {
         if let Some((arg, batch)) = &quoted {
             env.extend([(ENV_TODO_ARG, arg.as_str()), (ENV_TODO_BATCH_ARG, batch.as_str())]);
         }
+        let _launching = match self.begin_launch() {
+            Ok(launching) => launching,
+            Err(err) => {
+                undo_worktree();
+                return Err(err);
+            }
+        };
         let session = match self.spawn_with(SpawnOptions::headless(Some(cwd)), &env) {
             Ok(session) => session,
             Err(err) => {
@@ -805,8 +856,14 @@ impl Shared {
         let agent =
             runode_agent::models::start_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
         let command = agent_command(&agent, &shell, setup.is_some());
-        self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes()));
+        if !self.deliver(session, Inbox::TypeAtPrompt(command.into_bytes())) {
+            self.kill(session);
+            undo_worktree();
+            return Err(format!("the session for todo {} ended before the agent could start", todo.id));
+        }
         let worktree = made.as_ref().map(|(root, branch)| (root.as_path(), branch.as_str()));
+        #[cfg(test)]
+        drop(self.todos.hold_launch());
         if let Err(err) = self.todos.with_db(|db| db.set_started(&todo.id, started, session, worktree, true)) {
             self.kill(session);
             undo_worktree();
@@ -840,6 +897,21 @@ mod tests {
         assert!(todos.claim("b").is_some());
         drop(claim);
         assert!(todos.claim("a").is_some());
+    }
+
+    /// 正在开的任务会话丢掉守卫时减回去；交接开始以后不再记上。
+    #[cfg(unix)]
+    #[test]
+    fn launches_are_counted_only_while_serving() {
+        let host = Host::new(runode_protocol::BuildId("test".into()));
+        let shared = &host.shared;
+        let launching = shared.begin_launch().unwrap();
+        assert_eq!(shared.peers().launching, 1);
+        drop(launching);
+        assert_eq!(shared.peers().launching, 0);
+        shared.peers().phase = crate::server::Phase::HandingOver;
+        assert!(shared.begin_launch().is_err());
+        assert_eq!(shared.peers().launching, 0);
     }
 
     /// 标完成、取消完成也要占住任务：清工作树的、正在开始的占着时回一句让前端再试，不改库。

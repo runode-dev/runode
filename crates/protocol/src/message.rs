@@ -968,7 +968,7 @@ pub enum GoodbyeReason {
 pub enum HandoffRefusal {
     /// 有桌面的界面连着它：多半是旧版本的 app 还开着，要先退出它。
     DesktopConnected,
-    /// 已经在交给别的新宿主了。
+    /// 已经在交给别的新宿主了，或者有任务会话正在开、一时交不了；过一会儿可以再试。
     Busy,
     /// 宿主跑在某个 app 的进程里（`Welcome::standalone` 为假），会话归那个 app 管。
     NotStandalone,

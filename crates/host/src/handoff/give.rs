@@ -38,6 +38,8 @@ pub(super) const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) const RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 /// 写 `Commit` 最多这么久，发出后再等新宿主回 `HandoffDone` 也最多这么久。
 pub(super) const DONE_TIMEOUT: Duration = Duration::from_secs(5);
+/// 开始交接前最多等这么久，等正在开的任务会话记进看板库。
+pub(super) const LAUNCH_WAIT: Duration = Duration::from_secs(2);
 
 /// 新宿主要接手（`ClientMsg::Handoff`）时说的。
 pub(crate) struct Asked {
@@ -218,9 +220,17 @@ impl Giving {
 
 /// 检查能不能交，能交就清场：记下正在交接、停下接受连接、给别的连接发 `Goodbye`，定下要交的
 /// 会话。都在同一把锁里，之后新开的会话（见 `Shared::spawn`）和新连上的连接（见 `serve`）都
-/// 看得到正在交接。
+/// 看得到正在交接。检查之前先等 `Peers::launching` 归零，交出去的任务会话在库里才一定记成了开始，接手的宿主
+/// 不会把任务再开一次；等过 `LAUNCH_WAIT` 还没归零就回 `HandoffRefusal::Busy`。
 fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, HandoffRefusal> {
-    let mut peers = shared.peers();
+    // 等的时候放开过锁，下面的检查照等完时的状态做。
+    let (mut peers, _) = shared
+        .peers_changed
+        .wait_timeout_while(shared.peers(), LAUNCH_WAIT, |peers| peers.launching > 0)
+        .unwrap_or_else(PoisonError::into_inner);
+    if peers.launching > 0 {
+        return Err(HandoffRefusal::Busy);
+    }
     // 要接手的和自己是同一个构建：另一个新 app 抢先让这个构建的新宿主接手了，这是它拉起的宿主，
     // 后来的 app 的探测已经过时。按正在交接回话，那边过一会儿重新探，会连上这里。
     if asked.build == shared.build {
@@ -664,5 +674,100 @@ mod tests {
         for (_, thread) in sessions {
             thread.join().unwrap();
         }
+    }
+
+    /// 单独跑、在监听、开着看板的宿主，和看板上一张不要工作树、agent 是 `true` 的任务。
+    fn host_with_todo(name: &str) -> (Arc<Shared>, String) {
+        let dir = std::env::temp_dir().join(format!("rnh-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = crate::Host::new(BuildId("old".into()));
+        host.mark_standalone();
+        host.listen(&dir.join("host.sock"), &dir.join("host.lock")).unwrap();
+        host.serve_todos(dir.join("todos.db"));
+        let spec = runode_protocol::todo::TodoSpec {
+            title: "t".into(),
+            dir,
+            agent: "true".into(),
+            worktree: false,
+            ..Default::default()
+        };
+        let HostMsg::TodoAdded { id, .. } = host.shared.add_todo(1, &spec).unwrap() else { panic!("no todo") };
+        (host.shared, id)
+    }
+
+    /// 另起线程开始任务 `id`，等它的会话登记好，返回会话和那个线程。
+    fn start_in_background(
+        shared: &Arc<Shared>,
+        id: &str,
+    ) -> (SessionId, thread::JoinHandle<Result<SessionId, String>>) {
+        let starting = {
+            let (shared, id) = (shared.clone(), id.to_owned());
+            thread::spawn(move || shared.start_todo(&id))
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(session) = shared.registry().sessions.keys().next().copied() {
+                return (session, starting);
+            }
+            assert!(Instant::now() < deadline, "the todo's session never showed up");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// 另起线程开始交接，返回 `begin` 的结果和它一返回时任务 `id` 在库里的开始时刻。
+    fn begin_in_background(
+        shared: &Arc<Shared>,
+        id: &str,
+    ) -> thread::JoinHandle<(Result<Giving, HandoffRefusal>, Option<u64>)> {
+        let (shared, id) = (shared.clone(), id.to_owned());
+        thread::spawn(move || {
+            let asked = Asked { formats: HANDOFF_FORMAT..=HANDOFF_FORMAT, build: BuildId("new".into()) };
+            let giving = begin(&shared, 0, &asked);
+            let started = shared.todos.started(&id);
+            (giving, started)
+        })
+    }
+
+    /// 交接落在任务开好会话、还没记进库的时候：等它记完再定下要交的会话，交出去的任务会话在库里已经记成
+    /// 开始，新宿主不会把它当成还没开始的再开一次。
+    #[test]
+    fn a_handoff_waits_for_a_todo_being_started() {
+        let (shared, id) = host_with_todo("give-launch");
+        let gate = shared.todos.hold_launch();
+        let (session, starting) = start_in_background(&shared, &id);
+        let giving = begin_in_background(&shared, &id);
+        thread::sleep(Duration::from_millis(300));
+        drop(gate);
+
+        let (giving, started) = giving.join().unwrap();
+        assert_eq!(starting.join().unwrap(), Ok(session));
+        let Ok(giving) = giving else { panic!("the handoff was refused") };
+        assert!(started.is_some(), "the handed-over todo session was not recorded as started");
+        assert!(giving.handles.iter().any(|(handed, _)| *handed == session));
+        giving.roll_back(&shared, Instant::now(), "the test is over");
+        shared.kill(session);
+    }
+
+    /// 任务过了 `LAUNCH_WAIT` 还没记进库时不交，回正在忙，照常办事；记完以后照常能交。
+    #[test]
+    fn a_handoff_is_refused_while_a_todo_start_takes_too_long() {
+        let (shared, id) = host_with_todo("give-launch-slow");
+        let gate = shared.todos.hold_launch();
+        let (session, starting) = start_in_background(&shared, &id);
+        let asked_at = Instant::now();
+        let (refused, started) = begin_in_background(&shared, &id).join().unwrap();
+        assert!(matches!(refused, Err(HandoffRefusal::Busy)));
+        assert!(asked_at.elapsed() >= LAUNCH_WAIT);
+        assert_eq!(started, None);
+        assert_eq!(shared.peers().phase, Phase::Serving);
+        drop(gate);
+        assert_eq!(starting.join().unwrap(), Ok(session));
+
+        let (giving, started) = begin_in_background(&shared, &id).join().unwrap();
+        let Ok(giving) = giving else { panic!("the handoff was refused after the todo started") };
+        assert!(started.is_some());
+        giving.roll_back(&shared, Instant::now(), "the test is over");
+        shared.kill(session);
     }
 }
