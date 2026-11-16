@@ -193,7 +193,8 @@ fn watch_ci_is_quiet_when_everything_passes() {
 #[test]
 fn watch_ci_fires_once_for_a_new_failure() {
     let sandbox = Sandbox::new("ci-once");
-    sandbox.fixture("run-list", &format!("21\t构建 CI\t{SHA}\tcompleted\tfailure\n20\tLint\t{SHA}\tcompleted\tsuccess\n"));
+    sandbox
+        .fixture("run-list", &format!("21\t构建 CI\t{SHA}\tcompleted\tfailure\n20\tLint\t{SHA}\tcompleted\tsuccess\n"));
     sandbox.fixture("run-view-21", &failed_log("error: boom"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
     assert!(out.starts_with("These GitHub Actions workflows failed on main."), "{out}");
@@ -234,10 +235,7 @@ fn watch_ci_waits_for_a_run_in_progress() {
     assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
     assert_eq!(sandbox.state("pending"), "Lint\n");
 
-    sandbox.fixture(
-        "run-list",
-        &format!("93\tCI\t{SHA}\tcompleted\tfailure\n91\tCI\t{SHA}\tcompleted\tcancelled\n"),
-    );
+    sandbox.fixture("run-list", &format!("93\tCI\t{SHA}\tcompleted\tfailure\n91\tCI\t{SHA}\tcompleted\tcancelled\n"));
     sandbox.fixture("run-view-93", &failed_log("fresh"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
     assert!(out.contains("## CI (run 93, ") && out.contains("fresh"), "{out}");
