@@ -172,14 +172,18 @@ pub(super) fn agent_with_options(spec: &TodoSpec) -> String {
 }
 
 /// 写好 `agent` 那家免确认时要的设置文件（`runode_agent::models::auto_settings`），返回它的路径；内容没变时不重写。
-/// 那家不用、或者写不出来时为空，agent 照样起，只是不带这个设置。
+/// 那家不用、或者写不出来时为空，agent 照样起，只是不带这个设置。几个任务可能同时启动、同时读写它，
+/// 整个换上去，正在启动的 agent 不会读到写了一半的文件。
 fn auto_settings_file(agent: &str, dirs: &Dirs) -> Option<PathBuf> {
     let (program, contents) = runode_agent::models::auto_settings(agent)?;
     let path = dirs.agent_settings_file(program)?;
     if std::fs::read(&path).is_ok_and(|old| old == contents.as_bytes()) {
         return Some(path);
     }
-    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, contents));
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| runode_paths::replace_file(&path, contents.as_bytes()));
     match written {
         Ok(()) => Some(path),
         Err(err) => {
