@@ -126,8 +126,10 @@ pub struct FinishedCommand {
 /// 往终端里打路径、地址时照哪种 shell 的写法加引号。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Quoting {
-    /// sh、bash（包括 Windows 上的 Git Bash）、zsh、fish：单引号，里面的单引号写成 `'\''`。
+    /// sh、bash（包括 Windows 上的 Git Bash）、zsh：单引号，里面的单引号写成 `'\''`。
     Posix,
+    /// fish：单引号里 `\\`、`\'` 仍是转义，反斜杠和单引号前各加一个反斜杠。
+    Fish,
     /// PowerShell：单引号里什么都不展开，单引号写两遍；它把 `‘’‚‛` 也当单引号。
     PowerShell,
     /// elvish：单引号里什么都不展开，单引号写两遍。
@@ -159,7 +161,8 @@ impl Quoting {
 
     fn of_shell(shell: Shell) -> Self {
         match shell {
-            Shell::Zsh | Shell::Bash | Shell::Fish => Self::Posix,
+            Shell::Zsh | Shell::Bash => Self::Posix,
+            Shell::Fish => Self::Fish,
             Shell::PowerShell => Self::PowerShell,
             Shell::Elvish => Self::Elvish,
             Shell::Cmd => Self::Cmd,
@@ -177,7 +180,7 @@ impl Quoting {
     fn is_plain(self, c: char) -> bool {
         c.is_alphanumeric()
             || match self {
-                Self::Posix => matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='),
+                Self::Posix | Self::Fish => matches!(c, '/' | '.' | '_' | '-' | '+' | '@' | '%' | ':' | ',' | '='),
                 // PowerShell 把 `,` 当数组、`@` 当展开，elvish 和 nushell 的裸字也不全认它们；`\` 在这几种里不是转义。
                 Self::PowerShell | Self::Elvish | Self::Nushell => {
                     matches!(c, '/' | '\\' | '.' | '_' | '-' | '+' | ':')
@@ -195,6 +198,7 @@ impl Quoting {
         }
         match self {
             Self::Posix => format!("'{}'", text.replace('\'', r"'\''")),
+            Self::Fish => format!("'{}'", text.replace('\\', r"\\").replace('\'', r"\'")),
             Self::PowerShell => {
                 let mut quoted = String::with_capacity(text.len() + 2);
                 quoted.push('\'');
@@ -220,13 +224,13 @@ impl Quoting {
         }
     }
 
-    /// 和 `quote` 一样只放过常见字符；sh 的写法里其余字符前面加反斜杠，像访达把文件拖进终端时那样，
+    /// 和 `quote` 一样只放过常见字符；sh 和 fish 的写法里其余字符前面加反斜杠，像访达把文件拖进终端时那样，
     /// 别的写法里反斜杠不是转义，照 `quote` 括起来。
     /// 图片路径用这种写法：Claude Code 按「空格后跟 `/`」拆开几个路径，引号只在整段两头时才去掉，
     /// 几个带引号的路径连在一起它就认不出来了；反斜杠转义它和 Codex 都能还原。带换行时照 `quote` 括起来：
     /// 反斜杠加换行在 sh 里是续行，换行会被吃掉。
     pub fn escape(self, text: &str) -> String {
-        if self != Self::Posix || text.contains('\n') {
+        if !matches!(self, Self::Posix | Self::Fish) || text.contains('\n') {
             return self.quote(text);
         }
         let mut escaped = String::with_capacity(text.len());

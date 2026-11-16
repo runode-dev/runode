@@ -14,6 +14,19 @@ fn quotes_paths_for_posix_shells() {
     assert_eq!(quote(r"C:\src\a.rs"), r"'C:\src\a.rs'");
 }
 
+/// fish 的单引号里 `\\` 和 `\'` 仍是转义，反斜杠要写两遍。
+#[test]
+fn quotes_paths_for_fish() {
+    let quote = |text| Quoting::Fish.quote(text);
+    assert_eq!(quote("src/main.rs:12"), "src/main.rs:12");
+    assert_eq!(quote("my file.txt"), "'my file.txt'");
+    assert_eq!(quote("it's"), r"'it\'s'");
+    assert_eq!(quote(r"a\\b"), r"'a\\\\b'");
+    assert_eq!(quote(r"dir\"), r"'dir\\'");
+    assert_eq!(Quoting::Fish.escape("/tmp/Screen Shot (1).png"), r"/tmp/Screen\ Shot\ \(1\).png");
+    assert_eq!(Quoting::Fish.escape("/tmp/a\nb.png"), "'/tmp/a\nb.png'");
+}
+
 #[test]
 fn quotes_paths_for_windows_shells() {
     assert_eq!(Quoting::PowerShell.quote(r"C:\src\main.rs:12"), r"C:\src\main.rs:12");
@@ -39,6 +52,7 @@ fn picks_the_quoting_of_the_foreground_shell() {
     assert_eq!(Quoting::of_session(&meta("pwsh.exe", true)), Quoting::PowerShell);
     assert_eq!(Quoting::of_session(&meta("bash.exe", true)), Quoting::Posix);
     assert_eq!(Quoting::of_session(&meta("nu", true)), Quoting::Nushell);
+    assert_eq!(Quoting::of_session(&meta("fish", true)), Quoting::Fish);
     assert_eq!(Quoting::of_session(&meta("cmd.exe", true)), Quoting::Cmd);
     assert_eq!(Quoting::of_session(&meta("pwsh.exe", false)), platform);
     assert_eq!(Quoting::of_program("powershell.exe"), Quoting::PowerShell);
