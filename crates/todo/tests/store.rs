@@ -705,16 +705,22 @@ fn numbers_count_up_and_are_never_reused() {
 }
 
 /// 两个进程同时加任务时都等对方写完，不报库被锁：先读后写的事务一开始就拿写锁，`busy_timeout` 才管用。
+/// 每边写的条数要少：SQLite 的忙等不排队，一边连着提交时另一边可能一直抢不到锁，Windows 上每次提交
+/// 都要刷盘，写多了另一边就等过 `busy_timeout`。
 #[test]
 fn concurrent_writers_wait_for_each_other() {
+    const WRITES: u64 = 10;
     let path = temp_db("concurrent");
     drop(Store::open(&path).unwrap());
+    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
     let writers: Vec<_> = (0..2)
         .map(|_| {
             let path = path.clone();
+            let start = start.clone();
             std::thread::spawn(move || {
                 let mut store = Store::open(&path).unwrap();
-                for at in 0..50 {
+                start.wait();
+                for at in 0..WRITES {
                     store.add_todo(&spec("t"), at, None).unwrap();
                 }
             })
@@ -726,7 +732,7 @@ fn concurrent_writers_wait_for_each_other() {
     let mut numbers: Vec<u64> =
         Store::open(&path).unwrap().list_todos(100).unwrap().into_iter().map(|todo| todo.number).collect();
     numbers.sort_unstable();
-    assert_eq!(numbers, (1..=100).collect::<Vec<_>>());
+    assert_eq!(numbers, (1..=2 * WRITES).collect::<Vec<_>>());
 }
 
 /// 完成了的记录不管多久以前的都翻得到，完成得晚的在前，分页、按定时筛。
