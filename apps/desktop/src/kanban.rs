@@ -971,6 +971,31 @@ fn agent_badge(command: &str, color: Hsla) -> AnyElement {
     }
 }
 
+/// 卡片下面一行小字的说明：`parts` 之间用「·」隔开，排成一行，放不下的由各段自己截断。
+fn detail_row(parts: impl IntoIterator<Item = AnyElement>, color: Hsla) -> Div {
+    let mut row: Vec<AnyElement> = Vec::new();
+    for part in parts {
+        if !row.is_empty() {
+            row.push(div().flex_none().child("·").into_any_element());
+        }
+        row.push(part);
+    }
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .min_w_0()
+        .overflow_hidden()
+        .text_size(FontSize::Small)
+        .text_color(color)
+        .children(row)
+}
+
+/// `detail_row` 里放不下时截断的一段字。
+fn detail_text(text: String) -> AnyElement {
+    div().min_w_0().truncate().child(text).into_any_element()
+}
+
 /// 任务的 agent 写在卡片上的样子：对话框里挑出来的写名字，挑了模型、强度的接在后面；自己写的命令照原样。
 fn agent_text(command: &str) -> String {
     let Some(pick) = Pick::parse(command) else { return command.to_owned() };

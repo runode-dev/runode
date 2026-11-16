@@ -1,10 +1,10 @@
 //! 记录页：完成了的任务一页一页向宿主要来，完成得晚的在前，可以只看一个定时开出的；只看一个带检查命令的定时时
 //! 另有一段列它的检查记录（`runs`）。
 
+use crate::i18n::action_for;
 use crate::ui::{
     a11y::Press,
     button::{Button, ButtonSize, ButtonVariant},
-    font_size::FontSize,
     icons::{DISCARD_ICON, TERMINAL_ICON, TRASH_ICON},
     scrollbar::scrollbar,
     segmented::Segmented,
@@ -18,7 +18,7 @@ use runode_protocol::{
 use std::collections::HashSet;
 
 use super::{
-    Kanban, Page, agent_text, dialog, icon_button, label_row, named,
+    Kanban, Page, agent_badge, agent_text, detail_row, detail_text, dialog, icon_button, label_row, named,
     store::{self, TodoData},
 };
 
@@ -263,23 +263,45 @@ impl Kanban {
             .as_ref()
             .filter(|_| self.history.schedule.is_none())
             .and_then(|id| data.schedules.iter().find(|s| &s.id == id));
-        let details: Vec<String> = [
-            (todo.number > 0).then(|| format!("#{}", todo.number)),
-            Some(self.place_name(&todo.spec.dir)),
-            Some(agent_text(&todo.spec.agent)),
-            todo.branch.clone(),
-            todo.done_at.map(|at| rust_i18n::t!("kanban.done_at", time = dialog::full_time(at)).into_owned()),
-            schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        // 各段和放不下时它截不截：编号和完成时间留全，项目、分支、来自哪个定时截断。
+        let before = [
+            ((todo.number > 0).then(|| format!("#{}", todo.number)), false),
+            (Some(self.place_name(&todo.spec.dir)), true),
+        ];
+        let after = [
+            (todo.branch.clone(), true),
+            (todo.done_at.map(|at| rust_i18n::t!("kanban.done_at", time = dialog::full_time(at)).into_owned()), false),
+            (schedule.map(|s| rust_i18n::t!("kanban.from_schedule", name = s.spec.title.as_str()).into_owned()), true),
+        ];
+        // 辅助工具读的说明里 agent 写名字，画出来的那一行 agent 是 logo。
+        let details: Vec<String> = before
+            .iter()
+            .map(|(text, _)| text.clone())
+            .chain([Some(agent_text(&todo.spec.agent))])
+            .chain(after.iter().map(|(text, _)| text.clone()))
+            .flatten()
+            .collect();
+        let part = |(text, shrinks): (Option<String>, bool)| {
+            text.map(|text| if shrinks { detail_text(text) } else { div().flex_none().child(text).into_any_element() })
+        };
+        let color = fg.opacity(0.55);
+        let line = detail_row(
+            before
+                .into_iter()
+                .filter_map(part)
+                .chain([agent_badge(&todo.spec.agent, color)])
+                .chain(after.into_iter().filter_map(part)),
+            color,
+        );
+        // 辅助工具读到的按钮名带上任务的标题，各条记录上的同一种按钮才分得清。
+        let title = todo.spec.title.as_str();
         let mut buttons: Vec<Button> = Vec::new();
         if todo.session.is_some() {
             let todo = todo.clone();
             let label = rust_i18n::t!("kanban.open").into_owned();
             buttons.push(
-                icon_button("todo-open", TERMINAL_ICON, label)
+                icon_button("todo-open", TERMINAL_ICON, label.clone())
+                    .aria_label(action_for(&label, title))
                     .on_press(cx, move |this, _, cx| this.open_todo(&todo, cx)),
             );
         }
@@ -287,7 +309,8 @@ impl Kanban {
             let id = todo.id.clone();
             let label = rust_i18n::t!("kanban.reopen").into_owned();
             buttons.push(
-                icon_button("todo-reopen", DISCARD_ICON, label)
+                icon_button("todo-reopen", DISCARD_ICON, label.clone())
+                    .aria_label(action_for(&label, title))
                     .on_press(cx, move |this, _, cx| this.finish_todo(id.clone(), false, cx)),
             );
         }
@@ -295,7 +318,8 @@ impl Kanban {
             let id = todo.id.clone();
             let label = rust_i18n::t!("kanban.remove_todo").into_owned();
             buttons.push(
-                icon_button("todo-remove", TRASH_ICON, label)
+                icon_button("todo-remove", TRASH_ICON, label.clone())
+                    .aria_label(action_for(&label, title))
                     .on_press(cx, move |this, window, cx| this.remove_todo(id.clone(), window, cx)),
             );
         }
@@ -318,13 +342,7 @@ impl Kanban {
                     .flex_col()
                     .gap(px(4.))
                     .child(div().truncate().font_weight(FontWeight::MEDIUM).child(todo.spec.title.clone()))
-                    .child(
-                        div()
-                            .text_size(FontSize::Small)
-                            .text_color(fg.opacity(0.55))
-                            .truncate()
-                            .child(details.join(" · ")),
-                    ),
+                    .child(line),
             )
             .child(div().flex_none().flex().items_start().gap(px(2.)).children(buttons))
     }

@@ -20,7 +20,7 @@ use runode_protocol::{
 use std::path::{Path, PathBuf};
 
 use super::{
-    Kanban, Page, TOAST_LINGER, ToastState, agent_badge, agent_text, column_name,
+    Kanban, Page, TOAST_LINGER, ToastState, agent_badge, agent_text, column_name, detail_row, detail_text,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     runs::last_line,
@@ -566,28 +566,12 @@ impl Kanban {
         // 说明那一行：规则、项目、agent、工作树，agent 画成 logo。辅助工具读上面的 `description`。放不下时
         // 规则留全，后面几段各自截断。
         let meta_color = fg.opacity(details_alpha);
-        let mut meta: Vec<AnyElement> = Vec::new();
-        let shrinking = |text: String| div().min_w_0().truncate().child(text).into_any_element();
         let parts = [div().flex_none().child(rule).into_any_element()]
             .into_iter()
-            .chain(place.map(shrinking))
+            .chain(place.map(detail_text))
             .chain([agent_badge(&schedule.spec.agent, meta_color)])
-            .chain(worktree.map(shrinking));
-        for part in parts {
-            if !meta.is_empty() {
-                meta.push(div().flex_none().child("·").into_any_element());
-            }
-            meta.push(part);
-        }
-        let meta = div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .min_w_0()
-            .overflow_hidden()
-            .text_size(FontSize::Small)
-            .text_color(meta_color)
-            .children(meta);
+            .chain(worktree.map(detail_text));
+        let meta = detail_row(parts, meta_color);
         div()
             .id(named("todo-schedule", &schedule.id))
             .role(Role::ListItem)
