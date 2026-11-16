@@ -1215,6 +1215,9 @@ kanban:
   in_worktree: "%{agent}，在工作树里"
   took: "%{agent} 用了 %{time}"
   not_finished: "%{agent} 没做完"
+  footer_in_worktree: 在工作树里
+  footer_took: "用了 %{time}"
+  footer_not_finished: 没做完
   continue: 接着做
   view_terminal: 看终端
   next_schedule: 下一个定时

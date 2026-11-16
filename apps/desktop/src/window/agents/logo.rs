@@ -79,7 +79,7 @@ pub(in crate::window) fn logo_path(kind: AgentKind) -> Option<&'static str> {
 }
 
 /// `kind` 的 logo，边长 `size`；单色的和首字母都染成 `fg`。认不出是哪个的 agent 为 `None`。
-pub(in crate::window) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> Option<AnyElement> {
+pub(crate) fn agent_logo(kind: AgentKind, size: Pixels, fg: Hsla) -> Option<AnyElement> {
     Some(match logo_of(kind)? {
         Logo::Colored(path) => colored_logo(path, size),
         Logo::Mono(path) => svg().path(path).flex_none().size(size).text_color(fg).into_any_element(),

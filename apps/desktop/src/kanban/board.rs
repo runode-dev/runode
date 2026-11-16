@@ -35,7 +35,7 @@ use runode_protocol::{
 use runode_types::agent::Agent;
 
 use super::{
-    Kanban, KanbanEvent, Page, RING_WIDTH, agent_text, card_shadow, column_name,
+    Kanban, KanbanEvent, Page, RING_WIDTH, agent_badge, agent_text, card_shadow, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     store::{self, Step, TodoData},
@@ -454,18 +454,26 @@ impl Kanban {
             Column::Done => todo.done_at.map(|at| (ago(i64::try_from(at).unwrap_or(i64::MAX)), false)),
             Column::Todo | Column::InProgress => None,
         };
-        let footer = match column {
-            _ if failed => rust_i18n::t!("kanban.not_finished", agent = agent),
-            Column::InProgress if todo.worktree_dir.is_some() => rust_i18n::t!("kanban.in_worktree", agent = agent),
-            Column::Done => match todo.started.zip(todo.done_at) {
+        let took = todo.started.zip(todo.done_at).filter(|_| column == Column::Done);
+        let (footer, footer_rest) = match column {
+            _ if failed => {
+                (rust_i18n::t!("kanban.not_finished", agent = agent), Some(rust_i18n::t!("kanban.footer_not_finished")))
+            }
+            Column::InProgress if todo.worktree_dir.is_some() => {
+                (rust_i18n::t!("kanban.in_worktree", agent = agent), Some(rust_i18n::t!("kanban.footer_in_worktree")))
+            }
+            _ => match took {
                 Some((started, done)) => {
-                    rust_i18n::t!("kanban.took", agent = agent, time = waited(done.saturating_sub(started)))
+                    let time = waited(done.saturating_sub(started));
+                    (
+                        rust_i18n::t!("kanban.took", agent = agent, time = time.as_str()),
+                        Some(rust_i18n::t!("kanban.footer_took", time = time.as_str())),
+                    )
                 }
-                None => agent.into(),
+                None => (agent.into(), None),
             },
-            _ => agent.into(),
-        }
-        .into_owned();
+        };
+        let (footer, footer_rest) = (footer.into_owned(), footer_rest.map(|rest| rest.into_owned()));
         let limit = todo.spec.time_limit;
         let progress = limit.zip(todo.started).filter(|_| column == Column::InProgress).map(|(limit, started)| {
             let ran = now.saturating_sub(started);
@@ -491,6 +499,7 @@ impl Kanban {
             place: self.place_name(&todo.spec.dir),
             when,
             footer,
+            footer_rest,
             limit: limit.filter(|_| column == Column::Todo).map(limit_text),
             progress,
             queued,
@@ -528,9 +537,8 @@ impl Kanban {
     }
 
     /// 卡片的样子，看板上的和飞着的共用：第一行是目录，右边是等了多久或完成在多久以前和编号，`corner` 浮在
-    /// 右上角；下面依次是分支、PR、标题、agent 的提问和回答的按钮、终端摘录、时限的进度、结果和排队的说法；最后一行是
-    /// agent 怎么样了，`actions`
-    /// 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
+    /// 右上角；下面依次是标题、agent 的提问和回答的按钮、终端摘录、时限的进度、结果和排队的说法、分支和 PR；
+    /// 最后一行是 agent 怎么样了，`actions` 摆在右下角。`agent_id` 给 agent 标记用（它转圈要 id）。
     #[allow(clippy::too_many_arguments)]
     fn card_face(
         &self,
@@ -601,13 +609,14 @@ impl Kanban {
             .when(todo.number > 0, |row| {
                 row.child(div().flex_none().text_color(muted).child(format!("#{}", todo.number)))
             });
-        // 分支单独一行，和目录挤在一行时窄列里两个都截得认不出。
+        // 分支和 PR 一行：分支放不下时截断，PR 的说法最多占一大半，分支至少露个开头。
         let branch = todo.branch.clone().map(|branch| {
             div()
+                .flex_1()
+                .min_w(scaled(40.))
                 .flex()
                 .items_center()
                 .gap(px(4.))
-                .min_w_0()
                 .text_size(FontSize::Small)
                 .text_color(subtle)
                 .child(svg().path(BRANCH_ICON).flex_none().size(px(11.)).text_color(muted))
@@ -619,7 +628,9 @@ impl Kanban {
                         .child(branch),
                 )
         });
-        let pull = self.pulls.get(&todo.id).map(|pr| pull_row(pr, &todo.id, cx));
+        let pull = self.pulls.get(&todo.id).map(|pr| pull_row(pr, &todo.id, cx).max_w(relative(0.7)));
+        let git = (branch.is_some() || pull.is_some())
+            .then(|| div().flex().items_center().gap(px(10.)).min_w_0().children(branch).children(pull));
         let asked = text.prompt.as_ref().zip(todo.session).map(|(prompt, id)| {
             let open = todo.clone();
             agent_prompts::render_prompt(
@@ -709,12 +720,16 @@ impl Kanban {
                 div()
                     .id(named("todo-footer", &todo.id))
                     .min_w_0()
-                    .truncate()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
                     .text_color(subtle)
                     .when(!footer_tip.is_empty(), |footer| {
                         footer.tooltip(crate::ui::tooltip::tooltip(footer_tip.join("\n"), None))
                     })
-                    .child(text.footer.clone()),
+                    .child(agent_badge(&todo.spec.agent, subtle))
+                    // 放不下时先截 agent 的模型和强度，这一次干得怎么样留全。
+                    .children(text.footer_rest.clone().map(|rest| div().flex_none().child(rest))),
             )
             .children(limit)
             .when(!actions.is_empty(), |row| {
@@ -747,8 +762,6 @@ impl Kanban {
                 None => card.border_color(border),
             })
             .child(top)
-            .children(branch)
-            .children(pull)
             .child(
                 div()
                     .min_w_0()
@@ -764,6 +777,7 @@ impl Kanban {
             .children(progress)
             .children(result)
             .children(queued)
+            .children(git)
             .child(bottom)
             .children(corner)
     }
@@ -1037,8 +1051,10 @@ struct CardText {
     place: String,
     /// 编号前面的时间，和它要不要用琥珀色：需要你的写等了多久，完成的写完成在多久以前。
     when: Option<(String, bool)>,
-    /// 最后一行：agent，和它这一次干得怎么样。
+    /// 最后一行：agent，和它这一次干得怎么样；报给辅助工具。
     footer: String,
+    /// 最后一行里 agent 后面的话，接在 `agent_badge` 后面画；只写 agent 时为空。
+    footer_rest: Option<String>,
     /// 待办的卡片上写的时限。
     limit: Option<String>,
     /// 进行中、有时限的卡片上的进度。

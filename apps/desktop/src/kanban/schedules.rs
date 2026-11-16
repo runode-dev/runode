@@ -6,7 +6,9 @@ use crate::ui::{
     a11y::{Press, StaticText as _},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{FontSize, scaled},
-    icons::{BAN_ICON, CHEVRON_RIGHT_ICON, CLOCK_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON, ZAP_ICON},
+    icons::{
+        BAN_ICON, CHEVRON_RIGHT_ICON, CLOCK_ICON, FOLDER_ICON, PENCIL_ICON, PLAY_ICON, PLUS_ICON, TRASH_ICON, ZAP_ICON,
+    },
     scrollbar::scrollbar,
     theme::ActiveTheme as _,
 };
@@ -15,10 +17,10 @@ use runode_protocol::{
     ClientMsg,
     todo::{RunOutcome, Schedule, Todo, column, holds_schedule},
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
-    Kanban, Page, TOAST_LINGER, ToastState, agent_text, column_name,
+    Kanban, Page, TOAST_LINGER, ToastState, agent_badge, agent_text, column_name,
     dialog::Editing,
     history_link, icon_button, label_row, named,
     runs::last_line,
@@ -35,6 +37,23 @@ fn recent_runs<'a>(todos: &'a [Todo], schedule: &str) -> Vec<&'a Todo> {
     runs.sort_by_key(|todo| std::cmp::Reverse(todo.created));
     runs.truncate(RECENT_RUNS);
     runs
+}
+
+/// 定时按跑在哪个目录分组：是 `workspaces` 之一的按它在里面的先后排在前面，别的目录按路径排在后面；组里照原来的先后。
+fn group_by_place<'a>(schedules: &'a [Schedule], workspaces: &[PathBuf]) -> Vec<(&'a Path, Vec<&'a Schedule>)> {
+    let mut groups: Vec<(&Path, Vec<&Schedule>)> = Vec::new();
+    for schedule in schedules {
+        let dir = schedule.spec.dir.as_path();
+        match groups.iter_mut().find(|(place, _)| *place == dir) {
+            Some((_, group)) => group.push(schedule),
+            None => groups.push((dir, vec![schedule])),
+        }
+    }
+    groups.sort_by_key(|(dir, _)| match workspaces.iter().position(|workspace| workspace == dir) {
+        Some(at) => (0, at, PathBuf::new()),
+        None => (1, 0, dir.to_path_buf()),
+    });
+    groups
 }
 
 /// 交给它们跑的是后面的脚本，卡片上写脚本的名字。
@@ -264,8 +283,64 @@ impl Kanban {
                 ))
                 .child(open)
         });
-        let rows: Vec<_> =
-            data.schedules.iter().map(|schedule| self.render_schedule(schedule, data, now, cx)).collect();
+        let workspaces: Vec<PathBuf> = self.input.workspaces.iter().map(|(dir, _)| dir.clone()).collect();
+        let groups = group_by_place(&data.schedules, &workspaces);
+        // 定时都在一个项目里时不分组，整页是一个列表，项目名写在各个定时的说明里；多个项目时每个项目一组：
+        // 组头写项目名，下面是这个项目自己的列表。
+        let grouped = groups.len() > 1;
+        let muted = cx.theme().muted_foreground;
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (dir, schedules) in &groups {
+            let items = schedules.iter().map(|schedule| self.render_schedule(schedule, data, now, !grouped, cx));
+            if !grouped {
+                rows.extend(items.map(IntoElement::into_any_element));
+                continue;
+            }
+            let name = self.place_name(dir);
+            let count = rust_i18n::t!("kanban.schedule_count", count = schedules.len()).into_owned();
+            let key = dir.to_string_lossy();
+            let heading = div()
+                .id(named("todo-schedule-group-heading", &key))
+                .role(Role::Heading)
+                .aria_level(2)
+                .aria_label(format!("{name} · {count}"))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .px(px(4.))
+                .child(svg().path(FOLDER_ICON).flex_none().size(px(13.)).text_color(muted))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(FontSize::Body)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(fg)
+                        .child(name.clone()),
+                )
+                .child(div().flex_none().text_size(FontSize::Small).text_color(muted).child(count));
+            let list = div()
+                .id(named("todo-schedule-group-list", &key))
+                .role(Role::List)
+                .aria_label(name.clone())
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .children(items);
+            rows.push(
+                div()
+                    .id(named("todo-schedule-group", &key))
+                    .role(Role::Group)
+                    .aria_label(name)
+                    .when(!rows.is_empty(), |group| group.pt(px(12.)))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(heading)
+                    .child(list)
+                    .into_any_element(),
+            );
+        }
         // 空着时说清定时是做什么的，就地给个新建的入口。
         let empty = rows.is_empty().then(|| {
             let add = Button::new("todo-schedules-new", rust_i18n::t!("kanban.new_schedule").into_owned())
@@ -302,7 +377,7 @@ impl Kanban {
                 .child(
                     div()
                         .id("todo-schedules")
-                        .role(Role::List)
+                        .role(if grouped { Role::Group } else { Role::List })
                         .aria_label(rust_i18n::t!("kanban.schedules").into_owned())
                         .size_full()
                         .overflow_y_scroll()
@@ -319,7 +394,15 @@ impl Kanban {
         )
     }
 
-    fn render_schedule(&self, schedule: &Schedule, data: &TodoData, now: u64, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// `show_place` 为真时说明里写上项目名。
+    fn render_schedule(
+        &self,
+        schedule: &Schedule,
+        data: &TodoData,
+        now: u64,
+        show_place: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let fg = cx.theme().foreground;
         let hover_bg = cx.theme().accent;
         let rule = describe_when(&schedule.when);
@@ -337,10 +420,10 @@ impl Kanban {
             .is_some_and(|todo| holds_schedule(todo, todo.session.and_then(|id| data.sessions.get(&id)), now));
         let held = schedule.next_fire.is_some() && last_holds;
         let held_text = held.then(|| rust_i18n::t!("kanban.next_held").into_owned());
-        let place = self.place_name(&schedule.spec.dir);
+        let place = show_place.then(|| self.place_name(&schedule.spec.dir));
         let worktree = schedule.spec.worktree.then(|| rust_i18n::t!("kanban.worktree_on").into_owned());
         let details: Vec<String> =
-            [Some(place), Some(agent_text(&schedule.spec.agent)), worktree].into_iter().flatten().collect();
+            [place.clone(), Some(agent_text(&schedule.spec.agent)), worktree.clone()].into_iter().flatten().collect();
         let runs = recent_runs(&data.todos, &schedule.id);
         let mut run_rows: Vec<AnyElement> = runs
             .iter()
@@ -480,7 +563,31 @@ impl Kanban {
         };
         // 下一次什么时候是最要紧的一条，和标题放在一行、靠右；停用和不会再跑时调淡。
         let next_color = if idle { muted } else { fg };
-        let meta = [rule].into_iter().chain(details).collect::<Vec<_>>().join(" · ");
+        // 说明那一行：规则、项目、agent、工作树，agent 画成 logo。辅助工具读上面的 `description`。放不下时
+        // 规则留全，后面几段各自截断。
+        let meta_color = fg.opacity(details_alpha);
+        let mut meta: Vec<AnyElement> = Vec::new();
+        let shrinking = |text: String| div().min_w_0().truncate().child(text).into_any_element();
+        let parts = [div().flex_none().child(rule).into_any_element()]
+            .into_iter()
+            .chain(place.map(shrinking))
+            .chain([agent_badge(&schedule.spec.agent, meta_color)])
+            .chain(worktree.map(shrinking));
+        for part in parts {
+            if !meta.is_empty() {
+                meta.push(div().flex_none().child("·").into_any_element());
+            }
+            meta.push(part);
+        }
+        let meta = div()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .min_w_0()
+            .overflow_hidden()
+            .text_size(FontSize::Small)
+            .text_color(meta_color)
+            .children(meta);
         div()
             .id(named("todo-schedule", &schedule.id))
             .role(Role::ListItem)
@@ -539,7 +646,7 @@ impl Kanban {
                                     .child(remove),
                             ),
                     )
-                    .child(small(meta, fg.opacity(details_alpha)))
+                    .child(meta)
                     .children(held_line)
                     .children(run_line)
                     // 链接按钮自带的左边距往回收，文字和上面几行对齐。
@@ -562,6 +669,45 @@ mod tests {
         let todos = [run("d", 4), run("c", 3), todo("x", None, None), run("b", 2), run("e", 5), run("a", 1)];
         let ids: Vec<_> = recent_runs(&todos, "s").iter().map(|todo| todo.id.as_str()).collect();
         assert_eq!(ids, ["e", "d", "c"]);
+    }
+
+    #[test]
+    fn schedules_group_by_place() {
+        let schedule = |id: &str, dir: &str| {
+            let mut spec = todo(id, None, None).spec;
+            spec.dir = PathBuf::from(dir);
+            Schedule {
+                id: id.into(),
+                spec,
+                when: runode_protocol::todo::When::Every { minutes: 60 },
+                last_fired: 0,
+                next_fire: None,
+                paused: false,
+                run: None,
+                run_timeout: None,
+                last_run: None,
+                running: false,
+            }
+        };
+        let schedules = [
+            schedule("a", "/z"),
+            schedule("b", "/runode"),
+            schedule("c", "/seeker"),
+            schedule("d", "/runode"),
+            schedule("e", "/y"),
+        ];
+        let workspaces = [PathBuf::from("/seeker"), PathBuf::from("/runode")];
+        let groups: Vec<(String, Vec<&str>)> = group_by_place(&schedules, &workspaces)
+            .into_iter()
+            .map(|(dir, group)| (dir.display().to_string(), group.iter().map(|s| s.id.as_str()).collect()))
+            .collect();
+        let expected: Vec<(String, Vec<&str>)> = vec![
+            ("/seeker".into(), vec!["c"]),
+            ("/runode".into(), vec!["b", "d"]),
+            ("/y".into(), vec!["e"]),
+            ("/z".into(), vec!["a"]),
+        ];
+        assert_eq!(groups, expected);
     }
 
     /// 下一个定时跳过停用的和不会再到点的。

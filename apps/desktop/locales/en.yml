@@ -1215,6 +1215,9 @@ kanban:
   in_worktree: "%{agent}, in a worktree"
   took: "%{agent} took %{time}"
   not_finished: "%{agent} didn't finish"
+  footer_in_worktree: in a worktree
+  footer_took: "took %{time}"
+  footer_not_finished: "didn't finish"
   continue: Continue
   view_terminal: View terminal
   next_schedule: Next schedule

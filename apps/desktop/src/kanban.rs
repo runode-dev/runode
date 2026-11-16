@@ -950,6 +950,27 @@ fn label_row(id: impl Into<gpui::ElementId>, text: String, color: Hsla) -> State
     div().id(id).aria_static_text(text.clone()).text_size(FontSize::Small).text_color(color).child(text)
 }
 
+/// 任务的 agent 在卡片上画成什么：认得出是哪家的画它的 logo，后面接挑的模型、强度；认不出的写 `agent_text`。
+/// `color` 是文字和单色 logo 的颜色。放不下时 logo 留着，文字截断。
+fn agent_badge(command: &str, color: Hsla) -> AnyElement {
+    let logo = Pick::parse(command).and_then(|pick| {
+        let kind = runode_agent::agent_from_name(pick.launcher().program())?;
+        let logo = crate::window::agents::logo::agent_logo(kind, px(12.), color)?;
+        Some((logo, [pick.model, pick.effort].into_iter().flatten().collect::<Vec<_>>().join(" ")))
+    });
+    match logo {
+        Some((logo, rest)) => div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .child(logo)
+            .when(!rest.is_empty(), |badge| badge.child(div().min_w_0().truncate().child(rest)))
+            .into_any_element(),
+        None => div().min_w_0().truncate().child(agent_text(command)).into_any_element(),
+    }
+}
+
 /// 任务的 agent 写在卡片上的样子：对话框里挑出来的写名字，挑了模型、强度的接在后面；自己写的命令照原样。
 fn agent_text(command: &str) -> String {
     let Some(pick) = Pick::parse(command) else { return command.to_owned() };
