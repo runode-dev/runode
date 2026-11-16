@@ -99,7 +99,14 @@
         private var scrollbackPans: [UIPanGestureRecognizer] = []
 
         /// 在选中：画拖柄、弹「拷贝」菜单。选区本身只存在 VT 里，`refreshNow` 每次对账。
-        private(set) var selecting = false
+        private(set) var selecting = false {
+            didSet {
+                guard selecting != oldValue else { return }
+                if selecting { suspendPopGestures() } else { resumePopGestures() }
+            }
+        }
+        /// 选中期间关掉的导航返回手势：长按后接着拖、拖柄时手指横着走，不被认成侧滑退出这一页。
+        private var suspendedPopGestures: [UIGestureRecognizer] = []
         /// 正在拖的是选区的哪一端；没在拖时为空。
         private var selectionDrag: SelectionEnd?
         /// 拖选区时手指（拖柄时加上 `handleGrab`）最后在哪，本视图坐标：网格自动滚动、平移后照它重新取格。
@@ -957,6 +964,37 @@
             terminal?.clearSelection()
             layoutSelectionHandles()
             scheduleRefresh()
+        }
+
+        /// 离开窗口（推出别的页、退出这一页）就退出选中：选中关着的返回手势要还给导航栈里别的页。
+        public override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { endSelection() }
+        }
+
+        /// 关掉所在导航栈的边缘和整页侧滑返回手势；关掉也会取消已经在跟的那一下。
+        private func suspendPopGestures() {
+            guard suspendedPopGestures.isEmpty, let navigation = enclosingNavigationController else { return }
+            var gestures = [navigation.interactivePopGestureRecognizer]
+            if #available(iOS 26, *) { gestures.append(navigation.interactiveContentPopGestureRecognizer) }
+            suspendedPopGestures = gestures.compactMap { $0 }.filter(\.isEnabled)
+            for gesture in suspendedPopGestures { gesture.isEnabled = false }
+        }
+
+        private func resumePopGestures() {
+            for gesture in suspendedPopGestures { gesture.isEnabled = true }
+            suspendedPopGestures = []
+        }
+
+        private var enclosingNavigationController: UINavigationController? {
+            var responder: UIResponder? = next
+            while let current = responder {
+                if let controller = current as? UIViewController {
+                    return controller as? UINavigationController ?? controller.navigationController
+                }
+                responder = current.next
+            }
+            return nil
         }
 
         private func dragHandle(_ handle: SelectionHandleView, _ pan: UIPanGestureRecognizer) {
