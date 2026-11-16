@@ -230,7 +230,9 @@ impl Assembler {
             }
         }
         let retry = NACK_RETRY + rtt + rtt / 2;
-        for frame in first..=top {
+        // 一次最多看 `MAX_PENDING` 帧：帧号跳得再远，记的和要重发的也有数。
+        let last = top.min(first.saturating_add(MAX_PENDING as u32 - 1));
+        for frame in first..=last {
             let waiting = self.next.is_some();
             match self.frames.get_mut(&frame) {
                 Some(partial) if partial.missing > 0 => {
@@ -303,6 +305,18 @@ mod tests {
         // 后一帧先到，等前一帧拼齐了一起交出。
         assert!(feed(&mut assembler, 2, &chunks(&next, 20), &[], now).is_empty());
         assert_eq!(feed(&mut assembler, 1, &chunks(&key, 20), &[], now), vec![key, next]);
+    }
+
+    /// 帧号一下子跳得很远（电脑报的或来片的）：一次只补 `MAX_PENDING` 帧，不为中间每一帧都记一份、要一次重发。
+    #[test]
+    fn a_far_jump_in_frame_numbers_is_repaired_a_window_at_a_time() {
+        let now = Instant::now();
+        let mut assembler = Assembler::new();
+        feed(&mut assembler, 0, &chunks(&payload(true, 10), 10), &[], now);
+        assembler.note_top(u32::MAX - 1, now);
+        let poll = assembler.poll(now + REORDER_GRACE, Duration::ZERO);
+        assert!(poll.nacks.len() <= MAX_PENDING, "{} nacks", poll.nacks.len());
+        assert!(assembler.frames.len() <= MAX_PENDING + 1);
     }
 
     #[test]
