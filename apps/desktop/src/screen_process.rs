@@ -49,6 +49,8 @@ const MAX_QUEUED: usize = 3;
 const MAX_QUEUED_CONTROL: usize = 64;
 /// 客户端这么久一点都不收就断开它，写的线程不一直卡着。
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// 观看端发来的一次滚动注入前限在这么多点以内，再往下换算成格数和系统单位不会溢出，注入的事件也有数。
+const MAX_SCROLL: i32 = 1 << 14;
 
 /// 显示模式被换过的屏幕 → 换过它、还没断开也没换回去的连接（`NEXT_CONNECTION` 发的号）。
 static MODE_OWNERS: Mutex<Option<HashMap<u32, HashSet<u64>>>> = Mutex::new(None);
@@ -245,6 +247,10 @@ fn connection(stream: UnixStream) -> io::Result<()> {
                 }
             }
             ScreenClientMsg::Datagram { key, port, addrs } => outbox.offer_datagram(&key, port, &addrs),
+            ScreenClientMsg::Input { input: ScreenInput::Scroll { dx, dy } } => injector.inject(&ScreenInput::Scroll {
+                dx: dx.clamp(-MAX_SCROLL, MAX_SCROLL),
+                dy: dy.clamp(-MAX_SCROLL, MAX_SCROLL),
+            }),
             ScreenClientMsg::Input { input } => injector.inject(&input),
             ScreenClientMsg::Unlock { password } => {
                 if let Err(reason) = unlock(&mut injector, &password) {
