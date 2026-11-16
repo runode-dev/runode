@@ -170,7 +170,7 @@ private fun hideSystemBars(window: Window): () -> Unit {
 /**
  * 电脑的整块屏幕。触屏模式点按是左键，长按后原地松手是右键、接着拖是按着左键拖，没放大时单指拖也是按着左键拖，
  * 放大后单指拖是挪画面；触控板模式单指挪光标，点按是左键，点一下再按住拖是按着左键拖。两种模式下双指点按、一指按住
- * 另一指点都是右键。双指滑是滚动，捏合放大，放大后双指拖着看别处，按着左键拖到或光标挪到页面边上时画面跟着往那边
+ * 另一指点都是右键。双指滑是滚动，捏合放大，触控板模式放大后双指拖着看别处，按着左键拖到或光标挪到页面边上时画面跟着往那边
  * 挪。返回按钮浮在左上角，右上角是解锁、切换
  * 指针模式和（有几块屏幕时）切换屏幕。底部一条快捷键（软键盘没有的键，右端开关软键盘），软键盘弹出时跟在键盘上面。
  * 进来时开始连（[ScreenModel.start]），离开页面时由 `AppModel` 断开。
@@ -476,8 +476,8 @@ private enum class Opening {
 }
 
 /**
- * 画面上的手势，[shown] 是画面现在摆在哪里（放大后的），[zoomed] 是放大着。双指捏合、放大后的双指拖和触屏模式
- * 放大后的单指拖交给 [transform]（捏合中心、平移、缩放倍数），没放大时双指滑是滚动；放大着时按着左键拖到页面边上、
+ * 画面上的手势，[shown] 是画面现在摆在哪里（放大后的），[zoomed] 是放大着。双指捏合、触控板模式放大后的双指拖和
+ * 触屏模式放大后的单指拖交给 [transform]（捏合中心、平移、缩放倍数），别的时候双指滑是滚动；放大着时按着左键拖到页面边上、
  * 光标挪到页面边上，也经 [transform] 把画面往那边挪。触屏模式的长按在认出来时调 [haptic]。
  */
 private suspend fun PointerInputScope.screenGestures(
@@ -663,7 +663,7 @@ private suspend fun AwaitPointerEventScope.touchDrag(
 }
 
 /**
- * 两根手指：捏合或放大后的拖交给 [transform]，没放大时滑是滚动。第二根手指按下后很快抬起（两指一起点，或一指按住、
+ * 两根手指：捏合和触控板模式放大后的拖交给 [transform]，别的时候滑是滚动。第二根手指按下后很快抬起（两指一起点，或一指按住、
  * 另一指点）是右键：触控板模式在光标处，触屏模式经 [rightClickAt] 点在先按下的那根手指处。
  */
 private suspend fun AwaitPointerEventScope.twoFingers(
@@ -705,7 +705,7 @@ private suspend fun AwaitPointerEventScope.twoFingers(
             val pinched = abs(1 - totalZoom) * event.calculateCentroidSize(useCurrent = true) > slop
             mode = when {
                 pinched -> TwoFingerMode.Transform
-                totalPan.getDistance() > slop -> if (zoomed()) TwoFingerMode.Transform else TwoFingerMode.Scroll
+                totalPan.getDistance() > slop -> if (trackpad && zoomed()) TwoFingerMode.Transform else TwoFingerMode.Scroll
                 else -> TwoFingerMode.Undecided
             }
         }

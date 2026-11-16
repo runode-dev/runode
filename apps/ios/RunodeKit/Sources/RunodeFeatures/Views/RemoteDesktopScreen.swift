@@ -8,7 +8,7 @@
 
     /// 远程桌面页：电脑的整块屏幕。触屏模式点按是左键，长按后原地松手是右键、接着拖是按着左键拖，没放大时单指
     /// 拖也是按着左键拖，放大后单指拖是挪画面；触控板模式单指挪光标，点按是左键，点一下再按住拖是按着左键拖。
-    /// 两种模式下双指点按、一指按住另一指点都是右键。双指滑是滚动，捏合放大，放大后双指拖着看别处，按着左键
+    /// 两种模式下双指点按、一指按住另一指点都是右键。双指滑是滚动，捏合放大，触控板模式放大后双指拖着看别处，按着左键
     /// 拖到或光标挪到页面边上时画面跟着往那边挪。
     /// 整页全屏，不要导航栏和状态栏，返回按钮浮在左上角，电脑有几块屏幕时右上角能切换。底部一条快捷键
     /// （软键盘没有的键，右端开关软键盘），软键盘弹出时这条跟着键盘走（`ScreenKeyBar`）。
@@ -232,7 +232,7 @@
         }
     }
 
-    /// 放画面的滚动视图：捏合放大，放大后双指拖着看别处；没放大时双指滑是电脑上的滚动。
+    /// 放画面的滚动视图：捏合放大，放大后触屏模式单指、触控板模式双指拖着看别处，别的时候双指滑是电脑上的滚动。
     private struct ScreenSurface: UIViewRepresentable {
         let model: ScreenModel
         @Binding var keyboardVisible: Bool
@@ -475,13 +475,15 @@
             flushArmedClick()
         }
 
-        /// 放大着时由滚动视图挪画面：触屏模式单指、双指都挪，触控板模式双指挪（单指要挪光标）。没放大时双指滑是
-        /// 电脑上的滚动。
+        /// 放大着时由滚动视图挪画面：触屏模式单指挪，双指滑照样是电脑上的滚动；触控板模式双指挪（单指要挪光标）。
+        /// 没放大时双指滑是电脑上的滚动。
         private func updatePanning() {
             let zoomed = zoomScale > 1.01
-            panGestureRecognizer.minimumNumberOfTouches = zoomed && !trackpad ? 1 : 2
+            let touchZoomed = zoomed && !trackpad
+            panGestureRecognizer.minimumNumberOfTouches = touchZoomed ? 1 : 2
+            panGestureRecognizer.maximumNumberOfTouches = touchZoomed ? 1 : Int.max
             panGestureRecognizer.isEnabled = zoomed
-            scrollRecognizer.isEnabled = !zoomed
+            scrollRecognizer.isEnabled = !zoomed || !trackpad
             drag.isEnabled = trackpad || !zoomed
         }
 
