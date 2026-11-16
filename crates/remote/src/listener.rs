@@ -43,7 +43,7 @@ const MAX_GATING_PER_SOURCE: usize = 4;
 const MAX_GATING_PER_PREFIX: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 pub(crate) const MAX_CONNECTIONS: usize = 64;
-/// 同一台设备最多同时连着这么多条终端、远程桌面、识别和项目的连接；过了门禁、还没发第一帧的另算，也是这么多。
+/// 同一台设备最多同时连着这么多条终端、远程桌面、识别、收图片视频和项目的连接；过了门禁、还没发第一帧的另算，也是这么多。
 const MAX_PER_DEVICE: usize = 8;
 /// 同一台桌面设备最多同时连着这么多条端口转发的连接。
 const MAX_FORWARDS_PER_DEVICE: usize = 32;
@@ -93,6 +93,9 @@ pub struct Options {
     /// 门禁过了、手机要电脑识别录音（第一帧是 `SpeechClientMsg::SpeechHello`）时要一条到识别的
     /// 新连接。
     pub connect_speech: Connect,
+    /// 门禁过了、手机要把图片、视频交给电脑（第一帧是 `MediaClientMsg::MediaHello`）时要一条到收文件的
+    /// 新连接。
+    pub connect_media: Connect,
     /// 桌面设备要读写项目时用；为 `None` 时回 `ChannelRefusal::Unavailable`。
     pub connect_project: Option<ConnectProject>,
 }
@@ -122,6 +125,7 @@ pub(crate) struct Shared {
     pub(crate) connect: Connect,
     pub(crate) connect_screen: Connect,
     pub(crate) connect_speech: Connect,
+    pub(crate) connect_media: Connect,
     pub(crate) connect_project: Option<ConnectProject>,
     /// 要停了：门禁阶段的连接回 `RejectReason::Disabled`。
     pub(crate) stopping: AtomicBool,
@@ -164,7 +168,7 @@ fn crowd_out(connections: &HashMap<u64, Live>, device: DeviceId, lane: Option<La
 /// 过了门禁的连接按第一帧分的类，同一台设备的连接只和同一类的挤名额。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Lane {
-    /// 终端、远程桌面、识别和项目的连接。
+    /// 终端、远程桌面、识别、收图片视频和项目的连接。
     Session,
     /// 桌面设备的端口转发：浏览器对一个端口就会并发开好几条。
     Forward,
@@ -273,6 +277,7 @@ impl Listener {
             connect,
             connect_screen,
             connect_speech,
+            connect_media,
             connect_project,
         } = options;
         let lock = lock_listener(&dirs)?.ok_or_else(|| {
@@ -320,6 +325,7 @@ impl Listener {
             connect,
             connect_screen,
             connect_speech,
+            connect_media,
             connect_project,
             stopping: AtomicBool::new(false),
             connections: Mutex::default(),

@@ -10,6 +10,7 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RenderNode
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -67,6 +68,12 @@ interface TerminalViewDelegate {
 
     /** 按键栏上的麦克风键按下、松开或者滑出去放开。 */
     fun dictation(view: TerminalView, press: DictationPress)
+
+    /** 按了按键栏上的图片键：要用户挑几张图片或几段视频发给电脑。 */
+    fun requestMedia(view: TerminalView)
+
+    /** 粘贴时剪贴板里没有文字、只有图片：[uri] 是这张图片，要发给电脑。 */
+    fun pasteImage(view: TerminalView, uri: Uri)
 }
 
 /**
@@ -1359,12 +1366,18 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         emit(TerminalInput.Key(latched))
     }
 
-    /** 粘贴剪贴板里的文字。 */
+    /** 粘贴剪贴板里的文字；没有文字、只有图片时把图片交给 [TerminalViewDelegate.pasteImage]。 */
     fun paste() {
         val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
         val clip = clipboard.primaryClip ?: return
         if (clip.itemCount == 0) return
-        paste(clip.getItemAt(0).coerceToText(context).toString())
+        val item = clip.getItemAt(0)
+        val uri = item.uri
+        if (item.text.isNullOrEmpty() && uri != null && clip.description.hasMimeType("image/*")) {
+            if (acceptsInput) delegate?.pasteImage(this, uri)
+            return
+        }
+        paste(item.coerceToText(context).toString())
     }
 
     /** 把一段文字当作用户粘贴的发出去。 */

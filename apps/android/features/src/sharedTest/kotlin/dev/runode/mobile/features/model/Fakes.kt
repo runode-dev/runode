@@ -44,7 +44,10 @@ class FakeLink : HostLink {
     private var reconnectCount = 0
     private var subscribed = 0
 
-    override val state: StateFlow<LinkState> = MutableStateFlow(LinkState.Idle)
+    /** 测试可以直接改的连接状态。 */
+    override val state: MutableStateFlow<LinkState> = MutableStateFlow(LinkState.Idle)
+
+    override var pastesPaths: Boolean = false
 
     val sent: List<ClientMsg> get() = synchronized(lock) { sentList.toList() }
 

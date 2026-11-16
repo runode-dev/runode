@@ -9,6 +9,7 @@
     <string name="terminal_key_right">右</string>
     <string name="terminal_key_return">Return</string>
     <string name="terminal_key_paste">貼上</string>
+    <string name="terminal_key_media">傳送圖片或影片</string>
     <string name="terminal_key_dictation">語音輸入</string>
     <string name="terminal_key_recording">正在錄音</string>
     <string name="terminal_key_show_keyboard">開啟鍵盤</string>

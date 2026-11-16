@@ -15,6 +15,8 @@ public enum FrameKind: UInt8, Sendable, Hashable {
     case video = 4
     /// 交给电脑识别的一段录音，载荷见 `speechSampleRate`。
     case audio = 5
+    /// 交给电脑的一个图片或视频文件的一段，见 `MediaClientMsg.media`。
+    case media = 6
 }
 
 public struct Frame: Sendable, Equatable {

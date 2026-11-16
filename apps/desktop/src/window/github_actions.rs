@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use crate::github_actions::{ActionsEvent, ActionsPanel, Input, PROGRAM, render_pinned};
 use gpui::{AnyElement, App, Context, Div, Entity, Focusable, Stateful, Window, div, prelude::*};
+use runode_types::shell::Quoting;
 
 use super::{
     Divider, WindowView,
-    files::Quoting,
     project::{SidePanel, panel_message},
     status_bar,
 };

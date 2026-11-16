@@ -42,6 +42,10 @@ class TerminalViewTests {
         override fun keyboardVisible(view: TerminalView, visible: Boolean) = Unit
 
         override fun dictation(view: TerminalView, press: DictationPress) = Unit
+
+        override fun requestMedia(view: TerminalView) = Unit
+
+        override fun pasteImage(view: TerminalView, uri: android.net.Uri) = Unit
     }
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext

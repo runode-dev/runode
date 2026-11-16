@@ -19,6 +19,11 @@ internal object KeyIcons {
         "paste",
         "M9.5 3.5h5v3h-5zM9 5H6.5A1.5 1.5 0 0 0 5 6.5v13A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 17.5 5H15",
     )
+    val image = stroke(
+        "image",
+        "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
+            "M20 15l-4-4L6 20M7.5 9a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0",
+    )
     val microphone =stroke("microphone", "M9 6a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0zM5 11a7 7 0 0 0 14 0M12 18v3")
     val keyboard = stroke(
         "keyboard",

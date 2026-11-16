@@ -503,6 +503,7 @@ impl FakeHost {
                         desktops: 0,
                         os: String::new(),
                         home: None,
+                        paste_path: false,
                     }
                 }
                 ClientMsg::ListSessions if self.goodbye.swap(false, Ordering::SeqCst) => {

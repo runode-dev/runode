@@ -77,6 +77,10 @@ final class FakeTransport: FrameTransport {
         outbound.push(data)
     }
 
+    func sendAndWait(_ data: Data) async throws {
+        outbound.push(data)
+    }
+
     func exporter() throws -> Data {
         exporterBytes
     }

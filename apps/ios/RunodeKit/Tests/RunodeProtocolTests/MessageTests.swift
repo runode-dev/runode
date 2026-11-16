@@ -74,7 +74,7 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
         "list_dirs", "list_dirs_home",
         "list_tasks", "find_commands", "find_commands_path", "spawn",
         "attach_vt", "attach_meta", "attach_size", "detach", "resize", "focus", "kill",
-        "read_screen", "read_screen_command", "send_keys", "paste",
+        "read_screen", "read_screen_command", "send_keys", "paste", "paste_path",
         "push_register", "push_unregister", "push_register_fcm", "keep_awake", "unpair",
     ])
     func matchesTheHost(_ name: String) throws {
@@ -110,6 +110,8 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             case "read_screen_command": .readScreen(id: id, lines: nil, command: 1)
             case "send_keys": .sendKeys(req: 5, id: id, keys: ["1", "enter", "esc", "up"])
             case "paste": .paste(req: 6, id: id, text: "继续，用方案 2\n")
+            case "paste_path":
+                .pastePath(req: 7, id: id, path: "/Users/ethan/Library/Application Support/runode/截图 1.png")
             case "push_register":
                 .pushRegister(
                     req: 10, token: "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
@@ -164,15 +166,15 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
             .attach(id: id, size: nil, mode: .vtReplay), .detach(id: id), .resize(id: id, size: size),
             .focus(id: id, focused: true), .kill(id: id), .readScreen(id: id, lines: 3),
             .sendKeys(req: 1, id: id, keys: ["enter"]), .paste(req: 2, id: id, text: "y"),
-            .git(req: 3, id: id, request: .status),
+            .pastePath(req: 2, id: id, path: "/tmp/a.png"), .git(req: 3, id: id, request: .status),
             .pushRegister(req: 4, token: "00", env: .production, bundle: "b", machine: "m", machineName: "n"),
             .unpair(req: 5), .keepAwake,
         ]
         func covered(_ message: ClientMsg) -> Bool {
             switch message {
             case .hello, .listSessions, .layout, .open, .openWorkspace, .renameWorkspace, .listDirs, .listTasks,
-                .findCommands, .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .git, .pushRegister,
-                .unpair, .keepAwake:
+                .findCommands, .spawn, .attach, .detach, .resize, .focus, .kill, .readScreen, .sendKeys, .paste, .pastePath,
+                .git, .pushRegister, .unpair, .keepAwake:
                 true
             }
         }
@@ -216,10 +218,12 @@ func sameJSON(_ a: Data, _ b: Data) throws -> Bool {
     }
 
     @Test func welcomeAndIncompatible() throws {
-        #expect(try decode("welcome") == .welcome(keepAwake: true, findsCommands: true))
-        // 协议里 `keep_awake`、`shells` 可以缺省，缺了当作不认得。
+        #expect(try decode("welcome") == .welcome(keepAwake: true, findsCommands: true, pastesPaths: true))
+        // 协议里 `keep_awake`、`shells`、`paste_path` 可以缺省，缺了当作不认得。
         let bare = Data(#"{"type":"welcome","protocol":4}"#.utf8)
-        #expect(try JSONDecoder().decode(HostMsg.self, from: bare) == .welcome(keepAwake: false, findsCommands: false))
+        #expect(
+            try JSONDecoder().decode(HostMsg.self, from: bare)
+                == .welcome(keepAwake: false, findsCommands: false, pastesPaths: false))
         #expect(try decode("incompatible") == .incompatible(protocol: 5, build: "x", reason: "old"))
     }
 

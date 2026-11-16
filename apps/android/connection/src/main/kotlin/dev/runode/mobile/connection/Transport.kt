@@ -23,6 +23,7 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509ExtendedTrustManager
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -34,6 +35,12 @@ interface FrameTransport {
 
     /** 把字节排进发送队列，按调用的先后写出去；写失败时下一次 [receive] 会报错。 */
     fun send(data: ByteArray)
+
+    /**
+     * 等之前 [send] 排进去的字节都交给系统写完（写失败的也算完）。发大文件时隔一阵等一次，排着没写的字节才不随文件一起涨。
+     * 没有发送队列的实现不用等。
+     */
+    suspend fun drain() {}
 
     /** TLS exporter（label [GateSignature.exporterLabel]、不带 context、[GateSignature.exporterLength] 字节），门禁签名用。 */
     fun exporter(): ByteArray
@@ -108,6 +115,12 @@ class TlsChannel private constructor(
                 close()
             }
         }
+    }
+
+    override suspend fun drain() {
+        val written = CompletableDeferred<Unit>()
+        writer.execute { written.complete(Unit) }
+        written.await()
     }
 
     override fun exporter(): ByteArray {

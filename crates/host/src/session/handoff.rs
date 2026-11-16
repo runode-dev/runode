@@ -374,6 +374,7 @@ impl Runner {
                 }
                 Inbox::Keys(keys) => self.session.encode_keys(&keys),
                 Inbox::Paste(text) => self.session.encode_paste(&text),
+                Inbox::PastePath(path) => self.session.encode_paste(&self.path_paste(&path)),
                 _ => continue,
             };
             match bytes {

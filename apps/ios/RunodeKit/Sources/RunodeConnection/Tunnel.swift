@@ -173,6 +173,7 @@ final class TunnelledTransport: FrameTransport {
 
     func receive() async throws -> Data? { try await tls.receive() }
     func send(_ data: Data) { tls.send(data) }
+    func sendAndWait(_ data: Data) async throws { try await tls.sendAndWait(data) }
     func exporter() throws -> Data { try tls.exporter() }
     var remoteAddress: String? { nil }
 

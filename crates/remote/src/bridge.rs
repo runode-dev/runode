@@ -30,7 +30,7 @@ use rustls::ServerConnection;
 use self::frames::{FromPhone, LocalRequests, ToPhone};
 use crate::{UnixStream, poll};
 
-/// 桥接的另一头：宿主、采集进程、识别和项目服务是本机的 socket，端口转发是回环地址上的 TCP。
+/// 桥接的另一头：宿主、采集进程、识别、收图片视频的地方和项目服务是本机的 socket，端口转发是回环地址上的 TCP。
 pub(crate) enum Upstream {
     Unix(UnixStream),
     Tcp(TcpStream),
@@ -78,7 +78,7 @@ impl Upstream {
 pub(crate) enum Relay {
     /// 连的是终端的宿主，来的是这种设备：控制帧过筛，这边自己办的交给 `LocalRequests`。
     Terminal(DeviceKind),
-    /// 远程桌面、语音识别：照帧头数边界，控制帧不解析、原样转。
+    /// 远程桌面、语音识别、收图片视频：照帧头数边界，控制帧不解析、原样转。
     Frames,
     /// 专用连接（`ChannelHello`）：不分帧，原样转。
     Raw,

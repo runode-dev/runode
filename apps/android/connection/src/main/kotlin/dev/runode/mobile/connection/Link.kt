@@ -125,6 +125,12 @@ interface HostLink {
     /** 当前的连接状态；变化同样经 [events] 按先后送到。 */
     val state: StateFlow<LinkState>
 
+    /**
+     * 最近一次连上的宿主认得 `ClientMsg.PastePath`、收图片和视频的连接（`Welcome` 的 `paste_path`）；还没连上过时为假。不认得的宿主
+     * 不发给它。
+     */
+    val pastesPaths: Boolean
+
     /** 订阅事件：开始收集时先收到一次当前状态（已连上时还有一次 [HostEvent.Ready]），之后的事件按先后到达。 */
     fun events(): Flow<HostEvent>
 

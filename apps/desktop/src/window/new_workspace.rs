@@ -14,8 +14,9 @@ use gpui::{
     MouseButton, PathPromptOptions, Role, ScrollHandle, SharedString, Stateful, Subscription, Window, div, prelude::*,
     px, svg,
 };
+use runode_types::shell::Quoting;
 
-use super::{NewWorkspace, WindowView, files::Quoting, model::home_dir};
+use super::{NewWorkspace, WindowView, model::home_dir};
 use crate::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::{
     ui::icons::{CLOSE_ICON, FOLDER_OPEN_ICON, GLOBE_ICON, PLUS_ICON},

@@ -96,6 +96,15 @@ class AppDependencies(
      */
     var speechModels: File? = null
 
+    /** 连上一台电脑收图片和视频的地方；和 [imagePreparer]、[videoPreparer] 有一个为空时发不了（测试、演示模式）。 */
+    var openMedia: MediaOpener? = null
+
+    /** 发图片之前处理图片的。 */
+    var imagePreparer: ImagePreparer? = null
+
+    /** 发视频之前压视频的。 */
+    var videoPreparer: VideoPreparer? = null
+
     /** Application 的 Context，语音输入用它录麦克风、查麦克风权限；为空时语音输入报没有能用的麦克风（测试、演示模式）。 */
     var appContext: Context? = null
 }
@@ -150,6 +159,9 @@ class AppModel(private val dependencies: AppDependencies) {
         dependencies.openSpeech,
         dependencies.appContext,
     )
+
+    /** 把截图、照片和视频发给终端里的 agent。 */
+    val mediaSend = MediaSendModel(dependencies.openMedia, dependencies.imagePreparer, dependencies.videoPreparer)
 
     /** 上次打开的终端，首页的「上次打开」用它。 */
     var recent by mutableStateOf(dependencies.recents.load())

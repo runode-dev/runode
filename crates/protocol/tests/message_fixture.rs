@@ -246,6 +246,14 @@ fn samples() -> BTreeMap<&'static str, Value> {
         ),
         ("paste", ClientMsg::Paste { req: 6, id: ID, text: "继续，用方案 2\n".into() }),
         (
+            "paste_path",
+            ClientMsg::PastePath {
+                req: 7,
+                id: ID,
+                path: "/Users/ethan/Library/Application Support/runode/截图 1.png".into(),
+            },
+        ),
+        (
             "push_register",
             ClientMsg::PushRegister {
                 req: 10,
@@ -303,6 +311,7 @@ fn samples() -> BTreeMap<&'static str, Value> {
                 desktops: 0,
                 os: "macos".into(),
                 home: Some("/Users/ethan".into()),
+                paste_path: true,
             },
         ),
         ("incompatible", HostMsg::Incompatible { protocol: 5, build: BuildId("x".into()), reason: "old".into() }),

@@ -108,7 +108,7 @@ class ScreenConnection private constructor(
             FrameKind.Video -> ScreenEvent.Video(
                 VideoFrame(frame.payload) ?: throw LinkFailure.ProtocolViolation("malformed video frame"),
             )
-            FrameKind.Output, FrameKind.Input, FrameKind.Snapshot, FrameKind.Audio ->
+            FrameKind.Output, FrameKind.Input, FrameKind.Snapshot, FrameKind.Audio, FrameKind.Media ->
                 throw LinkFailure.ProtocolViolation("got a ${frame.kind} frame on the remote desktop")
         }
     }

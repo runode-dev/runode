@@ -117,6 +117,7 @@ pub fn welcome(todos: bool) -> HostMsg {
         desktops: 0,
         os: String::new(),
         home: None,
+        paste_path: false,
     }
 }
 

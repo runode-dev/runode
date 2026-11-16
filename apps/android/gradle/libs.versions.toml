@@ -17,6 +17,8 @@ fragment = "1.7.1"
 # 配对页扫码：CameraX 取景，ML Kit 认二维码，用打包进 App 的模型，不依赖 Play 服务下载。
 camerax = "1.6.2"
 mlkit-barcode = "17.3.0"
+# 发视频前在手机上用 Transformer 转成 720p 的 H.264 MP4；1.11 起要求 compileSdk 36。
+media3 = "1.11.1"
 # 编 terminal 的 JNI 壳用的 NDK 和 CMake，要先在 SDK Manager 里装好。
 ndk = "28.2.13676358"
 cmake = "3.22.1"
@@ -46,6 +48,10 @@ camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "cam
 camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode" }
+media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
+media3-container = { module = "androidx.media3:media3-container", version.ref = "media3" }
+media3-effect = { module = "androidx.media3:media3-effect", version.ref = "media3" }
+media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

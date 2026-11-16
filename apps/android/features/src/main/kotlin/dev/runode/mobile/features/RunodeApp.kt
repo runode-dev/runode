@@ -126,6 +126,7 @@ private fun Destination(app: AppModel, route: Route) {
                     preferences = app.settings.preferences,
                     sessions = app.sessionList(route.machine),
                     dictation = app.dictation,
+                    media = app.mediaSend,
                     machine = app.machineList.machine(route.machine),
                     onBack = back,
                     onOpenGit = { app.openGit(route.machine, session) },

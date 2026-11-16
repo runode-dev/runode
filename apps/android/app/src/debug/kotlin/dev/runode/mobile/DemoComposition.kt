@@ -196,6 +196,7 @@ private val demoPhoneName = demoText("演示手机", "Demo Phone")
 private class DemoOfflineLink : HostLink {
     private val failed = LinkState.Failed(LinkFailure.ConnectionFailed(demoText("找不到这台电脑", "Can’t find this computer")))
     override val state: StateFlow<LinkState> = MutableStateFlow(failed)
+    override val pastesPaths: Boolean = false
 
     override fun events(): Flow<HostEvent> = callbackFlow {
         trySend(HostEvent.State(failed))
@@ -287,6 +288,9 @@ private class DemoLink(private val flags: Set<String>) : HostLink {
     private val connected = LinkState.Connected(demoMachineName, "192.168.1.20")
     private val mutableState = MutableStateFlow<LinkState>(connected)
     override val state: StateFlow<LinkState> = mutableState
+
+    /** 演示模式不发图片和视频。 */
+    override val pastesPaths: Boolean = false
 
     private val theme: TermSettings =
         if ("light" in flags) TermSettings.default.copy(background = Rgb(0xFBF8F1u), foreground = Rgb(0x3B3A36u)) else TermSettings.default

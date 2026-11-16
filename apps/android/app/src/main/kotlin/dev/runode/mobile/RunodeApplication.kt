@@ -9,6 +9,7 @@ import dev.runode.mobile.connection.ClientIdentity
 import dev.runode.mobile.connection.FileMachineStore
 import dev.runode.mobile.connection.HostConnection
 import dev.runode.mobile.connection.KeystoreUnlockPasswords
+import dev.runode.mobile.connection.MediaConnection
 import dev.runode.mobile.connection.NativeIroh
 import dev.runode.mobile.connection.NetworkChanges
 import dev.runode.mobile.connection.NsdDiscovery
@@ -20,7 +21,10 @@ import dev.runode.mobile.features.model.AppLanguage
 import dev.runode.mobile.features.model.AppModel
 import dev.runode.mobile.features.model.AppPreferences
 import dev.runode.mobile.features.model.DefaultsStore
+import dev.runode.mobile.features.model.MediaUploader
 import dev.runode.mobile.features.model.SharedPreferencesDefaults
+import dev.runode.mobile.features.model.SystemImagePreparer
+import dev.runode.mobile.features.model.SystemVideoPreparer
 import java.io.File
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -96,6 +100,20 @@ class RunodeApplication : Application() {
         dependencies.openSpeech = { machine ->
             SpeechConnection.open(store.all().firstOrNull { it.id == machine.id } ?: machine, keyStore, discovery)
         }
+        dependencies.openMedia = { machine ->
+            val connection = MediaConnection.open(store.all().firstOrNull { it.id == machine.id } ?: machine, keyStore, discovery)
+            object : MediaUploader {
+                override suspend fun send(data: ByteArray, progress: (sent: Long, total: Long) -> Unit): String =
+                    connection.send(data, progress)
+
+                override suspend fun send(file: File, progress: (sent: Long, total: Long) -> Unit): String =
+                    connection.send(file, progress)
+
+                override fun close() = connection.close()
+            }
+        }
+        dependencies.imagePreparer = SystemImagePreparer
+        dependencies.videoPreparer = SystemVideoPreparer(context)
         dependencies.unlockPasswords = KeystoreUnlockPasswords(context)
         dependencies.speechModels = File(noBackupFilesDir, SPEECH_MODELS)
         dependencies.appContext = context

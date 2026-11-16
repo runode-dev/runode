@@ -178,6 +178,12 @@ sealed class ClientMsg {
     data class Paste(val req: UInt, val id: SessionId, val text: String) : ClientMsg()
 
     /**
+     * 把电脑上的路径 [path] 照会话前台 shell 的写法转义、后面跟一个空格，当粘贴打进会话，回 [HostMsg.Done]。不用连上会话。
+     * 只发给在 `Welcome` 里说认得它的宿主。
+     */
+    data class PastePath(val req: UInt, val id: SessionId, val path: String) : ClientMsg()
+
+    /**
      * 在会话 shell 当前所在的仓库里读写 git，回 [HostMsg.GitStatus]、[HostMsg.GitDiff] 或 [HostMsg.GitBranches]；
      * 办不了时回只带 `req`、不带会话 `id` 的 `Error`。一条连接上的这些请求宿主按先后一件一件办。
      */
@@ -294,6 +300,11 @@ internal object ClientMsgSerializer : EncodeOnlySerializer<ClientMsg>("ClientMsg
             put("id", SessionIdSerializer, value.id)
             put("text", value.text)
         }
+        is ClientMsg.PastePath -> typed("paste_path") {
+            putUInt("req", value.req)
+            put("id", SessionIdSerializer, value.id)
+            put("path", value.path)
+        }
         is ClientMsg.Git -> typed("git") {
             putUInt("req", value.req)
             put("id", SessionIdSerializer, value.id)
@@ -374,12 +385,15 @@ data class HostErrorReason(
 /**
  * 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 [Unknown]（宿主的 `#[serde(other)]`），
  * 认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的请求、交接、跑完的命令）只解出编号，
- * 内容不读；[Welcome] 只读 `keep_awake` 和 `shells`。
+ * 内容不读；[Welcome] 只读 `keep_awake`、`shells` 和 `paste_path`。
  */
 @Serializable(with = HostMsgSerializer::class)
 sealed class HostMsg {
-    /** [keepAwake]：宿主认得 [ClientMsg.KeepAwake]；[findsCommands]：宿主认得 [ClientMsg.FindCommands]。 */
-    data class Welcome(val keepAwake: Boolean, val findsCommands: Boolean) : HostMsg()
+    /**
+     * [keepAwake]：宿主认得 [ClientMsg.KeepAwake]；[findsCommands]：宿主认得 [ClientMsg.FindCommands]；[pastesPaths]：宿主认得
+     * [ClientMsg.PastePath]，也收图片和视频的连接（[MediaClientMsg]）。
+     */
+    data class Welcome(val keepAwake: Boolean, val findsCommands: Boolean, val pastesPaths: Boolean = false) : HostMsg()
 
     data class Incompatible(val protocol: UInt, val build: String, val reason: String) : HostMsg()
 
@@ -522,6 +536,7 @@ internal object HostMsgSerializer : DecodeOnlySerializer<HostMsg>("HostMsg") {
             "welcome" -> HostMsg.Welcome(
                 keepAwake = c.optional("keep_awake", Boolean.serializer()) ?: false,
                 findsCommands = c.optional("shells", Boolean.serializer()) ?: false,
+                pastesPaths = c.optional("paste_path", Boolean.serializer()) ?: false,
             )
             "incompatible" -> HostMsg.Incompatible(c.uint("protocol"), c.string("build"), c.string("reason"))
             "session_list" -> HostMsg.SessionList(c.required("sessions", ListSerializer(SessionInfo.serializer())))

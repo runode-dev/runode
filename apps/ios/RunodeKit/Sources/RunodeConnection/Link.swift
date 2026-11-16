@@ -127,6 +127,11 @@ public protocol HostLink: AnyObject, Sendable {
     /// `Spawn` 这类请求的编号，一条连接上不重复，不发 0。同步给出：取编号和发请求之间没有挂起点，连接状态
     /// 不会在中间变。
     func nextRequestId() -> UInt32
+    /// 最近一次连上的宿主认得 `ClientMsg.pastePath`、收交图片和视频的连接；还没连上过时为假。不认得的宿主
+    /// 收不到 `pastePath`，连接直接丢掉。
+    var pastesPaths: Bool { get }
+    /// 现在连着、`send` 写得出去。断开时 `send` 的消息直接丢掉，丢不起的消息发之前先问它。
+    var isConnected: Bool { get }
 }
 
 /// 前端报给宿主的身份。

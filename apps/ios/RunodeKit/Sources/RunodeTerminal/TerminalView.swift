@@ -1,6 +1,7 @@
 #if os(iOS)
     import RunodeProtocol
     import UIKit
+    import UniformTypeIdentifiers
 
     /// 终端视图要上层做的事。
     @MainActor
@@ -15,6 +16,10 @@
         func terminalView(_ view: TerminalView, keyboardVisible visible: Bool)
         /// 辅助栏上的麦克风键按下、松开或者滑出去放开。
         func terminalView(_ view: TerminalView, dictation press: DictationPress)
+        /// 辅助栏上的图片键按下了：用户要挑图片或视频发给这个终端。
+        func terminalViewRequestsMedia(_ view: TerminalView)
+        /// 粘贴时剪贴板上没有文字、有图片：`data` 是那张图片的文件内容。
+        func terminalView(_ view: TerminalView, didPasteImage data: Data)
     }
 
     /// 终端视图：按宿主给的网格尺寸画（网格比屏幕大时缩放到不小于可读字号，超出的横向平移；有输出或
@@ -1267,16 +1272,30 @@
 
         public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
             switch action {
-            case #selector(paste(_:)): acceptsInput && pasteboard.hasStrings
+            case #selector(paste(_:)): acceptsInput && (pasteboard.hasStrings || pasteboard.hasImages)
             case #selector(copy(_:)): terminal?.hasSelection == true
             case #selector(selectAll(_:)): selecting
             default: super.canPerformAction(action, withSender: sender)
             }
         }
 
+        /// 剪贴板上有文字时粘贴文字；没有文字、有图片时把图片交给代理。
         public override func paste(_ sender: Any?) {
-            guard let text = pasteboard.string, !text.isEmpty else { return }
-            emit(.paste(text))
+            if let text = pasteboard.string, !text.isEmpty {
+                emit(.paste(text))
+            } else if acceptsInput, let image = pastedImage() {
+                endSelection()
+                delegate?.terminalView(self, didPasteImage: image)
+            }
+        }
+
+        /// 剪贴板上那张图片的文件内容：有 PNG 或 JPEG 的原始数据时用它，没有时把图片编成 PNG。
+        private func pastedImage() -> Data? {
+            guard pasteboard.hasImages else { return nil }
+            for type in [UTType.png, UTType.jpeg] {
+                if let data = pasteboard.data(forPasteboardType: type.identifier), !data.isEmpty { return data }
+            }
+            return pasteboard.image?.pngData()
         }
 
         /// 把一段文字当作用户粘贴的发出去。

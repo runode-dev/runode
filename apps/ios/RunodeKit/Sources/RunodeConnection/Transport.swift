@@ -10,6 +10,9 @@ public protocol FrameTransport: AnyObject, Sendable {
     func receive() async throws -> Data?
     /// 把字节排进发送队列，按调用的先后写出去；写失败时下一次 `receive` 会报错。
     func send(_ data: Data)
+    /// 和 `send` 排进同一条队列，等这些字节交给了网络栈才返回，写失败时报错。一块块发大文件时一块等一块，
+    /// 还没写出去的字节才不会在内存里越堆越多。
+    func sendAndWait(_ data: Data) async throws
     /// TLS exporter（label `EXPORTER-runode-remote`、不带 context、32 字节），门禁签名用。
     func exporter() throws -> Data
     /// 实际连上的对方地址（不含端口），记下来下次先试。
@@ -170,6 +173,20 @@ public final class TLSChannel: FrameTransport {
 
     public func send(_ data: Data) {
         connection.send(content: data, completion: .contentProcessed { _ in })
+    }
+
+    public func sendAndWait(_ data: Data) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            connection.send(
+                content: data,
+                completion: .contentProcessed { error in
+                    if let error {
+                        continuation.resume(throwing: LinkFailure.closed(error.localizedDescription))
+                    } else {
+                        continuation.resume()
+                    }
+                })
+        }
     }
 
     public func exporter() throws -> Data {

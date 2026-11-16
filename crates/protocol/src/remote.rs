@@ -40,7 +40,7 @@
 //!    （`{"type":"remote_rejected","reason":{"kind":"unknown_device"}}`，原因见 `RejectReason`），
 //!    拒绝后宿主关闭连接。
 //! 5. 通过以后，客户端发的第一帧必须是 `ClientMsg::Hello`（终端）、`ScreenClientMsg::ScreenHello`（远程
-//!    桌面）或 `SpeechClientMsg::SpeechHello`（语音识别），桌面设备还可以是 `ChannelHello`（见「桌面设备」），
+//!    桌面）、`SpeechClientMsg::SpeechHello`（语音识别）或 `MediaClientMsg::MediaHello`（交图片、视频），桌面设备还可以是 `ChannelHello`（见「桌面设备」），
 //!    否则宿主直接断开。`Hello` 的 `client` 要和配对时报的 `DeviceKind` 对得上：手机是 `ClientKind::Mobile`，
 //!    桌面是 `ClientKind::Desktop`。终端的连接之后就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：
 //!    `ClientMsg::remote_refusal` 挡下的请求不转给宿主，宿主在发往客户端的方向、两帧之间回一条
@@ -159,6 +159,7 @@ impl crate::ClientMsg {
             | ReadScreen { .. }
             | SendKeys { .. }
             | Paste { .. }
+            | PastePath { .. }
             | Layout { .. }
             | LayoutChanged { .. }
             | Open { .. }

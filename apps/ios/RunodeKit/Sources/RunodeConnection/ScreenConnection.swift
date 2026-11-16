@@ -85,7 +85,7 @@ public final class ScreenConnection: Sendable {
                 throw LinkFailure.protocolViolation(String(localized: "画面的格式不对"))
             }
             return .video(video)
-        case .output, .input, .snapshot, .audio:
+        case .output, .input, .snapshot, .audio, .media:
             throw LinkFailure.protocolViolation(String(localized: "远程桌面上收到了类型 \(frame.kind.rawValue) 的帧"))
         }
     }

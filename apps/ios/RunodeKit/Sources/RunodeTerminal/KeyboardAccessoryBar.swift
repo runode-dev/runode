@@ -2,7 +2,7 @@
     import UIKit
 
     /// 键盘上方的一条辅助栏：软键盘上没有的 Esc、粘住的 Ctrl、Tab、方向键，回车（软键盘收着时也按得到）
-    /// 和几个常用符号，横着能拖。软键盘收着时界面底部放一条一样的键、更高一点的栏（`resting` 为真，由
+    /// 和几个常用符号，最后是粘贴和挑图片、视频发给终端的键，横着能拖。软键盘收着时界面底部放一条一样的键、更高一点的栏（`resting` 为真，由
     /// `TerminalView.makeRestingKeyBar` 建）。语音输入的麦克风键和开关软键盘的键固定在右端，不跟着别的键
     /// 滚走；麦克风键按下、松开都报给代理，录音时显示成按下去的样子。开关软键盘的键两条都用键盘图标：
     /// 底部那条是「打开键盘」，跟着软键盘的那条是「收起键盘」，按下去的样子表示键盘开着。
@@ -42,6 +42,10 @@
                 keys.addArrangedSubview(button(symbol, label: symbol) { $0.typeText(symbol) })
             }
             keys.addArrangedSubview(button("doc.on.clipboard", symbol: true, label: String(localized: "粘贴")) { $0.paste(nil) })
+            keys.addArrangedSubview(
+                button("photo", symbol: true, label: String(localized: "发送图片或视频")) { owner in
+                    owner.delegate?.terminalViewRequestsMedia(owner)
+                })
         }
 
         func setControlLatched(_ latched: Bool) {

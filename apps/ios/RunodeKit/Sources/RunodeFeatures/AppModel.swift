@@ -51,6 +51,10 @@ public struct AppDependencies {
     public var openSpeech: SpeechOpener?
     /// 手机上的语音模型下载到哪里；不给时放在临时目录里（测试、演示模式）。
     public var speechModels: URL?
+    /// 连上一台电脑收图片、视频的地方；为空时不能往终端里发图片和视频（测试、演示模式）。
+    public var openMedia: MediaOpener?
+    /// 发图片、视频时开后台任务；为空时 App 一退到后台就停下（测试、演示模式）。
+    public var beginBackgroundTask: BackgroundTaskStarter?
 
     @MainActor
     public init(
@@ -75,6 +79,8 @@ public struct AppDependencies {
         unlockPasswords = nil
         openSpeech = nil
         speechModels = nil
+        openMedia = nil
+        beginBackgroundTask = nil
     }
 }
 
@@ -103,6 +109,7 @@ public final class AppModel {
     /// 向各台电脑登记推送，设置页按它显示哪台电脑不支持。
     public let push: PushRegistration
     public let dictation: DictationModel
+    public let mediaSend: MediaSendModel
     /// 上次打开的终端，首页的「上次打开」用它。
     public private(set) var recent: RecentTerminal?
     /// 上次用的主题，电脑还没连上时用它。
@@ -137,6 +144,7 @@ public final class AppModel {
         dictation = DictationModel(
             root: dependencies.speechModels ?? FileManager.default.temporaryDirectory.appending(path: "speech-models"),
             openSpeech: dependencies.openSpeech)
+        mediaSend = MediaSendModel(open: dependencies.openMedia, beginBackgroundTask: dependencies.beginBackgroundTask)
         recent = dependencies.recents.load()
         savedTheme = dependencies.themes.load()
         machineList.willDelete = { [weak self] id in await self?.forget(machine: id) ?? true }

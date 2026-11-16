@@ -13,7 +13,7 @@ import androidx.compose.ui.res.stringResource
 
 /**
  * 终端下方的按键栏：软键盘上没有的 Esc、粘住的 Ctrl、Tab、方向键，回车（软键盘收着时也按得到）和几个常用符号，横着
- * 能拖。按了直接发给 [view]。栏自己让开软键盘和系统栏（`WindowInsets.ime` 在 [WindowInsets.safeDrawing] 里），
+ * 能拖。按了直接发给 [view]；最后的图片键交给 [TerminalViewDelegate.requestMedia]。栏自己让开软键盘和系统栏（`WindowInsets.ime` 在 [WindowInsets.safeDrawing] 里），
  * 放在终端下面就贴着软键盘的上沿，软键盘收着时贴在页面底部。
  *
  * 语音输入的麦克风键和开关软键盘的键固定在右端，不跟着别的键滚走；麦克风键按下、松开都报给
@@ -82,5 +82,8 @@ fun KeyboardAccessoryBar(view: TerminalView, modifier: Modifier = Modifier, pale
             KeyBarKey(title = symbol, label = symbol) { view.typeText(symbol) }
         }
         KeyBarKey(title = "paste", icon = KeyIcons.paste, label = stringResource(R.string.terminal_key_paste)) { view.paste() }
+        KeyBarKey(title = "image", icon = KeyIcons.image, label = stringResource(R.string.terminal_key_media)) {
+            view.delegate?.requestMedia(view)
+        }
     }
 }

@@ -1,8 +1,12 @@
 package dev.runode.mobile.features.ui.terminal
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -49,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,6 +88,9 @@ import dev.runode.mobile.features.model.AgentPrompt
 import dev.runode.mobile.features.model.AppPreferences
 import dev.runode.mobile.features.model.DictationModel
 import dev.runode.mobile.features.model.DictationRemedy
+import dev.runode.mobile.features.model.MediaSendModel
+import dev.runode.mobile.features.model.MediaSendRemedy
+import dev.runode.mobile.features.model.OutgoingMedia
 import dev.runode.mobile.features.model.Presentation
 import dev.runode.mobile.features.model.QuickKey
 import dev.runode.mobile.features.model.QuickReplyModel
@@ -124,7 +132,12 @@ import dev.runode.mobile.terminal.Terminal
 import dev.runode.mobile.terminal.TerminalInput
 import dev.runode.mobile.terminal.TerminalView
 import dev.runode.mobile.terminal.TerminalViewDelegate
+import java.io.FileNotFoundException
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 终端页：顶栏是会话名和连接状态，分了屏时下面一排分屏标签；中间是终端，断线时顶上叠一条横幅，结束了斜盖一枚印章；
@@ -133,7 +146,8 @@ import kotlinx.coroutines.delay
  *
  * @param sessions 这台电脑的会话列表：分屏、认出来的提问从它取
  * @param dictation 语音输入；为空时麦克风键不起作用
- * @param machine 这个终端所在的电脑，交给电脑识别时连它
+ * @param media 把图片和视频发给电脑；为空或发不了（[MediaSendModel.available]）时图片键不起作用
+ * @param machine 这个终端所在的电脑，交给电脑识别、发图片和视频时连它
  * @param onPaneEnded 显示的分屏结束了，带着它所在标签里的分屏
  * @param onOpenSettings 打开 app 的设置页：语音输入缺模型时从弹框过去下载
  */
@@ -143,6 +157,7 @@ fun TerminalScreen(
     preferences: AppPreferences,
     sessions: SessionListModel?,
     dictation: DictationModel?,
+    media: MediaSendModel?,
     machine: MachineRecord?,
     onBack: () -> Unit,
     onOpenGit: () -> Unit,
@@ -189,7 +204,41 @@ fun TerminalScreen(
             if (view != null && view === pressedView) view.paste(text) else model.send(TerminalInput.Paste(text))
         }
     }
-    val delegate = remember(model) { Delegate(model) { onDictation(it) } }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 图片、视频打进挑完那一刻显示的会话。
+    val sendMedia by rememberUpdatedState<(List<OutgoingMedia>) -> Unit> { items ->
+        val link = sessions?.link
+        if (media != null && link != null) media.send(items, machine, link, model.sessionId)
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MediaSendModel.maxItems)) { uris ->
+        if (uris.isNotEmpty()) {
+            val resolver = context.contentResolver
+            sendMedia(uris.map { outgoingMedia(resolver, it) })
+        }
+    }
+    val onRequestMedia by rememberUpdatedState<() -> Unit> {
+        val link = sessions?.link
+        if (media != null && link != null && media.available && media.checkReady(link)) {
+            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+        }
+    }
+    val delegate = remember(model) {
+        Delegate(
+            model,
+            onDictation = { onDictation(it) },
+            onRequestMedia = { onRequestMedia() },
+            onPasteImage = { uri ->
+                val resolver = context.contentResolver
+                // 剪贴板里 URI 的读权限在用户复制了别的东西后就收回，排在别的批后面再读会读不出，所以粘贴时就读好；
+                // 读不出的错留给发送时照常报。
+                scope.launch {
+                    val read = withContext(Dispatchers.IO) { runCatching { readImage(resolver, uri) } }
+                    sendMedia(listOf(OutgoingMedia.Image { read.getOrThrow() }))
+                }
+            },
+        )
+    }
     val banner = bannerMessage(model, connectingLong)
 
     Column(Modifier.fillMaxSize().background(colors.page)) {
@@ -237,8 +286,17 @@ fun TerminalScreen(
                     exit = fadeOut(),
                     modifier = Modifier.align(Alignment.Center),
                 ) { EndedStamp(model.phase) }
-                dictation?.phase?.takeIf { it != DictationModel.Phase.Idle }?.let { phase ->
-                    DictationBadge(phase, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+                val sending = media?.phase?.takeIf { it != MediaSendModel.Phase.Idle }
+                val dictating = dictation?.phase?.takeIf { it != DictationModel.Phase.Idle }
+                if (sending != null || dictating != null) {
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        sending?.let { MediaSendBadge(it) }
+                        dictating?.let { DictationBadge(it) }
+                    }
                 }
                 if (model.scrolledBack) {
                     SurfaceButton(
@@ -260,6 +318,7 @@ fun TerminalScreen(
     }
 
     DictationErrorDialog(dictation, onOpenSettings)
+    MediaSendErrorDialog(media)
     if (model.isConfirmingKill) {
         ConfirmDialog(
             title = stringResource(R.string.end_terminal_title),
@@ -273,8 +332,25 @@ fun TerminalScreen(
 
 private const val CONNECTING_BANNER_DELAY_MS = 600L
 
-/** 把终端视图报上来的事交给视图模型；语音输入的按键交给 [onDictation]。 */
-private class Delegate(private val model: TerminalModel, private val onDictation: (DictationPress) -> Unit) : TerminalViewDelegate {
+/** 用户挑的一项：系统报的类型是视频的当视频发，别的当图片。 */
+private fun outgoingMedia(resolver: ContentResolver, uri: Uri): OutgoingMedia =
+    if (resolver.getType(uri)?.startsWith("video/") == true) {
+        OutgoingMedia.Video(uri.toString())
+    } else {
+        OutgoingMedia.Image { readImage(resolver, uri) }
+    }
+
+/** 读出用户挑的一张图片原样的字节，太大时抛错。 */
+private fun readImage(resolver: ContentResolver, uri: Uri): ByteArray =
+    resolver.openInputStream(uri)?.use { MediaSendModel.readImage(it) } ?: throw FileNotFoundException(uri.toString())
+
+/** 把终端视图报上来的事交给视图模型；语音输入的按键交给 [onDictation]，要发图片、视频交给 [onRequestMedia]、[onPasteImage]。 */
+private class Delegate(
+    private val model: TerminalModel,
+    private val onDictation: (DictationPress) -> Unit,
+    private val onRequestMedia: () -> Unit,
+    private val onPasteImage: (Uri) -> Unit,
+) : TerminalViewDelegate {
     override fun didInput(view: TerminalView, input: TerminalInput) = model.send(input)
 
     override fun fitSizeDidChange(view: TerminalView, size: GridSize) = model.updateFitSize(size)
@@ -288,6 +364,10 @@ private class Delegate(private val model: TerminalModel, private val onDictation
     }
 
     override fun dictation(view: TerminalView, press: DictationPress) = onDictation(press)
+
+    override fun requestMedia(view: TerminalView) = onRequestMedia()
+
+    override fun pasteImage(view: TerminalView, uri: Uri) = onPasteImage(uri)
 }
 
 /** 分屏时标题是工作区的名字，当前会话由下面的分屏标签标出；没分屏时是会话名，前面带它的状态。下面一行是电脑和连接状态。 */
@@ -520,6 +600,53 @@ private fun DictationBadge(phase: DictationModel.Phase, modifier: Modifier = Mod
 }
 
 /**
+ * 终端底部正中的提示：正在压视频或发送，一次发几项时带着第几项，发视频时带着百分比。读屏只念不带百分比的说法，百分比变了
+ * 不再念一遍。
+ */
+@Composable
+private fun MediaSendBadge(phase: MediaSendModel.Phase, modifier: Modifier = Modifier) {
+    val colors = themeColors
+    val spoken = when (phase) {
+        is MediaSendModel.Phase.Preparing -> if (phase.count == 1) {
+            stringResource(R.string.media_preparing)
+        } else {
+            stringResource(R.string.media_preparing_count, phase.index, phase.count)
+        }
+        is MediaSendModel.Phase.Sending -> if (phase.count == 1) {
+            stringResource(R.string.media_sending)
+        } else {
+            stringResource(R.string.media_sending_count, phase.index, phase.count)
+        }
+        MediaSendModel.Phase.Idle -> return
+    }
+    val shown = if (phase is MediaSendModel.Phase.Sending && phase.video) {
+        val percent = (phase.fraction * 100).roundToInt().coerceIn(0, 100)
+        if (phase.count == 1) {
+            stringResource(R.string.media_sending_percent, percent)
+        } else {
+            stringResource(R.string.media_sending_count_percent, phase.index, phase.count, percent)
+        }
+    } else {
+        spoken
+    }
+    Row(
+        modifier
+            .background(colors.card, CircleShape)
+            .border(1.dp, colors.hairline, CircleShape)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clearAndSetSemantics {
+                contentDescription = spoken
+                liveRegion = LiveRegionMode.Polite
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        CircularProgressIndicator(Modifier.size(10.dp), color = colors.secondary, strokeWidth = 1.5.dp)
+        Text(shown, style = Type.footnote)
+    }
+}
+
+/**
  * 底部的回答行和按键栏。按键栏铺满宽度，软键盘弹出时跟在键盘上面；会话结束了不出，这时只给导航栏让出地方。
  */
 @Composable
@@ -687,6 +814,28 @@ private fun PaneTabBar(panes: List<SplitPane>, current: SessionId, onSelect: (Se
             }
         }
     }
+}
+
+/** 发图片、视频出错的弹框；电脑上的 Runode 太旧时标题说要更新它。 */
+@Composable
+private fun MediaSendErrorDialog(media: MediaSendModel?) {
+    val message = media?.errorMessage ?: return
+    val dismiss = { media.errorMessage = null }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = {
+            Text(
+                stringResource(
+                    when (media.remedy) {
+                        MediaSendRemedy.UpdateComputer -> R.string.media_update_needed
+                        null -> R.string.media_send_failed
+                    },
+                ),
+            )
+        },
+        text = { Text(message.resolve()) },
+        confirmButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.action_ok)) } },
+    )
 }
 
 /** 语音输入出错的弹框；缺模型时多一个去设置页下载，没有麦克风权限时多一个去系统设置。 */

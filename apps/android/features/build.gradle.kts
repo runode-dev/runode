@@ -67,6 +67,10 @@ dependencies {
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.media3.common)
+    implementation(libs.media3.container)
+    implementation(libs.media3.effect)
+    implementation(libs.media3.transformer)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test.junit)

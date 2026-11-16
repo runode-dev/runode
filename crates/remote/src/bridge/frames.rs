@@ -43,7 +43,7 @@ pub(crate) struct FromPhone {
     left: u32,
     /// 正在攒的控制帧（含帧头）；不是控制帧时为 `None`，帧体边到边转。
     held: Option<Vec<u8>>,
-    /// 控制帧不解析、原样转：连的不是终端的宿主（远程桌面、语音识别），控制消息不是 `ClientMsg`。
+    /// 控制帧不解析、原样转：连的不是终端的宿主（远程桌面、语音识别、收图片视频），控制消息不是 `ClientMsg`。
     passthrough: bool,
     /// 不分帧、原样转：专用连接（`ChannelHello`）开好以后对面跑的不是帧。
     raw: bool,

@@ -7,6 +7,7 @@ import dev.runode.mobile.protocol.FrameKind
 import dev.runode.mobile.protocol.GateMessage
 import dev.runode.mobile.protocol.GateRejection
 import dev.runode.mobile.protocol.HostMsg
+import dev.runode.mobile.protocol.SessionId
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
@@ -156,6 +157,32 @@ class HostConnectionTests {
 
     @Test
     fun findCommandsGoesToHostsThatKnowIt() = findCommandsOnlyGoesToHostsThatKnowIt(true)
+
+    /** `pastePath` 也只发给在 `Welcome` 里说认得它的宿主，认不认得经 `pastesPaths` 报给上层。 */
+    private fun pastePathOnlyGoesToHostsThatKnowIt(knows: Boolean) = test { scope ->
+        val transport = FakeTransport()
+        supply.add(transport)
+        val link = connection()
+        val events = link.subscribe(scope)
+        assertFalse(link.pastesPaths)
+        link.start()
+        val host = FakeHost(transport)
+        val welcome = if (knows) FakeHost.welcome.replace("}", ""","paste_path":true}""") else FakeHost.welcome
+        admit(host, welcome)
+        assertNotNull(events.waitReady())
+        assertEquals(knows, link.pastesPaths)
+        val id = assertNotNull(SessionId("0123456789abcdef0011223344556677"))
+        link.send(ClientMsg.PastePath(req = 1u, id = id, path = "/tmp/截图 1.png"))
+        link.send(ClientMsg.ListSessions)
+        assertEquals(if (knows) "paste_path" else "list_sessions", host.readControl()?.type())
+        link.stop()
+    }
+
+    @Test
+    fun pastePathIsNotSentToHostsThatDoNotKnowIt() = pastePathOnlyGoesToHostsThatKnowIt(false)
+
+    @Test
+    fun pastePathGoesToHostsThatKnowIt() = pastePathOnlyGoesToHostsThatKnowIt(true)
 
     @Test
     fun connectsSaysHelloAndForwardsMessages() = test { scope ->

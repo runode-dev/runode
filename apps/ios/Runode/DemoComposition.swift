@@ -89,6 +89,8 @@
         func setFocused(_ focused: Bool) {}
         func setDeviceName(_ name: String) async {}
         func nextRequestId() -> UInt32 { 0 }
+        var pastesPaths: Bool { false }
+        var isConnected: Bool { false }
     }
 
     /// 假的宿主：收到什么就照协议回什么。
@@ -316,6 +318,8 @@
         func reconnectNow() async {}
         func setFocused(_ focused: Bool) {}
         func setDeviceName(_ name: String) async {}
+        var pastesPaths: Bool { true }
+        var isConnected: Bool { true }
 
         private let request = Mutex<UInt32>(0)
         func nextRequestId() -> UInt32 {

@@ -95,6 +95,23 @@ fn pastes_are_bracketed_when_the_program_asks() {
     peer.send(&ClientMsg::Kill { id });
 }
 
+/// 粘贴的路径照 sh 的写法转义、后面跟一个空格，程序开着括号粘贴时同样套上括号。
+#[test]
+fn pasted_paths_are_escaped_and_followed_by_a_space() {
+    let dir = temp_dir("pastepath");
+    let (_host, socket) = listen(&dir);
+    let mut peer = Peer::hello(&socket, false);
+    let (id, channel) = spawn_attached(&mut peer, &visible_cat(&dir, "\\033[?2004h"));
+    peer.wait_for_output(channel, b"ready");
+    peer.send(&ClientMsg::PastePath { req: 4, id, path: "/tmp/shot.png".into() });
+    assert!(matches!(peer.reply(), HostMsg::Done { req: 4 }));
+    peer.send(&ClientMsg::PastePath { req: 5, id, path: "/tmp/my shot.png".into() });
+    assert!(matches!(peer.reply(), HostMsg::Done { req: 5 }));
+    peer.send(&ClientMsg::SendKeys { req: 6, id, keys: vec!["enter".into()] });
+    wait_done_and_output(&peer, channel, 6, b"^[[200~/tmp/shot.png ^[[201~^[[200~/tmp/my\\ shot.png ^[[201~");
+    peer.send(&ClientMsg::Kill { id });
+}
+
 /// 读倒数第几条命令的输出要 shell 集成标出的提示符，没有时回给读的一方看的说明。
 #[test]
 fn command_output_needs_prompt_marks() {

@@ -95,6 +95,11 @@ class ClientMessageTests {
             "read_screen_command" to ClientMsg.ReadScreen(id = sampleId, lines = null, command = 1u),
             "send_keys" to ClientMsg.SendKeys(req = 5u, id = sampleId, keys = listOf("1", "enter", "esc", "up")),
             "paste" to ClientMsg.Paste(req = 6u, id = sampleId, text = "继续，用方案 2\n"),
+            "paste_path" to ClientMsg.PastePath(
+                req = 7u,
+                id = sampleId,
+                path = "/Users/ethan/Library/Application Support/runode/截图 1.png",
+            ),
             "push_register" to ClientMsg.PushRegister(
                 req = 10u,
                 token = "80f0c8b3a4e2d1c0ffeeddccbbaa99887766554433221100aabbccddeeff0011",
@@ -183,6 +188,7 @@ class ClientMessageTests {
             ClientMsg.ReadScreen(sampleId, 3u),
             ClientMsg.SendKeys(1u, sampleId, listOf("enter")),
             ClientMsg.Paste(2u, sampleId, "y"),
+            ClientMsg.PastePath(2u, sampleId, "/tmp/a.png"),
             ClientMsg.Git(3u, sampleId, GitRequest.Status),
             ClientMsg.PushRegister(4u, "00", ApnsEnv.Production, "b", "m", "n"),
             ClientMsg.Unpair(5u),
@@ -193,7 +199,7 @@ class ClientMessageTests {
             is ClientMsg.OpenWorkspace, is ClientMsg.RenameWorkspace, is ClientMsg.ListDirs, is ClientMsg.ListTasks,
             is ClientMsg.FindCommands, is ClientMsg.Spawn, is ClientMsg.Attach, is ClientMsg.Detach,
             is ClientMsg.Resize, is ClientMsg.Focus, is ClientMsg.Kill, is ClientMsg.ReadScreen,
-            is ClientMsg.SendKeys, is ClientMsg.Paste, is ClientMsg.Git, is ClientMsg.PushRegister,
+            is ClientMsg.SendKeys, is ClientMsg.Paste, is ClientMsg.PastePath, is ClientMsg.Git, is ClientMsg.PushRegister,
             is ClientMsg.Unpair, ClientMsg.KeepAwake,
             -> true
         }
@@ -239,10 +245,10 @@ class HostMessageTests {
 
     @Test
     fun welcomeAndIncompatible() {
-        assertEquals(HostMsg.Welcome(keepAwake = true, findsCommands = true), decode("welcome"))
-        // 协议里 `keep_awake`、`shells` 可以缺省，缺了当作不认得。
+        assertEquals(HostMsg.Welcome(keepAwake = true, findsCommands = true, pastesPaths = true), decode("welcome"))
+        // 协议里 `keep_awake`、`shells`、`paste_path` 可以缺省，缺了当作不认得。
         assertEquals(
-            HostMsg.Welcome(keepAwake = false, findsCommands = false),
+            HostMsg.Welcome(keepAwake = false, findsCommands = false, pastesPaths = false),
             decodeText("""{"type":"welcome","protocol":4}"""),
         )
         assertEquals(HostMsg.Incompatible(protocol = 5u, build = "x", reason = "old"), decode("incompatible"))

@@ -1,4 +1,5 @@
 #if os(iOS)
+    import PhotosUI
     import RunodeConnection
     import RunodeProtocol
     import RunodeTerminal
@@ -7,7 +8,8 @@
     /// 终端页：整页铺终端的背景色，标题下面一行 agent 和连接的状态。断线时终端上方叠一条带「重试」的
     /// 横幅；agent 等回答时底部出现快速回复栏；软键盘没弹出时底部常驻一条按键栏，弹出后由键盘上方的
     /// 辅助栏接手。电脑上这个终端所在的标签分了屏时，导航栏下面一排标签切换各个分屏。按键栏上的麦克风键
-    /// 语音输入，录音、识别时终端底部正中有提示。
+    /// 语音输入，录音、识别时终端底部正中有提示；图片键挑照片、视频发给终端（剪贴板上只有图片时「粘贴」发那
+    /// 张），压视频、发送时底部也有提示。
     struct TerminalScreen: View {
         @Bindable var model: TerminalModel
         /// 设置里的字号和响铃震动。
@@ -22,7 +24,9 @@
         var sessions: SessionListModel?
         /// 语音输入；为空时麦克风键不起作用。
         var dictation: DictationModel?
-        /// 这个终端所在的电脑，交给电脑识别时连它。
+        /// 往终端里发图片、视频；为空时图片键不起作用。
+        var mediaSend: MediaSendModel?
+        /// 这个终端所在的电脑，交给电脑识别、发图片和视频时连它。
         var machine: MachineRecord?
         /// 打开 app 的设置页，语音输入缺模型时从弹框过去下载。
         var onOpenSettings: () -> Void = {}
@@ -38,6 +42,11 @@
         /// 最后一次知道的、这个会话所在标签里的分屏。会话结束后电脑关掉它的分屏，布局里就找不到它了，
         /// 所以先记着；换到别的标签的会话后，不含它的旧值不算数。
         @State private var tabMates: [SessionId] = []
+        /// 挑图片、视频的界面开着。
+        @State private var pickingMedia = false
+        @State private var pickedMedia: [PhotosPickerItem] = []
+        /// 挑好的发到哪里，按下图片键时定下：挑的时候切了分屏也发给原来的会话。
+        @State private var mediaTarget: MediaTarget?
         @ScaledMetric(relativeTo: .headline) private var titleGlyphSize: CGFloat = 15
 
         private var background: Color { Color(model.background) }
@@ -63,11 +72,36 @@
                             model.send(.paste(text))
                         }
                     }
+                },
+                onRequestMedia: {
+                    guard let target = currentMediaTarget() else { return }
+                    mediaTarget = target
+                    pickingMedia = true
+                },
+                onPasteImage: { data in
+                    guard let target = currentMediaTarget() else { return }
+                    Task { await send([.image(data)], to: target) }
                 })
+                .photosPicker(
+                    isPresented: $pickingMedia, selection: $pickedMedia, maxSelectionCount: 5,
+                    selectionBehavior: .ordered, matching: .any(of: [.images, .videos])
+                )
+                .onChange(of: pickedMedia) { _, items in
+                    guard !items.isEmpty else { return }
+                    pickedMedia = []
+                    guard let target = mediaTarget else { return }
+                    mediaTarget = nil
+                    Task { await send(items, to: target) }
+                }
                 .overlay(alignment: .top) { banner }
                 // 印章的出现要由外层驱动；动画只挂在这层 ZStack 上，不让终端跟着按键栏收起播改尺寸的动画。
                 .overlay { ZStack { endedStamp }.animation(.spring(duration: 0.3), value: model.isEnded) }
-                .overlay(alignment: .bottom) { dictationBadge }
+                .overlay(alignment: .bottom) {
+                    VStack(spacing: 6) {
+                        mediaBadge
+                        dictationBadge
+                    }
+                }
                 .overlay(alignment: .bottomTrailing) {
                     if model.scrolledBack {
                         Button("回到最新", systemImage: "arrow.down.to.line") { model.scrollToBottom() }
@@ -130,6 +164,15 @@
                     }
                 } message: {
                     Text(dictation?.errorMessage ?? "")
+                }
+                .alert(
+                    "发送失败",
+                    isPresented: Binding(
+                        get: { mediaSend?.errorMessage != nil }, set: { if !$0 { mediaSend?.errorMessage = nil } })
+                ) {
+                    Button("好") {}
+                } message: {
+                    Text(mediaSend?.errorMessage ?? "")
                 }
                 .environment(\.themeColors, chrome)
         }
@@ -211,6 +254,75 @@
                 .accessibilityElement(children: .combine)
                 .transition(.opacity)
             }
+        }
+
+        /// 终端底部正中的提示：正在压、正在发一批里的第几项，发视频时带上发出去的百分比。
+        @ViewBuilder
+        private var mediaBadge: some View {
+            if let text = mediaProgressText {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(text)
+                        .font(.footnote)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: .capsule)
+                .environment(\.colorScheme, scheme)
+                .padding(.bottom, 8)
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
+            }
+        }
+
+        private var mediaProgressText: String? {
+            switch mediaSend?.phase {
+            case .preparing(let index, let count)?:
+                String(localized: "正在压缩视频（\(index)/\(count)）…")
+            case .sending(let index, let count, let fraction?)?:
+                String(localized: "正在发送（\(index)/\(count)）… \(fraction.formatted(.percent.precision(.fractionLength(0))))")
+            case .sending(let index, let count, nil)?:
+                String(localized: "正在发送（\(index)/\(count)）…")
+            case .idle?, nil:
+                nil
+            }
+        }
+
+        /// 现在要发到的地方：这个会话。发不了时为空，`mediaSend` 已经设好了要弹出来说的错。
+        private func currentMediaTarget() -> MediaTarget? {
+            guard let mediaSend, let machine, let link = sessions?.link, mediaSend.checkAvailable(link: link) else {
+                return nil
+            }
+            return MediaTarget(model: mediaSend, machine: machine, link: link, sessionId: model.sessionId)
+        }
+
+        /// 读出挑好的照片和视频再按挑的先后发：视频拷成自己的文件，图片读出内容。读不出的跳过，发完再报。
+        private func send(_ items: [PhotosPickerItem], to target: MediaTarget) async {
+            var media: [MediaItem] = []
+            var unreadable = 0
+            for item in items {
+                if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
+                    if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
+                        media.append(.video(movie.url))
+                    } else {
+                        unreadable += 1
+                    }
+                } else if let data = try? await item.loadTransferable(type: Data.self) {
+                    media.append(.image(data))
+                } else {
+                    unreadable += 1
+                }
+            }
+            await send(media, to: target)
+            if unreadable > 0, mediaSend?.errorMessage == nil {
+                mediaSend?.errorMessage = String(localized: "有 \(unreadable) 项读不出来，没有发送")
+            }
+        }
+
+        private func send(_ media: [MediaItem], to target: MediaTarget) async {
+            await target.model.send(media, machine: target.machine, link: target.link, sessionId: target.sessionId)
         }
 
         /// 会话列表里这个终端的信息（目录、前台程序），菜单里的命令据此列出、判断能不能跑。
@@ -550,6 +662,28 @@
         }
     }
 
+    /// 图片、视频经谁发到哪台电脑的哪个会话。
+    private struct MediaTarget {
+        var model: MediaSendModel
+        var machine: MachineRecord
+        var link: any HostLink
+        var sessionId: SessionId
+    }
+
+    /// 照片库里挑的一段视频，拷进了自己的临时目录：系统交来的文件在导入的闭包返回后就删了。
+    private struct PickedMovie: Transferable {
+        let url: URL
+
+        static var transferRepresentation: some TransferRepresentation {
+            FileRepresentation(importedContentType: .movie) { received in
+                let copy = FileManager.default.temporaryDirectory.appending(
+                    path: "\(UUID().uuidString).\(received.file.pathExtension)")
+                try FileManager.default.copyItem(at: received.file, to: copy)
+                return PickedMovie(url: copy)
+            }
+        }
+    }
+
     /// 软键盘收着时底部的按键栏（`TerminalView.makeRestingKeyBar`）。
     private struct RestingKeyBar: UIViewRepresentable {
         let terminalView: TerminalView
@@ -574,6 +708,8 @@
         /// 建好了终端视图，页面的按键栏要用它。
         var onMake: (TerminalView) -> Void = { _ in }
         var onDictation: (DictationPress) -> Void = { _ in }
+        var onRequestMedia: () -> Void = {}
+        var onPasteImage: (Data) -> Void = { _ in }
 
         func makeCoordinator() -> Coordinator {
             Coordinator(model: model)
@@ -609,12 +745,16 @@
             view.keyBarPalette = KeyBarPalette(theme: keyBarTheme)
             view.keyboardIsDark = keyBarTheme.isDark
             context.coordinator.onDictation = onDictation
+            context.coordinator.onRequestMedia = onRequestMedia
+            context.coordinator.onPasteImage = onPasteImage
         }
 
         @MainActor
         final class Coordinator: TerminalViewDelegate {
             var model: TerminalModel
             var onDictation: (DictationPress) -> Void = { _ in }
+            var onRequestMedia: () -> Void = {}
+            var onPasteImage: (Data) -> Void = { _ in }
 
             init(model: TerminalModel) {
                 self.model = model
@@ -638,6 +778,14 @@
 
             func terminalView(_ view: TerminalView, dictation press: DictationPress) {
                 onDictation(press)
+            }
+
+            func terminalViewRequestsMedia(_ view: TerminalView) {
+                onRequestMedia()
+            }
+
+            func terminalView(_ view: TerminalView, didPasteImage data: Data) {
+                onPasteImage(data)
             }
         }
     }

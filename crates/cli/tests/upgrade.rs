@@ -182,6 +182,7 @@ fn an_unknown_goodbye_reason_closes_the_connection() {
                             desktops: 0,
                             os: String::new(),
                             home: None,
+                            paste_path: false,
                         };
                         Frame::control(&welcome).unwrap().payload
                     }

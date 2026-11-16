@@ -19,6 +19,8 @@ final class FakeLink: HostLink {
         var request: UInt32 = 0
         var deviceNames: [String] = []
         var focused: [Bool] = []
+        var pastesPaths = true
+        var connected = true
     }
 
     private let state = Mutex(State())
@@ -33,6 +35,16 @@ final class FakeLink: HostLink {
     var deviceNames: [String] { state.withLock { $0.deviceNames } }
     /// 每次 `setFocused` 设的值。
     var focused: [Bool] { state.withLock { $0.focused } }
+    /// 假装连着的宿主认不认得 `pastePath`，默认认得。
+    var pastesPaths: Bool {
+        get { state.withLock { $0.pastesPaths } }
+        set { state.withLock { $0.pastesPaths = newValue } }
+    }
+    /// 假装连没连着，默认连着；和推给订阅者的状态事件无关。
+    var isConnected: Bool {
+        get { state.withLock { $0.connected } }
+        set { state.withLock { $0.connected = newValue } }
+    }
 
     func clearSent() {
         state.withLock { $0.sent.removeAll() }

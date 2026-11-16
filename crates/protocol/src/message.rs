@@ -196,6 +196,9 @@ pub enum ClientMsg {
     SendKeys { req: u32, id: SessionId, keys: Vec<String> },
     /// 往会话里粘贴一段文字，程序开着括号粘贴模式（mode 2004）时套上括号，回 `Done`。
     Paste { req: u32, id: SessionId, text: String },
+    /// 把 `path` 照会话前台 shell 的写法转义（`Quoting::escape`），后面跟一个空格，当粘贴打进会话，回 `Done`。
+    /// 只在 `HostMsg::Welcome` 的 `paste_path` 为真时发。
+    PastePath { req: u32, id: SessionId, path: PathBuf },
     /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。问过的连接之后在布局变了时
     /// 收到 `HostMsg::LayoutChanged`。没有界面连着时宿主照自己手里的布局回；界面自己发时也回宿主手里
     /// 的布局，不转给界面，见 `LayoutChanged`。
@@ -535,6 +538,9 @@ pub enum HostMsg {
             serialize_with = "runode_types::lossy_path::serialize_opt"
         )]
         home: Option<PathBuf>,
+        /// 宿主认得 `ClientMsg::PastePath`，也收 `media` 的连接。
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        paste_path: bool,
     },
     /// 协议版本对不上，宿主接着关掉连接。
     Incompatible {

@@ -1,6 +1,6 @@
 //! 一条远程连接从头到尾：TLS 握手、门禁、按第一帧是终端的
-//! `Hello`、`ScreenHello`、`SpeechHello` 还是桌面设备的 `ChannelHello` 接到宿主、远程桌面的采集进程、识别、
-//! 项目服务或者本机的端口上搬字节（`bridge`）。门禁阶段的读写都按同一个截止时刻（`GATE_TIMEOUT`）设超时，
+//! `Hello`、`ScreenHello`、`SpeechHello`、`MediaHello` 还是桌面设备的 `ChannelHello` 接到宿主、远程桌面的采集进程、
+//! 识别、收图片视频的地方、项目服务或者本机的端口上搬字节（`bridge`）。门禁阶段的读写都按同一个截止时刻（`GATE_TIMEOUT`）设超时，
 //! 对面一个字节一个字节地慢慢发也拖不过它。
 
 use std::{
@@ -13,6 +13,7 @@ use std::{
 use ring::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
 use runode_protocol::{
     ClientKind, ClientMsg, Frame, FrameKind,
+    media::MediaClientMsg,
     remote::{
         Bytes, ChannelHello, ChannelRefusal, ChannelReply, DeviceId, DeviceKind, EXPORTER_LABEL, EXPORTER_LEN,
         GATE_TIMEOUT, GATE_VERSION, GateClientMsg, GateHostMsg, NONCE_LEN, PUBLIC_KEY_LEN, Purpose, RejectReason,
@@ -110,7 +111,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     let hello = read_gate_frame(&mut tls)
         .map_err(io::Error::other)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "closed before hello"))?;
-    // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程、识别，或者桌面设备的专用连接。
+    // 第一帧定下这条连接接到哪里：终端的宿主、远程桌面的采集进程、识别、收图片视频的地方，或者桌面设备的专用连接。
     let first = first(&hello, kind);
     let lane = match &first {
         Some(First::Channel(ChannelHello::ForwardHello { .. })) => Lane::Forward,
@@ -120,6 +121,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
         Some(First::Terminal) => (forward_hello(&shared.connect, &hello)?, Relay::Terminal(kind)),
         Some(First::Screen) => (forward_hello(&shared.connect_screen, &hello)?, Relay::Frames),
         Some(First::Speech) => (forward_hello(&shared.connect_speech, &hello)?, Relay::Frames),
+        Some(First::Media) => (forward_hello(&shared.connect_media, &hello)?, Relay::Frames),
         Some(First::Channel(channel)) => match open_channel(shared, kind, channel) {
             Ok(host) => {
                 send(&mut tls, &ChannelReply::ChannelReady)?;
@@ -159,6 +161,7 @@ enum First {
     Terminal,
     Screen,
     Speech,
+    Media,
     Channel(ChannelHello),
 }
 
@@ -180,6 +183,9 @@ fn first(hello: &Frame, kind: DeviceKind) -> Option<First> {
     }
     if let Ok(SpeechClientMsg::SpeechHello { .. }) = hello.message::<SpeechClientMsg>() {
         return Some(First::Speech);
+    }
+    if let Ok(MediaClientMsg::MediaHello { .. }) = hello.message::<MediaClientMsg>() {
+        return Some(First::Media);
     }
     hello.message::<ChannelHello>().ok().map(First::Channel)
 }

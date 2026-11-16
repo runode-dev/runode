@@ -358,8 +358,8 @@ impl Connection {
                     }
                     None => tracing::debug!("input for unknown channel {}", frame.channel),
                 },
-                FrameKind::Output | FrameKind::Snapshot | FrameKind::Video | FrameKind::Audio => {
-                    self.goodbye("clients do not send output, snapshots, video or audio");
+                FrameKind::Output | FrameKind::Snapshot | FrameKind::Video | FrameKind::Audio | FrameKind::Media => {
+                    self.goodbye("clients do not send output, snapshots, video, audio or media");
                     return;
                 }
             }
@@ -382,6 +382,7 @@ impl Connection {
             desktops,
             os: std::env::consts::OS.to_owned(),
             home: runode_paths::Dirs::from_env().home.map(crate::browse::forward_slashes),
+            paste_path: true,
         }
     }
 
@@ -640,6 +641,9 @@ impl Connection {
                 self.error(Some(req), None, "only a remote device unpairs itself through remote access".into());
             }
             ClientMsg::KeepAwake => {}
+            ClientMsg::PastePath { req, id, path } => {
+                self.deliver_done(req, id, DriveAction::Paste, Inbox::PastePath(path))
+            }
             ClientMsg::Unknown => self.error(None, None, "unknown message".into()),
         }
     }

@@ -108,6 +108,9 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case sendKeys(req: UInt32, id: SessionId, keys: [String])
     /// 粘贴一段文字，程序开着括号粘贴时宿主套上括号，回 `Done`。不用连上会话。
     case paste(req: UInt32, id: SessionId, text: String)
+    /// 把电脑上的一个路径照会话前台 shell 的写法转义、后面跟一个空格，当粘贴打进会话，回 `Done`。不用连上
+    /// 会话。只发给在 `Welcome` 里说认得它的宿主。
+    case pastePath(req: UInt32, id: SessionId, path: String)
     /// 在会话 shell 当前所在的仓库里读写 git，回 `GitStatus`、`GitDiff` 或 `GitBranches`；办不了时回
     /// 只带 `req`、不带会话 `id` 的 `Error`。一条连接上的这些请求宿主按先后一件一件办。
     case git(req: UInt32, id: SessionId, request: GitRequest)
@@ -225,6 +228,11 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
             try c.encode(req, forKey: Key("req"))
             try c.encode(id, forKey: Key("id"))
             try c.encode(text, forKey: Key("text"))
+        case let .pastePath(req, id, path):
+            try c.encode("paste_path", forKey: Key("type"))
+            try c.encode(req, forKey: Key("req"))
+            try c.encode(id, forKey: Key("id"))
+            try c.encode(path, forKey: Key("path"))
         case let .git(req, id, request):
             try c.encode("git", forKey: Key("type"))
             try c.encode(req, forKey: Key("req"))
@@ -332,7 +340,7 @@ public struct ShellReport: Hashable, Sendable, Decodable {
 
 /// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
 /// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
-/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake` 和 `shells`。
+/// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake`、`shells` 和 `paste_path`。
 public enum HostMsg: Hashable, Sendable, Decodable {
     /// `error` 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。对应宿主的
     /// `runode_protocol::ERROR_BACKED_UP`，是认错误种类的约定。
@@ -340,8 +348,9 @@ public enum HostMsg: Hashable, Sendable, Decodable {
     /// `error` 以它开头：会话已经没了。对应宿主的 `runode_protocol::ERROR_NO_SESSION`。
     public static let noSessionPrefix = "no session"
 
-    /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`；`findsCommands`：宿主认得 `ClientMsg.findCommands`。
-    case welcome(keepAwake: Bool, findsCommands: Bool)
+    /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`；`findsCommands`：宿主认得 `ClientMsg.findCommands`；
+    /// `pastesPaths`：宿主认得 `ClientMsg.pastePath`，也收交图片、视频的连接（`MediaClientMsg`）。
+    case welcome(keepAwake: Bool, findsCommands: Bool, pastesPaths: Bool)
     case incompatible(protocol: UInt32, build: String, reason: String)
     case sessionList([SessionInfo])
     case spawned(req: UInt32, id: SessionId)
@@ -433,6 +442,7 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case status, text, truncated, ui, message, format, mine, owner, windows, path, dirs, diff, branches
         case dir, sources, found, shells, shell
         case keepAwake = "keep_awake"
+        case pastePath = "paste_path"
     }
 
     public init(from decoder: any Decoder) throws {
@@ -442,7 +452,8 @@ public enum HostMsg: Hashable, Sendable, Decodable {
         case "welcome":
             self = .welcome(
                 keepAwake: try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? false,
-                findsCommands: try c.decodeIfPresent(Bool.self, forKey: .shells) ?? false)
+                findsCommands: try c.decodeIfPresent(Bool.self, forKey: .shells) ?? false,
+                pastesPaths: try c.decodeIfPresent(Bool.self, forKey: .pastePath) ?? false)
         case "incompatible":
             self = .incompatible(
                 protocol: try c.decode(UInt32.self, forKey: .protocol),

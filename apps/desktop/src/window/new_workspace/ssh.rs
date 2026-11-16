@@ -15,11 +15,12 @@ use gpui::{
 use runode_files::ops::{self, OpError};
 use runode_protocol::{ClientMsg, HostMsg};
 use runode_ssh::Destination;
+use runode_types::shell::Quoting;
 
 use crate::ui::picker::{match_rank, matches_query};
 
 use super::{Source, clone_command, paired::AddPairedMachine, plain_in_windows_quotes, repo_name};
-use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, files::Quoting, status_bar::host_list::dot_color};
+use crate::window::{Dropdown, TITLEBAR_HEIGHT, WindowView, status_bar::host_list::dot_color};
 use crate::{
     host_client::{
         hosts::{self, HostId, Status},

@@ -81,6 +81,48 @@ import Testing
         await link.stop()
     }
 
+    /// `pastePath` 也只发给在 `Welcome` 里说认得它的宿主，认不认得也同步报给界面。
+    @Test(arguments: [false, true]) func pastePathOnlyGoesToHostsThatKnowIt(_ knows: Bool) async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        #expect(!link.pastesPaths)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        let welcome =
+            knows ? FakeHost.welcome.replacingOccurrences(of: "}", with: #","paste_path":true}"#) : FakeHost.welcome
+        _ = try await admit(&host, welcome: welcome)
+        _ = try #require(await waitReady(&events))
+        #expect(link.pastesPaths == knows)
+        link.send(.pastePath(req: 1, id: SessionId("0123456789abcdef0011223344556677")!, path: "/tmp/a.png"))
+        link.send(.listSessions)
+        let first = try await host.readControl()?["type"] as? String
+        #expect(first == (knows ? "paste_path" : "list_sessions"))
+        await link.stop()
+    }
+
+    /// `isConnected` 同步跟着连接：连上后为真，宿主断开后为假。
+    @Test func isConnectedFollowsTheConnection() async throws {
+        let transport = FakeTransport()
+        supply.add(transport)
+        let link = connection()
+        #expect(!link.isConnected)
+        var events = await link.events().makeAsyncIterator()
+        await link.start()
+        var host = FakeHost(transport)
+        _ = try await admit(&host)
+        _ = try #require(await waitReady(&events))
+        #expect(link.isConnected)
+        transport.close()
+        while let event = await events.next() {
+            if case .state(let state) = event, !state.isConnected { break }
+        }
+        #expect(!link.isConnected)
+        await link.stop()
+        #expect(!link.isConnected)
+    }
+
     @Test func connectsSaysHelloAndForwardsMessages() async throws {
         // 连接开着时用户改了名字：记地址不能把名字改回去。
         var renamed = machine

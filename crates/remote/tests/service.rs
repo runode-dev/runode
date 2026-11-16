@@ -40,6 +40,7 @@ fn a_new_name_restarts_the_listener_under_that_name() {
         connect: Arc::new(|| Err(std::io::Error::other("no host"))),
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_media: Arc::new(|| Err(std::io::Error::other("no media"))),
         connect_project: None,
     })
     .unwrap();

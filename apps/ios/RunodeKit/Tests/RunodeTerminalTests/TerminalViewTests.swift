@@ -2,6 +2,7 @@
     import RunodeProtocol
     import Testing
     import UIKit
+    import UniformTypeIdentifiers
 
     @testable import RunodeTerminal
 
@@ -10,12 +11,19 @@
         @MainActor final class Recorder: TerminalViewDelegate {
             var fitSizes: [GridSize] = []
             var inputs = 0
+            var pasted: [TerminalInput] = []
+            var images: [Data] = []
 
-            func terminalView(_ view: TerminalView, didInput input: TerminalInput) { inputs += 1 }
+            func terminalView(_ view: TerminalView, didInput input: TerminalInput) {
+                inputs += 1
+                if case .paste = input { pasted.append(input) }
+            }
             func terminalView(_ view: TerminalView, fitSizeDidChange size: GridSize) { fitSizes.append(size) }
             func terminalView(_ view: TerminalView, didScrollBack scrolledBack: Bool) {}
             func terminalView(_ view: TerminalView, keyboardVisible visible: Bool) {}
             func terminalView(_ view: TerminalView, dictation press: DictationPress) {}
+            func terminalViewRequestsMedia(_ view: TerminalView) {}
+            func terminalView(_ view: TerminalView, didPasteImage data: Data) { images.append(data) }
         }
 
         /// 键盘动的时候视图的高度一下变好几次，只在停稳以后按最后的大小报一次。
@@ -133,6 +141,29 @@
             #expect(pasteboard.string == "hello world")
             #expect(!view.selecting)
             #expect(!terminal.hasSelection)
+        }
+
+        /// 剪贴板上只有图片时粘贴交出图片的原始数据，有文字时照旧粘贴文字。
+        @Test func pastingAnImageHandsItToTheDelegate() throws {
+            let (view, _, recorder) = try selectionView("hello")
+            let pasteboard = try #require(UIPasteboard(name: UIPasteboard.Name("runode-test-\(UUID())"), create: true))
+            defer { UIPasteboard.remove(withName: pasteboard.name) }
+            view.pasteboard = pasteboard
+            let png = try #require(
+                UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+                    UIColor.red.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+                }.pngData())
+            pasteboard.setData(png, forPasteboardType: UTType.png.identifier)
+            #expect(view.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
+            view.paste(nil)
+            #expect(recorder.images == [png])
+            #expect(recorder.inputs == 0)
+
+            pasteboard.string = "ls"
+            view.paste(nil)
+            #expect(recorder.images.count == 1)
+            #expect(recorder.pasted.count == 1)
         }
 
         /// 选中时轻点选区外只退出选中：程序开着鼠标上报也不发点击，不弹键盘；点在选区里还在选中。

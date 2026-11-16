@@ -25,6 +25,9 @@ enum class FrameKind(val rawValue: UByte) {
 
     /** 交给电脑识别的一段录音，载荷见 [speechSampleRate]。 */
     Audio(5u),
+
+    /** 交给电脑的一张图片或一段视频的一段，载荷不超过 [maxMediaFrame]，见 [MediaClientMsg.Media]。 */
+    Media(6u),
     ;
 
     companion object {
@@ -85,6 +88,8 @@ class Frame(
         fun control(message: ScreenClientMsg): Frame = control(ScreenClientMsg.serializer(), message)
 
         fun control(message: SpeechClientMsg): Frame = control(SpeechClientMsg.serializer(), message)
+
+        fun control(message: MediaClientMsg): Frame = control(MediaClientMsg.serializer(), message)
 
         private fun writeU32(out: ByteArray, at: Int, value: UInt) {
             for (i in 0 until 4) out[at + i] = (value shr (8 * i)).toByte()

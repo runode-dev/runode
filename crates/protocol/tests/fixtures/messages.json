@@ -1433,6 +1433,12 @@
       "text": "继续，用方案 2\n",
       "type": "paste"
     },
+    "paste_path": {
+      "id": "0123456789abcdef0011223344556677",
+      "path": "/Users/ethan/Library/Application Support/runode/截图 1.png",
+      "req": 7,
+      "type": "paste_path"
+    },
     "push_register": {
       "bundle": "cn.barey.runode",
       "env": "production",
@@ -1990,6 +1996,7 @@
       "host_pid": 123,
       "keep_awake": true,
       "os": "macos",
+      "paste_path": true,
       "protocol": 4,
       "shells": true,
       "snapshot_format": 1,

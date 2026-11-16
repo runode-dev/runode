@@ -279,6 +279,7 @@ fn answers_to_requests_from_an_earlier_connection_are_dropped() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -586,6 +587,7 @@ fn a_host_with_another_snapshot_format_gets_asked_for_replays() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -630,6 +632,7 @@ fn fake_host_with(screen_req: bool, then: impl FnOnce(UnixStream) + Send + 'stat
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();
@@ -992,6 +995,7 @@ fn theme_and_options_are_sent_again_after_reconnecting() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         };
         let frame = Frame::control(&welcome).unwrap();
         write_frame(&mut stream, frame.kind, 0, &frame.payload).unwrap();

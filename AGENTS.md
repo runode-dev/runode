@@ -7,7 +7,7 @@
 | 目录 | 职责 | 可以依赖 |
 | --- | --- | --- |
 | `paths` | 配置、数据和缓存放在哪（`Dirs`；Linux 上宿主的 socket 和锁按机器分目录，家目录在 NFS 上共享时各台机器各跑各的宿主），以及覆盖写用户手写过的文件（`replace_file`）；另起 runode 自己、把它的位置写进文件和环境时用哪个可执行文件（`runode_exe`，从 AppImage 跑时是 AppImage 文件本身，不是挂载点里的）；Windows 上私有目录只让自己、SYSTEM 和管理员进 | std、windows-sys（Windows） |
-| `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、看板、终端设置、剪贴板的规矩、输入事件、语音识别的模型 | std、serde |
+| `types` | 各端共用的纯数据：终端帧、网格、分屏布局、agent 状态、会话标识、看板、终端设置、剪贴板的规矩、输入事件、语音识别的模型、往终端里打路径时的引号写法（`shell::Quoting`） | std、serde |
 | `protocol` | 宿主和各前端之间的消息；手机远程连接（`remote`）和推送通知（`push`）的线上格式以它为准 | types、serde、serde_json |
 | `git` | 用 git 命令行读仓库，做暂存、提交、分支、stash、工作树和同步；读到的状态可以序列化（`serde` 特性），桌面经 ssh 从远端取 | std、serde（`serde` 特性）、libc（Unix） |
 | `todo` | 看板的 SQLite 库（`Store`）和定时（`next_fire`），以及本地时间和 Unix 时间的换算（`LocalTime`）；宿主在跑时改看板仍经宿主的消息，它才会告诉在看看板的前端；定时先跑命令的内置检查脚本正文（`run_scripts`），由桌面写出 | types、rusqlite、libc |

@@ -246,6 +246,35 @@ fn a_speech_hello_goes_to_the_recognizer() {
     assert!(harness.hosts.try_recv().is_err() && harness.screens.try_recv().is_err());
 }
 
+/// 第一帧是 `MediaHello` 的连接接到收图片、视频的地方，之后的文件帧原样转过去。
+#[test]
+fn a_media_hello_goes_to_the_media_store() {
+    let harness = Harness::start("media");
+    let key = Key::generate();
+    let device_id = harness.pair(&key);
+    let mut phone = harness.phone();
+    let auth = phone.auth_message(device_id, &key);
+    assert_eq!(phone.ask(&auth), Some(GateHostMsg::RemoteAccepted { device_id }));
+    let hello = br#"{"type":"media_hello","version":1}"#;
+    phone.send_control(hello);
+    let media = harness.media.recv_timeout(PATIENCE).expect("no connection to the media store");
+    media.set_read_timeout(Some(PATIENCE)).unwrap();
+    let frame = runode_protocol::read_frame(&mut &media).unwrap().unwrap();
+    assert_eq!((frame.kind, frame.payload.as_slice()), (FrameKind::Control, &hello[..]));
+    // 比一条 TLS 记录长，又小到写的这边不必等对面读走。
+    let picture = vec![0x89; 40 << 10];
+    runode_protocol::write_frame(&mut phone.tls, FrameKind::Media, 0, &picture).unwrap();
+    std::io::Write::flush(&mut phone.tls).unwrap();
+    let frame = runode_protocol::read_frame(&mut &media).unwrap().unwrap();
+    assert_eq!((frame.kind, frame.payload.len()), (FrameKind::Media, picture.len()));
+    assert!(frame.payload == picture);
+    assert!(
+        harness.hosts.try_recv().is_err()
+            && harness.screens.try_recv().is_err()
+            && harness.speeches.try_recv().is_err()
+    );
+}
+
 #[test]
 fn revoking_a_device_disconnects_it() {
     let harness = Harness::start("revoke");

@@ -29,7 +29,7 @@ const CHUNK: usize = 4 << 20;
 
 /// 远端为上传做的一步。路径都要在放上传的目录里。
 #[derive(Debug, Serialize, Deserialize)]
-pub(super) enum UploadOp {
+pub(crate) enum UploadOp {
     /// 新建这次上传的子目录，交回它（用 `/` 分隔）；另起线程删掉放久了的旧上传。
     Begin,
     /// 在这次上传里新建目录。
@@ -51,7 +51,7 @@ impl UploadOp {
 
     /// 在远端做，`root` 是放上传的目录（没有 home 目录时为空），`content` 是请求后面跟着的字节。`Begin` 交回
     /// 新建的子目录。新建的目录只有自己能进，文件只有自己能读写。
-    pub(super) fn run(self, root: Option<&Path>, content: &[u8]) -> io::Result<Option<PathBuf>> {
+    pub(crate) fn run(self, root: Option<&Path>, content: &[u8]) -> io::Result<Option<PathBuf>> {
         let root = root.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
         match self {
             Self::Begin => {
@@ -76,6 +76,11 @@ impl UploadOp {
             }
         }
     }
+}
+
+/// 这台机器上放上传的目录：home 目录下的 `UPLOADS_DIR`；没有 home 目录时为空。
+pub(crate) fn uploads_dir(dirs: &runode_paths::Dirs) -> Option<PathBuf> {
+    dirs.home.as_ref().map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR))
 }
 
 /// 删掉 `root` 下放久了的上传：一个子目录连同里面的东西（不跟着链接）都已经 `UPLOAD_KEEP_DAYS` 天没改过才删。
@@ -272,12 +277,12 @@ fn write(client: &Client, path: &Path, input: &mut dyn Read, source: &dyn std::f
 }
 
 /// 远端目录 `dir` 下的 `name`，一律按 `/` 拼：Windows 远端也认 `/`，Windows 上的 `Path::join` 插的却是 `\`。
-fn child(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn child(dir: &Path, name: &str) -> PathBuf {
     let dir = text(dir);
     PathBuf::from(format!("{}/{name}", dir.trim_end_matches('/')))
 }
 
-fn text(path: &Path) -> String {
+pub(crate) fn text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 

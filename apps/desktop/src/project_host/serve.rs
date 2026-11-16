@@ -78,7 +78,7 @@ pub(crate) fn serve_on(input: impl Read, output: impl Write + Send + 'static) ->
 /// 目录下的 `UPLOADS_DIR`，移到回收站用这台机器的 `Dirs::trash_dir`。
 pub(super) fn serve(input: impl BufRead, output: impl Write + Send + 'static) -> i32 {
     let dirs = runode_paths::Dirs::from_env();
-    let uploads = dirs.home.as_ref().map(|home| home.join(runode_ssh::bootstrap::UPLOADS_DIR));
+    let uploads = super::upload::uploads_dir(&dirs);
     serve_with(input, output, Places { uploads, home_trash: dirs.trash_dir() })
 }
 

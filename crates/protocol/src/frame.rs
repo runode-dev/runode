@@ -28,6 +28,8 @@ pub enum FrameKind {
     Video = 4,
     /// 手机交给电脑识别的一段录音，载荷见 `speech`。
     Audio = 5,
+    /// 手机交给电脑的一个图片或视频文件的一段，载荷见 `media`。
+    Media = 6,
 }
 
 impl FrameKind {
@@ -39,6 +41,7 @@ impl FrameKind {
             3 => Self::Snapshot,
             4 => Self::Video,
             5 => Self::Audio,
+            6 => Self::Media,
             _ => return None,
         })
     }

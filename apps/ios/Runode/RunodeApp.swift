@@ -79,6 +79,14 @@ enum AppComposition {
             return try await SpeechConnection.open(machine: latest, keyStore: keyStore, discovery: discovery)
         }
         dependencies.speechModels = URL.applicationSupportDirectory.appending(path: "speech-models")
+        dependencies.openMedia = { machine in
+            let latest = await store.all().first { $0.id == machine.id } ?? machine
+            return try await MediaConnection.open(machine: latest, keyStore: keyStore, discovery: discovery)
+        }
+        dependencies.beginBackgroundTask = { name in
+            let task = BackgroundTask(name: name)
+            return { task.end() }
+        }
         dependencies.pushIdentity = PushIdentity(
             info: Bundle.main.infoDictionary ?? [:], bundle: Bundle.main.bundleIdentifier)
         // 带中转的构建只交中转换来的句柄；没带中转的（开发签名的构建）直接交 device token，由配了 APNs
@@ -100,4 +108,22 @@ enum AppComposition {
     /// 报给宿主的构建标识，固定不变。宿主只拿它和自己的比，一样才给快照；桌面端的是
     /// `<版本>.<提交号>`，和这个永远对不上，所以手机一律用 VT 重放。
     nonisolated static let buildIdentifier = "dev.runode.mobile"
+}
+
+/// 一段 `UIApplication` 的后台任务。系统叫停时必须马上结束，不然 App 会被杀掉；`end` 只结束一次，叫停后再调什么都不做。
+@MainActor
+private final class BackgroundTask {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

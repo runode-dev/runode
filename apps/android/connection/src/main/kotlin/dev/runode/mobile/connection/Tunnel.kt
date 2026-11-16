@@ -187,6 +187,8 @@ internal class TunnelledTransport(private val tls: FrameTransport, private val p
 
     override fun send(data: ByteArray) = tls.send(data)
 
+    override suspend fun drain() = tls.drain()
+
     override fun exporter(): ByteArray = tls.exporter()
 
     /** 不报：[tls] 连的是本机代理，不是电脑，不能记成下次先试的地址。 */

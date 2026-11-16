@@ -51,6 +51,10 @@ public actor HostConnection: HostLink {
     /// 这次连上的宿主认得 `ClientMsg.keepAwake`、`ClientMsg.findCommands`；不认得时不发，见 `write`。
     private var hostKeepsAwake = false
     private var hostFindsCommands = false
+    /// 最近一次连上的宿主认得 `ClientMsg.pastePath`；不经 actor，界面按它决定能不能发图片和视频。
+    private nonisolated let hostPastesPaths = Mutex(false)
+    /// 现在有一条连上的连接、写得出去；不经 actor，界面发消息前同步问。
+    private nonisolated let linkConnected = Mutex(false)
     private var generation: UInt64 = 0
     /// 一个订阅者转出去、还没取走的输出和快照最多这么多字节，再多就先不读，见 `readUntilClosed`。
     private static let backlogLimit = 256 << 10
@@ -201,6 +205,14 @@ public actor HostConnection: HostLink {
         identity.deviceName = name
     }
 
+    public nonisolated var pastesPaths: Bool {
+        hostPastesPaths.withLock { $0 }
+    }
+
+    public nonisolated var isConnected: Bool {
+        linkConnected.withLock { $0 }
+    }
+
     public nonisolated func nextRequestId() -> UInt32 {
         requestCounter.withLock { counter in
             counter &+= 1
@@ -226,6 +238,7 @@ public actor HostConnection: HostLink {
     private func setState(_ new: LinkState) {
         guard new != state else { return }
         state = new
+        linkConnected.withLock { $0 = new.isConnected }
         broadcast(.state(new))
     }
 
@@ -249,9 +262,12 @@ public actor HostConnection: HostLink {
                 transport = session.transport
                 hostKeepsAwake = session.keepAwake
                 hostFindsCommands = session.findsCommands
+                hostPastesPaths.withLock { $0 = session.pastesPaths }
                 setState(.connected(hostName: session.hostName, address: session.transport.remoteAddress))
                 broadcast(.ready(generation: generation))
                 reason = await readUntilClosed(session.transport, decoder: session.decoder)
+                // 状态要等下面算好重试的时间才换，写不出去了先报。
+                linkConnected.withLock { $0 = false }
                 transport = nil
                 session.transport.close()
                 // 连了一阵才断的（比如宿主交接给新版本）马上重连，重连失败了从第一档退避起；一连上就断的接着
@@ -321,6 +337,7 @@ public actor HostConnection: HostLink {
         var hostName: String
         var keepAwake: Bool
         var findsCommands: Bool
+        var pastesPaths: Bool
     }
 
     /// 经 `dial` 连上这台电脑，在连上的那条连接上走门禁、`Hello` 和 `Welcome`。
@@ -337,12 +354,15 @@ public actor HostConnection: HostLink {
             let outcome = try await GateClient.run(
                 over: transport, credential: .auth(deviceId: machine.deviceId, key: key))
             transport.send(try Frame.control(identity.hello).encoded())
-            let (decoder, keepAwake, findsCommands) = try await withTimeout(GateClient.timeout, onTimeout: { transport.close() }) {
+            let (decoder, keepAwake, findsCommands, pastesPaths) = try await withTimeout(
+                GateClient.timeout, onTimeout: { transport.close() }
+            ) {
                 var reader = FrameReader(transport: transport, decoder: outcome.decoder)
                 while true {
                     let payload = try await reader.nextControl()
                     switch try JSONDecoder().decode(HostMsg.self, from: payload) {
-                    case .welcome(let keepAwake, let findsCommands): return (reader.decoder, keepAwake, findsCommands)
+                    case .welcome(let keepAwake, let findsCommands, let pastesPaths):
+                        return (reader.decoder, keepAwake, findsCommands, pastesPaths)
                     case .incompatible(_, _, let reason): throw LinkFailure.incompatible(reason)
                     case .goodbye(let reason): throw LinkFailure.closed(String(localized: "宿主断开了连接（\(String(describing: reason))）"))
                     default: continue
@@ -359,7 +379,7 @@ public actor HostConnection: HostLink {
                 try? await machines.updateLastAddress(id: machine.id, address)
             }
             return Session(transport: transport, decoder: decoder, hostName: outcome.hostName, keepAwake: keepAwake,
-                findsCommands: findsCommands)
+                findsCommands: findsCommands, pastesPaths: pastesPaths)
         } catch {
             transport.close()
             throw error
@@ -431,7 +451,7 @@ public actor HostConnection: HostLink {
         case .output, .snapshot:
             broadcast(.frame(frame, generation: generation))
             return nil
-        case .input, .video, .audio:
+        case .input, .video, .audio, .media:
             return nil
         }
     }
@@ -444,6 +464,7 @@ public actor HostConnection: HostLink {
             // 宿主对不认得的消息回不带编号的 `Error`，会被等着回话的页面当成自己的。
             if message == .keepAwake, !hostKeepsAwake { return }
             if case .findCommands = message, !hostFindsCommands { return }
+            if case .pastePath = message, !hostPastesPaths.withLock({ $0 }) { return }
             guard let control = try? Frame.control(message) else { return }
             frame = control
         case let .input(data, channel, generation):

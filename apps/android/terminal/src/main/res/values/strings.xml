@@ -9,6 +9,7 @@
     <string name="terminal_key_right">Right</string>
     <string name="terminal_key_return">Return</string>
     <string name="terminal_key_paste">Paste</string>
+    <string name="terminal_key_media">Send image or video</string>
     <string name="terminal_key_dictation">Voice input</string>
     <string name="terminal_key_recording">Recording</string>
     <string name="terminal_key_show_keyboard">Open keyboard</string>

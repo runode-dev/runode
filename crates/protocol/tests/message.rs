@@ -211,6 +211,7 @@ fn client_messages_round_trip() {
         ClientMsg::ReadScreen { req: Some(7), id: ID, lines: Some(100), command: None },
         ClientMsg::SendKeys { req: 5, id: ID, keys: vec!["ctrl-c".into(), "down*3".into(), "f5".into()] },
         ClientMsg::Paste { req: 6, id: ID, text: "echo 中文\nls\n".into() },
+        ClientMsg::PastePath { req: 6, id: ID, path: "/Users/me/Library/截图 (1).png".into() },
         ClientMsg::Layout { req: 7 },
         ClientMsg::LayoutChanged { windows: Some(layout()) },
         ClientMsg::UiReply { ui: 8, reply: Box::new(HostMsg::Layout { req: 7, windows: layout() }) },
@@ -345,6 +346,7 @@ fn host_messages_round_trip() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         },
         HostMsg::Welcome {
             protocol: 4,
@@ -361,6 +363,7 @@ fn host_messages_round_trip() {
             desktops: 0,
             os: "linux".into(),
             home: Some("/home/me".into()),
+            paste_path: true,
         },
         HostMsg::Incompatible { protocol: 2, build: BuildId("b".into()), reason: "too new".into() },
         HostMsg::SessionList {
@@ -762,6 +765,7 @@ fn version_3_fields_have_old_defaults() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         })
         .unwrap(),
     ] {
@@ -790,6 +794,31 @@ fn welcome_without_standalone_reads_as_in_app() {
     assert!(matches!(welcome, HostMsg::Welcome { standalone: false, host_pid: 9, .. }));
 }
 
+/// 旧宿主的 `Welcome` 没有 `paste_path`，读成不认得 `PastePath`；为假时不写出这个字段。
+#[test]
+fn welcome_without_paste_path_reads_as_unsupported() {
+    let welcome: HostMsg =
+        serde_json::from_str(r#"{"type":"welcome","protocol":4,"build":"x","host_pid":9,"snapshot_format":1}"#)
+            .unwrap();
+    assert!(matches!(welcome, HostMsg::Welcome { paste_path: false, .. }));
+    assert!(!serde_json::to_string(&welcome).unwrap().contains("paste_path"));
+    let welcome: HostMsg = serde_json::from_str(
+        r#"{"type":"welcome","protocol":4,"build":"x","host_pid":9,"snapshot_format":1,"paste_path":true}"#,
+    )
+    .unwrap();
+    assert!(matches!(welcome, HostMsg::Welcome { paste_path: true, .. }));
+}
+
+/// 粘贴路径的消息带着请求编号、会话和路径。
+#[test]
+fn paste_path_carries_the_path() {
+    let json = serde_json::to_value(ClientMsg::PastePath { req: 3, id: ID, path: "/tmp/a b.png".into() }).unwrap();
+    assert_eq!(json["type"], "paste_path");
+    assert_eq!(json["req"], 3);
+    assert_eq!(json["id"], ID.to_string());
+    assert_eq!(json["path"], "/tmp/a b.png");
+}
+
 /// `Welcome` 报了系统和家目录时照写，没报时这两个字段不出现；读不带它们的 `Welcome` 时系统为空、家目录为 `None`。
 #[test]
 fn welcome_reports_the_system_and_home_only_when_known() {
@@ -808,6 +837,7 @@ fn welcome_reports_the_system_and_home_only_when_known() {
         desktops: 0,
         os: os.into(),
         home: home.map(Into::into),
+        paste_path: false,
     };
     let json = serde_json::to_value(welcome("windows", Some(r"C:\Users\me"))).unwrap();
     assert_eq!((json["os"].as_str(), json["home"].as_str()), (Some("windows"), Some(r"C:\Users\me")));
@@ -841,6 +871,7 @@ fn welcome_with_a_non_utf8_home_still_serializes() {
         desktops: 0,
         os: "linux".into(),
         home: Some(OsStr::from_bytes(b"/home/\xff").into()),
+        paste_path: false,
     };
     let json = serde_json::to_value(welcome).unwrap();
     assert_eq!(json["home"].as_str(), Some("/home/\u{fffd}"));

@@ -168,6 +168,7 @@ fn role_fake_old() {
             desktops: 0,
             os: String::new(),
             home: None,
+            paste_path: false,
         },
     );
     assert!(matches!(receive::<ClientMsg>(&stream), ClientMsg::Handoff { .. }));
@@ -921,6 +922,7 @@ fn a_goodbye_for_a_handoff_means_busy() {
         desktops: 0,
         os: String::new(),
         home: None,
+        paste_path: false,
     };
     let goodbye = HostMsg::Goodbye { reason: GoodbyeReason::Handoff };
     let scripts = [vec![goodbye.clone()], vec![welcome, goodbye]];

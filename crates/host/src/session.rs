@@ -16,6 +16,7 @@ use std::{
     any::Any,
     ffi::OsString,
     panic::{self, AssertUnwindSafe},
+    path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -39,7 +40,7 @@ use runode_types::{
     input::KeyChord,
     session::{DriveAction, SessionMeta},
     settings::TermSettings,
-    shell::IntegrationMode,
+    shell::{IntegrationMode, Quoting},
 };
 
 use crate::{SpawnOptions, server::UiPort};
@@ -135,6 +136,8 @@ pub(crate) enum Inbox {
     Keys(Vec<KeyChord>),
     /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
     Paste(String),
+    /// 把本机的这个路径转义后当粘贴写给程序。
+    PastePath(PathBuf),
     /// 等 shell 出了提示符（shell 集成报告了提示符所在的目录）再把这些字节写给程序，最多等
     /// `TYPE_AT_PROMPT_PATIENCE`（注入了集成的等 `TYPE_AT_INTEGRATED_PROMPT_PATIENCE`）。看板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
     /// 可能被配置里的程序读走。
@@ -715,6 +718,11 @@ impl Runner {
                 Ok(_) => {}
                 Err(err) => tracing::warn!("session {} cannot encode a paste: {err:#}", self.id),
             },
+            Inbox::PastePath(path) => match self.session.encode_paste(&self.path_paste(&path)) {
+                Ok(bytes) if !bytes.is_empty() => self.session.write(bytes),
+                Ok(_) => {}
+                Err(err) => tracing::warn!("session {} cannot encode a pasted path: {err:#}", self.id),
+            },
             Inbox::TypeAtPrompt(data) => self.type_ahead = Some((data, Instant::now())),
             Inbox::Driven(Some(Drive { by, action })) => {
                 let at_ms = std::time::SystemTime::now()
@@ -797,6 +805,11 @@ impl Runner {
         // 口令。桌面经 `Host::connect_pair` 连上来时也一样：它那份 VT 不认这些报告（标题、目录、
         // shell 的名字都从 `Meta` 来），抹过的流喂出来的状态和宿主的一样。
         self.subscribers.push(Subscriber { connection, sink, desktop });
+    }
+
+    /// 把 `path` 粘贴进这个会话时打的文字，引号写法看会话前台的 shell。
+    fn path_paste(&self, path: &Path) -> String {
+        format!("{} ", Quoting::of_session(&self.session.meta()).escape(&path.to_string_lossy()))
     }
 
     fn replay(&self) -> Vec<u8> {

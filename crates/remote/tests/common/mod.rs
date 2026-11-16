@@ -55,6 +55,8 @@ pub struct Harness {
     pub screens: mpsc::Receiver<UnixStream>,
     /// 同上，到识别的。
     pub speeches: mpsc::Receiver<UnixStream>,
+    /// 同上，到收图片、视频的。
+    pub media: mpsc::Receiver<UnixStream>,
     /// 桌面设备要读写项目时，项目服务那一端送到这里；对面的构建是 `PROJECT_BUILD` 才给开。
     pub projects: mpsc::Receiver<UnixStream>,
 }
@@ -72,11 +74,13 @@ impl Harness {
         let (tx, hosts) = mpsc::channel();
         let (screen_tx, screens) = mpsc::channel();
         let (speech_tx, speeches) = mpsc::channel();
+        let (media_tx, media) = mpsc::channel();
         let (project_tx, projects) = mpsc::channel();
         let project = pair_to(project_tx);
         let options = Options {
             connect_screen: pair_to(screen_tx),
             connect_speech: pair_to(speech_tx),
+            connect_media: pair_to(media_tx),
             connect_project: Some(Arc::new(move |build: &str| {
                 if build != PROJECT_BUILD {
                     return Err(ChannelRefusal::BuildMismatch { build: PROJECT_BUILD.into() });
@@ -90,7 +94,7 @@ impl Harness {
         let status = listener_status(&dirs).unwrap().expect("the listener writes its status");
         assert_eq!((status.port, status.host_name.as_str()), (addr.port(), "测试的 Mac"));
         let fingerprint = status.fingerprint.0.try_into().unwrap();
-        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens, speeches, projects }
+        Self { root, dirs, listener: Some(listener), addr, fingerprint, hosts, screens, speeches, media, projects }
     }
 
     /// 停掉监听再开一个，返回新的证书指纹。宿主连接换成一个连不上的。
@@ -174,6 +178,7 @@ pub fn options(dirs: &Dirs, connect: runode_remote::Connect) -> Options {
         connect,
         connect_screen: Arc::new(|| Err(std::io::Error::other("no screen"))),
         connect_speech: Arc::new(|| Err(std::io::Error::other("no speech"))),
+        connect_media: Arc::new(|| Err(std::io::Error::other("no media"))),
         connect_project: None,
     }
 }

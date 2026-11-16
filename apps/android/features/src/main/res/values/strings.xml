@@ -387,6 +387,20 @@
     <string name="terminal_waiting_for_you">Waiting for You</string>
     <string name="terminal_switch_pane">Switch to this pane</string>
     <string name="dictation_failed">Dictation Failed</string>
+    <string name="media_send_failed">Couldn\'t Send</string>
+    <string name="media_update_needed">Update Runode on the Computer</string>
+    <string name="media_computer_outdated">Runode on the computer is too old. Update it to send images and videos.</string>
+    <string name="media_failed_on_computer">The computer couldn\'t save the file: %1$s</string>
+    <string name="media_image_unreadable">Couldn\'t read the image.</string>
+    <string name="media_video_unreadable">Couldn\'t convert the video.</string>
+    <string name="media_image_too_large">The image is too large to send.</string>
+    <string name="media_video_too_large">The video is still too large to send after compressing.</string>
+    <string name="media_preparing">Compressing video…</string>
+    <string name="media_preparing_count">Compressing video (%1$d/%2$d)…</string>
+    <string name="media_sending">Sending…</string>
+    <string name="media_sending_count">Sending (%1$d/%2$d)…</string>
+    <string name="media_sending_percent">Sending %1$d%%…</string>
+    <string name="media_sending_count_percent">Sending (%1$d/%2$d) %3$d%%…</string>
     <string name="dictation_download">Download</string>
     <string name="open_system_settings">Open Settings</string>
 

@@ -99,6 +99,10 @@ class HostConnection(
     /** 这次连上的宿主认得 [ClientMsg.KeepAwake]、[ClientMsg.FindCommands]；不认得的宿主不发给它。 */
     private var hostKeepsAwake = false
     private var hostFindsCommands = false
+
+    @Volatile
+    override var pastesPaths: Boolean = false
+        private set
     private var generation: ULong = 0u
 
     /** 上层要不要连接：[start] 置真，[stop] 和不能重试的失败置假。 */
@@ -251,6 +255,7 @@ class HostConnection(
                     transport = session.transport
                     hostKeepsAwake = session.keepAwake
                     hostFindsCommands = session.findsCommands
+                    pastesPaths = session.pastesPaths
                     setState(LinkState.Connected(session.hostName, session.transport.remoteAddress))
                     broadcast(HostEvent.Ready(generation))
                     val closed = readUntilClosed(session.transport, session.decoder)
@@ -327,6 +332,7 @@ class HostConnection(
         val hostName: String,
         val keepAwake: Boolean,
         val findsCommands: Boolean,
+        val pastesPaths: Boolean,
     )
 
     /** 经 [dial] 连上这台电脑，在连上的那条连接上走门禁、`Hello` 和 `Welcome`。 */
@@ -351,7 +357,14 @@ class HostConnection(
                 // 只改地址：`machine` 是开连接时拷的，整条写回会盖掉之后改的名字、写回已删的记录。
                 ignoringErrors { machines.updateLastAddress(machine.id, address) }
             }
-            return Session(transport, reader.decoder, outcome.hostName, welcome.keepAwake, welcome.findsCommands)
+            return Session(
+                transport,
+                reader.decoder,
+                outcome.hostName,
+                welcome.keepAwake,
+                welcome.findsCommands,
+                welcome.pastesPaths,
+            )
         } catch (error: Throwable) {
             transport.close()
             throw error
@@ -452,7 +465,7 @@ class HostConnection(
             broadcast(HostEvent.Frame(frame, generation))
             null
         }
-        FrameKind.Input, FrameKind.Video, FrameKind.Audio -> null
+        FrameKind.Input, FrameKind.Video, FrameKind.Audio, FrameKind.Media -> null
     }
 
     private fun write(item: Outgoing) {
@@ -462,6 +475,7 @@ class HostConnection(
                 // 宿主对不认得的消息回不带编号的 `Error`，会被等着回话的页面当成自己的。
                 if (item.message == ClientMsg.KeepAwake && !hostKeepsAwake) return
                 if (item.message is ClientMsg.FindCommands && !hostFindsCommands) return
+                if (item.message is ClientMsg.PastePath && !pastesPaths) return
                 try {
                     Frame.control(item.message)
                 } catch (_: Exception) {
