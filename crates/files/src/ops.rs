@@ -1,6 +1,7 @@
 //! 改项目里文件的操作：新建、改名、移动、复制和移到废纸篓。出错时交回 `OpError`，由调用方换成提示。
 
 use std::{
+    ffi::{OsStr, OsString},
     fs, io,
     path::{Component, Path, PathBuf},
 };
@@ -181,13 +182,23 @@ fn free_name(dir: &Path, name: &Path) -> PathBuf {
     if fs::symlink_metadata(&path).is_err() {
         return path;
     }
-    let stem = name.file_stem().unwrap_or(name.as_os_str()).to_string_lossy();
-    let ext = name.extension().map(|ext| format!(".{}", ext.to_string_lossy())).unwrap_or_default();
     (1..)
-        .map(|n| if n == 1 { format!("{stem} copy{ext}") } else { format!("{stem} copy {n}{ext}") })
-        .map(|name| dir.join(name))
+        .map(|n| if n == 1 { " copy".to_owned() } else { format!(" copy {n}") })
+        .map(|insert| dir.join(insert_before_extension(name.as_os_str(), &insert)))
         .find(|path| fs::symlink_metadata(path).is_err())
         .expect("总有一个没被占用的名字")
+}
+
+/// 在 `name` 的扩展名前插上 `insert`，没有扩展名时接在最后；名字里不成 UTF-8 的字节原样保留。
+fn insert_before_extension(name: &OsStr, insert: &str) -> OsString {
+    let path = Path::new(name);
+    let mut out = path.file_stem().unwrap_or(name).to_owned();
+    out.push(insert);
+    if let Some(ext) = path.extension() {
+        out.push(".");
+        out.push(ext);
+    }
+    out
 }
 
 fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
@@ -372,6 +383,17 @@ pub fn trash(_: &Path, _: Option<&Path>) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 插在扩展名前，不成 UTF-8 的字节不被换成替换字符。
+    #[cfg(unix)]
+    #[test]
+    fn inserting_keeps_the_bytes_of_the_name() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let name = OsStr::from_bytes(b"caf\xe9.txt");
+        assert_eq!(insert_before_extension(name, " copy").as_bytes(), b"caf\xe9 copy.txt");
+        assert_eq!(insert_before_extension(OsStr::new("Makefile"), ".2"), "Makefile.2");
+        assert_eq!(insert_before_extension(OsStr::new(".env"), " copy"), ".env copy");
+    }
 
     #[cfg(windows)]
     #[test]

@@ -115,12 +115,7 @@ fn numbered(name: &std::ffi::OsStr, n: u32) -> std::ffi::OsString {
     if n == 1 {
         return name.to_owned();
     }
-    let path = Path::new(name);
-    let stem = path.file_stem().unwrap_or(name).to_string_lossy();
-    match path.extension() {
-        Some(ext) => format!("{stem}.{n}.{}", ext.to_string_lossy()).into(),
-        None => format!("{stem}.{n}").into(),
-    }
+    super::insert_before_extension(name, &format!(".{n}"))
 }
 
 /// 规范要的写法：路径按字节转义成 URL 那样，字母数字和 `/-._~` 照写，别的写成 `%XX`。
