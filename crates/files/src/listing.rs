@@ -106,8 +106,7 @@ pub fn read_dir(dir: &Path) -> Option<Vec<DirEntry>> {
             Some(DirEntry { name, is_dir })
         })
         .collect();
-    let key = |entry: &DirEntry| entry.name.to_string_lossy().to_lowercase();
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| key(a).cmp(&key(b))));
+    entries.sort_by_cached_key(|entry| (!entry.is_dir, entry.name.to_string_lossy().to_lowercase()));
     Some(entries)
 }
 

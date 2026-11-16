@@ -77,7 +77,7 @@ pub(crate) fn list_dirs(path: Option<PathBuf>) -> Result<Listing, ListError> {
         })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
-    dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+    dirs.sort_by_cached_key(|dir| (dir.to_lowercase(), dir.clone()));
     let truncated = dirs.len() > MAX_DIRS;
     dirs.truncate(MAX_DIRS);
     Ok(Listing { path: forward_slashes(path), dirs, truncated })
