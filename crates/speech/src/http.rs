@@ -40,9 +40,8 @@ pub(crate) fn post(
     let headers_file = dir.0.join("headers.txt");
     let mut command = curl();
     command
-        // 不跟重定向：curl 只在换主机时去掉 `Authorization`，别的密钥头会跟着发过去。`-q` 必须在最前面：
-        // 不读 `~/.curlrc`，里面的 `location` 会让它跟重定向，`fail` 会丢掉报错的响应体。
-        .args(["-q", "--silent", "--show-error", "--config", "-"])
+        // 不跟重定向：curl 只在换主机时去掉 `Authorization`，别的密钥头会跟着发过去。
+        .args(["--silent", "--show-error", "--config", "-"])
         .args(["--connect-timeout", "10", "--max-time"])
         .arg(timeout.as_secs().to_string())
         // 响应头另写进文件自己找：`--write-out` 的 `%header{}` 要 curl 7.84，Windows 10 自带的是 7.55。
@@ -81,7 +80,8 @@ pub(crate) fn post(
 }
 
 /// 跑 curl 的命令。Windows 上 `Command` 先找 System32 再找 PATH，所以先按 PATH 找 `curl.exe`，
-/// 用户自己装的新版排在系统自带的前面；也不给它开控制台窗口。
+/// 用户自己装的新版排在系统自带的前面；也不给它开控制台窗口。第一个参数是 `-q`（只在最前面才管用）：不读
+/// `~/.curlrc`，里面的 `location`、`fail`、超时这类设置会改掉调用方定的行为。
 pub(crate) fn curl() -> Command {
     #[cfg(windows)]
     {
@@ -90,10 +90,15 @@ pub(crate) fn curl() -> Command {
             .unwrap_or_else(|| PathBuf::from("curl"));
         let mut command = Command::new(program);
         std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+        command.arg("-q");
         command
     }
     #[cfg(not(windows))]
-    Command::new("curl")
+    {
+        let mut command = Command::new("curl");
+        command.arg("-q");
+        command
+    }
 }
 
 /// 拆开 curl 的输出：响应体，最后一行是 `--write-out` 写的状态码；`headers` 是 `--dump-header`
