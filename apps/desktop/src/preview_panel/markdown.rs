@@ -7,10 +7,10 @@
 //! 标题），前面记着它套在哪几层引用和列表项里。列表用 `gpui::list`，只画看得见的那些行，几千行的
 //! 文件滚起来也只画一屏；一行里的文字按栏宽自动换行。
 //!
-//! 文字能拖选：选区记成（行、行里第几段文字、字节偏移）的两端，见 `select`；每段文字画的时候把
-//! 布局登记下来，鼠标事件据此换算位置，见 `text`。Cmd+C 复制选中部分的纯文本，Cmd+A 全选，双击选词、
+//! 文字能拖选：选区记成（行、行里第几段文字、字节偏移）的两端；每段文字画的时候把
+//! 布局登记下来，鼠标事件据此换算位置。Cmd+C 复制选中部分的纯文本，Cmd+A 全选，双击选词、
 //! 三击选一段。拖动不到几个像素就松开算点击，点在链接上就打开：网址交给浏览器，本地文件在预览栏里
-//! 打开，`#锚点` 滚到对应的标题或脚注。网络图片在后台下载，见 `remote`。代码块悬停时右上角有复制
+//! 打开，`#锚点` 滚到对应的标题或脚注。网络图片在后台下载。代码块悬停时右上角有复制
 //! 按钮，整块复制。
 
 mod remote;
@@ -23,6 +23,7 @@ use crate::ui::a11y::RevealOnHover;
 use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
     ops::Range,
     path::{Path, PathBuf},
     sync::{
@@ -89,7 +90,7 @@ pub(super) struct View {
     texts: Texts,
     /// 网络图片按地址：下好了是图，下不了为空；还在下的不在表里。
     remote: HashMap<String, Option<Picture>>,
-    /// 按哪个栏宽给没量过的行估的高度，见 `render_markdown`。
+    /// 按哪个栏宽给没量过的行估的高度。
     hinted_width: Cell<f32>,
 }
 
@@ -192,6 +193,22 @@ pub(super) struct Row {
     pub footnote: bool,
     /// 在 HTML 居中的块里：文字逐行居中，图片摆在中间。
     pub center: bool,
+    /// 这一行元素 id 用的键（`occurrence_key`），按内容取：上面多出、少了和它内容不同的行时，它的键不变。
+    pub key: u64,
+}
+
+/// 内容哈希为 `hash` 的东西的键，连同它是这个哈希的第几次出现一起算，同样的内容重复出现时各有各的键。`seen`
+/// 记着各个哈希出现过几次，要按从前往后的顺序调。
+fn occurrence_key(seen: &mut HashMap<u64, usize>, hash: u64) -> u64 {
+    let nth = seen.entry(hash).or_default();
+    *nth += 1;
+    hash_of((hash, *nth))
+}
+
+fn hash_of(value: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,7 +242,7 @@ pub(super) enum Leaf {
         aligns: Vec<Align>,
         head: Vec<Rich>,
         rows: Vec<Vec<Rich>>,
-        /// 每列估计最宽的格子在第几行（表头算第 0 行），见 `widest_cells`。
+        /// 每列估计最宽的格子在第几行（表头算第 0 行）。
         widest: Vec<usize>,
     },
     /// 分割线；在脚注前面时是一条细线。
@@ -261,6 +278,26 @@ impl Leaf {
             }
             Leaf::Rule | Leaf::Images(_) => Vec::new(),
         }
+    }
+
+    /// 显示的东西的哈希：种类、文字和图片地址。
+    fn content_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        std::mem::discriminant(self).hash(&mut hasher);
+        match self {
+            Leaf::Heading(level, rich) => (level, &rich.text).hash(&mut hasher),
+            Leaf::Paragraph(rich) => rich.text.hash(&mut hasher),
+            Leaf::AlertTitle(alert, title) => (*alert as u8, title).hash(&mut hasher),
+            Leaf::Code { source, .. } => source.hash(&mut hasher),
+            Leaf::Table { .. } => self.texts().hash(&mut hasher),
+            Leaf::Rule => {}
+            Leaf::Images(images) => {
+                for image in images {
+                    (&image.url, &image.alt).hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
     }
 
     /// 第 `ix` 段文字带样式的那份；代码块和提示块的标题没有。
@@ -335,6 +372,7 @@ impl Doc {
             footnote: false,
             center: 0,
             ids: 0,
+            keys: HashMap::new(),
         };
         flat.blocks(blocks, &mut Vec::new());
         Self { rows: flat.rows, anchors: flat.anchors }
@@ -404,12 +442,12 @@ struct Flatten<'a> {
     anchors: HashMap<String, usize>,
     /// Markdown 文件所在的目录，本地图片的地址相对它。
     dir: &'a Path,
-    /// 一个字在终端里占几格，见 `widest_cells`。
+    /// 一个字在终端里占几格。
     cell_width: fn(char) -> u8,
     picture: &'a dyn Fn(&Path) -> Option<Picture>,
     /// 读过的本地图片文件，读不了的也记着，不再读第二次。
     pictures: HashMap<PathBuf, Option<Picture>>,
-    /// `pictures` 里的图合起来占的字节，见 `MAX_LOCAL_IMAGE_BYTES`。
+    /// `pictures` 里的图合起来占的字节。
     picture_bytes: usize,
     /// 正在摊平文末的脚注。
     footnote: bool,
@@ -417,6 +455,8 @@ struct Flatten<'a> {
     center: usize,
     /// 给引用和列表发编号。
     ids: usize,
+    /// 各行内容的哈希出现过几次，发 `Row::key` 用。
+    keys: HashMap<u64, usize>,
 }
 
 impl Flatten<'_> {
@@ -550,7 +590,8 @@ impl Flatten<'_> {
     }
 
     fn push(&mut self, nest: &mut [Nest], leaf: Leaf) {
-        self.rows.push(Row { nest: nest.to_vec(), leaf, footnote: self.footnote, center: self.center > 0 });
+        let key = occurrence_key(&mut self.keys, leaf.content_hash());
+        self.rows.push(Row { nest: nest.to_vec(), leaf, footnote: self.footnote, center: self.center > 0, key });
         // 列表项的记号只画在它的第一行。
         for level in nest.iter_mut() {
             if let Nest::Item { marker, .. } = level {
@@ -821,11 +862,11 @@ impl Paint {
 fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<AnyElement> {
     rich.links
         .iter()
-        .enumerate()
-        .map(|(ix, (range, url))| {
+        .zip(link_keys(rich))
+        .map(|((range, url), key)| {
             let (view, url) = (view.clone(), url.clone());
             div()
-                .id(("md-link", ix))
+                .id(("md-link", key))
                 .absolute()
                 .role(Role::Link)
                 .aria_label(rich.text.get(range.clone()).unwrap_or_default().to_owned())
@@ -835,6 +876,15 @@ fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<AnyElement> {
                 })
                 .into_any_element()
         })
+        .collect()
+}
+
+/// `rich` 里各个链接的元素 id 用的键，按地址和链接的文字取。
+fn link_keys(rich: &Rich) -> Vec<u64> {
+    let mut seen = HashMap::new();
+    rich.links
+        .iter()
+        .map(|(range, url)| occurrence_key(&mut seen, hash_of((url, rich.text.get(range.clone()).unwrap_or_default()))))
         .collect()
 }
 
@@ -964,7 +1014,7 @@ impl PreviewPanel {
         });
         let bottom = if alert_end { em * 0.5 } else { 0. } + if ix + 1 == doc.rows.len() { PADDING_Y } else { 0. };
         let mut element = div()
-            .id(("md-row", ix))
+            .id(("md-row", row.key))
             .w_full()
             .flex()
             .px(px(PADDING_X))
@@ -1074,7 +1124,7 @@ impl PreviewPanel {
                     .bg(colors.subtle)
                     .child(
                         div()
-                            .id(("md-code-scroll", ix))
+                            .id("md-code-scroll")
                             .font_family(mono)
                             .text_size(px(size * 0.85))
                             .line_height(relative(1.45))
@@ -1184,7 +1234,7 @@ impl PreviewPanel {
                     div().flex_none().flex().flex_col().children(sizer).children(cells)
                 }));
                 div()
-                    .id(("md-table", ix))
+                    .id("md-table")
                     .role(Role::Table)
                     .aria_row_count(rows.len() + 1)
                     .aria_column_count(columns)

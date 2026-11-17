@@ -252,7 +252,7 @@ const TAB_TRACK_HEIGHT: f32 = 28.;
 /// 卡片样式下标签之间的空隙。
 const TAB_GAP: f32 = 4.;
 
-/// 窗口用卡片样式，见 `WindowStyle`。
+/// 窗口用卡片样式。
 /// 按配色 `fg`、`bg` 和配置的调色板换上全 app 共用的主题 token（`Theme`），返回换上的：同一次绘制里接着画的
 /// 缓存的视图、悬停提示和拖动预览读到的就是这个窗口的。每个窗口画的时候一开头调，单独的终端窗口、远程桌面
 /// 窗口也一样，不然它们读到的是最后画的那个窗口的颜色。
@@ -320,24 +320,24 @@ pub struct WindowView {
     collapsed_projects: Vec<(HostId, PathBuf)>,
     /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
-    /// 右侧面板的 Git 页，见 `git_panel`：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
+    /// 右侧面板的 Git 页：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
     git_panel: Entity<GitPanel>,
     _git_panel_events: Subscription,
     /// 开着的分支列表。
     branch_picker: Option<git_panel::BranchPicker>,
-    /// 右侧面板的 GitHub Actions 页，见 `github_actions`。
+    /// 右侧面板的 GitHub Actions 页。
     github_actions: Entity<ActionsPanel>,
     /// 上次看 PATH 里有没有 gh 时的 PATH 和结果，标签要不要显示靠它，PATH 没变就不再找。
     actions_found: model::ToolCache,
     /// 在终端里填 secret、variable 值的那几个终端，按终端记着订阅，gh 跑完时让页重读对应的列表。
     actions_watches: HashMap<EntityId, Subscription>,
     _actions_events: Subscription,
-    /// 预览栏，见 `preview`：各 workspace 的预览标签都在它里面，自动换行和 Markdown 显示源码的开关也是。
+    /// 预览栏：各 workspace 的预览标签都在它里面，自动换行和 Markdown 显示源码的开关也是。
     preview: Entity<PreviewPanel>,
     _preview_events: Subscription,
     /// 预览栏通知时文件标签（`PreviewPanel::file_tabs`）变了就重画标题栏：文件标签画在标题栏里。
     _preview_watch: Subscription,
-    /// 右侧面板的文件树，见 `files`：各 workspace 的树都在它里面，显示哪些文件和搜索的选项也是。
+    /// 右侧面板的文件树：各 workspace 的树都在它里面，显示哪些文件和搜索的选项也是。
     file_tree: Entity<FileTree>,
     _file_tree_events: Subscription,
     /// 窗口开着的菜单：状态栏、标题栏命令按钮这些的右键菜单和按钮下面的菜单，同一时刻只开一个。
@@ -354,7 +354,7 @@ pub struct WindowView {
     new_workspace: Option<new_workspace::NewWorkspaceDialog>,
     /// 新建工作树的对话框。
     new_worktree: Option<new_worktree::NewWorktreeDialog>,
-    /// ssh 要问用户的，排着队，见 `askpass`。
+    /// ssh 要问用户的，排着队。
     asks: askpass::Asks,
     /// 添加命令的对话框。
     add_task: Option<tasks::AddTaskDialog>,
@@ -376,11 +376,9 @@ pub struct WindowView {
     arrange_picker: Option<arrange::ArrangePicker>,
     /// 底部状态栏上开着的浮层。
     status_popover: Option<status_bar::StatusPopover>,
-    /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器，见
-    /// `schedule_driver_redraw`。
+    /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器。
     driver_redraw: Option<(u64, Task<()>)>,
-    /// 侧栏「需要你」里有等回答的分屏时，到等得最久的那个满下一个整分钟的时刻重画的计时器，见
-    /// `schedule_inbox_redraw`。
+    /// 侧栏「需要你」里有等回答的分屏时，到等得最久的那个满下一个整分钟的时刻重画的计时器。
     inbox_redraw: Option<(Instant, Task<()>)>,
     /// 最近一次把路径打进终端（`insert_paths`）的任务：下一次等它打完再打，先后不乱。
     inserting: Option<Shared<Task<()>>>,
@@ -404,21 +402,20 @@ pub struct WindowView {
     _display_watch: Subscription,
     /// 窗口切到前台时重读右侧面板的内容。
     _activation_watch: Subscription,
-    /// 窗口看不看得见（被盖住、最小化、在别的 Space 上、显示器睡了）变了时重新告诉终端显示着没有，
-    /// 见 `sync_visibility`。
+    /// 窗口看不看得见（被盖住、最小化、在别的 Space 上、显示器睡了）变了时重新告诉终端显示着没有。
     _visibility_watch: Subscription,
     /// 配置重载后重画，文件树的字号等跟着变。
     _config_watch: Subscription,
     /// 认出的 agent 提问（`agent_prompts::Prompts`）变了时重画：侧栏是缓存的视图，只在窗口通知时重画。
     _prompts_watch: Subscription,
     project_watcher: project::Watcher,
-    /// 包成缓存视图的几块界面，见 `Slot`。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
+    /// 包成缓存视图的几块界面。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
-    /// 缓存的几块上次是按哪个主题画的，见 `follow_colors`。
+    /// 缓存的几块上次是按哪个主题画的。
     slot_theme: Option<Theme>,
 }
 
-/// 窗口里包成缓存视图的几块，终端有输出时照搬上一帧，见 `Slot`。
+/// 窗口里包成缓存视图的几块，终端有输出时照搬上一帧。
 #[derive(Clone)]
 struct Slots {
     sidebar: Entity<Slot>,
@@ -724,20 +721,23 @@ fn row_slot(slot: &Entity<Slot>, height: f32, window: &Window, cx: &App) -> AnyE
 
 /// 按 `style` 在父元素里占地方，后面紧跟着画这一块的转圈（`Slot::spinners`）。
 ///
-/// 辅助工具开着时不缓存：GPUI 在 prepaint 里逐帧重建报给辅助工具的节点，照搬上一帧的视图跳过了
-/// prepaint，它里面的按钮、列表就从树里消失了。
-///
 /// shortcut: Windows 上一律不缓存，GPUI 照搬上一帧时不重放拖窗口的区域（`window_control_area`），
 /// 标题栏和侧栏就拖不动窗口；GPUI 重放它以后去掉
 fn cached_slot(slot: &Entity<Slot>, style: StyleRefinement, window: &Window, cx: &App) -> AnyElement {
     let mut wrapper = div();
     wrapper.style().refine(&style);
-    let content = if window.is_a11y_active() || cfg!(windows) {
-        slot.clone().into_any_element()
-    } else {
-        slot.clone().cached(StyleRefinement::default().size_full()).into_any_element()
-    };
+    let content = if cfg!(windows) { slot.clone().into_any_element() } else { cached_page(slot.clone(), window) };
     wrapper.child(content).child(slot.read(cx).spinners.overlay()).into_any_element()
+}
+
+/// 自己写满宽高的视图（整页、`Slot`、分屏里的终端）。缓存：窗口跟着终端输出几乎每帧都重画，这个视图只在
+/// 自己的状态变了时重画。辅助工具开着时不缓存：照搬上一帧时跳过 prepaint，报给辅助工具的节点就丢了。
+fn cached_page<V: Render>(view: Entity<V>, window: &Window) -> AnyElement {
+    if window.is_a11y_active() {
+        view.into_any_element()
+    } else {
+        view.cached(StyleRefinement::default().size_full()).into_any_element()
+    }
 }
 
 /// 经典样式下标题栏画不画、两头给红绿灯和面板开关让出多宽，画主体和画标题栏时都要。

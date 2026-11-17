@@ -2,11 +2,11 @@
 //! （`activate`）、按 Esc 就收起。
 
 use gpui::{
-    AnyElement, App, Context, Entity, Focusable as _, MouseButton, StyleRefinement, Subscription, Window,
-    WindowControlArea, div, prelude::*, px,
+    AnyElement, App, Context, Entity, Focusable as _, MouseButton, Subscription, Window, WindowControlArea, div,
+    prelude::*, px,
 };
 
-use super::{CARD_GAP, TITLEBAR_HEIGHT, WindowView, cards, drag_window};
+use super::{CARD_GAP, TITLEBAR_HEIGHT, WindowView, cached_page, cards, drag_window};
 use crate::{
     config::AppConfig,
     mobile_page::{MobileEvent, MobilePage, Step},
@@ -83,17 +83,11 @@ impl WindowView {
         }
     }
 
-    /// 引导页开着时窗口的内容。缓存：窗口跟着终端输出几乎每帧都重画，这一页只在自己的状态变了时重画。辅助工具
-    /// 开着时不缓存，GPUI 才会逐帧重建报给辅助工具的节点。这一页里转着的盲文格紧跟在它后面画
-    /// （`MobilePage::spinner_overlay`）。
+    /// 配对设备页开着时窗口的内容。这一页里转着的盲文格紧跟在它后面画（`MobilePage::spinner_overlay`）。
     pub(super) fn render_mobile_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(page) = self.mobile_page().map(|page| page.view.clone()) else { return Vec::new() };
         let overlay = page.read(cx).spinner_overlay();
-        let page = if window.is_a11y_active() {
-            page.into_any_element()
-        } else {
-            page.cached(StyleRefinement::default().size_full()).into_any_element()
-        };
+        let page = cached_page(page, window);
         let page = div().size_full().child(page).child(overlay).into_any_element();
         self.render_page_body(page, true, window, cx)
     }

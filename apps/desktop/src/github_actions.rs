@@ -7,7 +7,7 @@
 //!
 //! 页是一个单独的视图（`ActionsPanel`），面板外框和顶上的标签由 app 画。仓库、分支、shell 报告的 PATH、
 //! 固定的工作流由 app 经 `set_input` 交进来，颜色画的时候从主题（`ActiveTheme`）读，要 app 办的事经
-//! `ActionsEvent` 交出去。经用户自己装的 gh 读写，见 `gh`；app 在窗口在前台时每秒调一次 `poll`，页上
+//! `ActionsEvent` 交出去。经用户自己装的 gh 读写；app 在窗口在前台时每秒调一次 `poll`，页上
 //! 显示着的和固定在状态栏上的数据隔 `POLL_IDLE` 重读一次，有没跑完的运行或 job 时隔 `POLL_RUNNING`。
 
 mod api;
@@ -24,7 +24,7 @@ use std::{
 };
 
 use crate::ui::{
-    a11y::{A11yPress, PressDown, StaticText},
+    a11y::{A11yPress, Press, PressDown, StaticText},
     button::{Button, ButtonSize, ButtonVariant},
     font_size::{self, FontSize, scaled},
     hsla,
@@ -73,7 +73,7 @@ pub struct PinnedWorkflow {
     pub name: String,
 }
 
-/// app 交给页的东西，见 `ActionsPanel::set_input`。
+/// app 交给页的东西。
 #[derive(Clone, Default)]
 pub struct Input {
     /// gh 在哪个目录里跑：仓库根目录，还没读过 git 状态时是终端的目录。
@@ -104,7 +104,7 @@ pub enum ActionsEvent {
     StartResize(usize),
 }
 
-/// gh 跑完以后要重读的那份数据和发命令时的 `ActionsPanel::generation`，见 `ActionsEvent::RunInTerminal`。
+/// gh 跑完以后要重读的那份数据和发命令时的 `ActionsPanel::generation`。
 /// 数据按页上当前的仓库读，等 gh 跑完时仓库换过（哪怕又换回来）就不读：读到的是另一个仓库的同名数据。
 #[derive(Clone)]
 pub struct Refetch(Query, u64);
@@ -223,7 +223,7 @@ impl Walk {
     }
 }
 
-/// 状态栏上一个固定的工作流：名字和最近一次运行，见 `ActionsPanel::pinned_items`。
+/// 状态栏上一个固定的工作流：名字和最近一次运行。
 pub struct PinnedItem {
     id: u64,
     name: String,
@@ -299,7 +299,7 @@ impl ActionsPanel {
         .detach();
     }
 
-    /// 改过 `query` 那份数据以后重读：同一份正在读时，等它读完丢掉再读，见 `stale`。
+    /// 改过 `query` 那份数据以后重读：同一份正在读时，等它读完丢掉再读。
     fn refetch_actions(&mut self, query: Query, cx: &mut Context<Self>) {
         if self.loading.contains(&query) {
             self.stale.insert(query);
@@ -308,7 +308,7 @@ impl ActionsPanel {
         }
     }
 
-    /// gh 跑完了：重读 `refetch` 那份数据，见 `ActionsEvent::RunInTerminal`。
+    /// gh 跑完了：重读 `refetch` 那份数据。
     pub fn refetch(&mut self, Refetch(query, generation): Refetch, cx: &mut Context<Self>) {
         if generation == self.generation {
             self.refetch_actions(query, cx);
@@ -731,8 +731,7 @@ impl ActionsPanel {
                     .px(px(8.))
                     .rounded(px(4.))
                     .text_size(FontSize::Body)
-                    .on_click(cx.listener(move |this, _, window, cx| login(this, window, cx)))
-                    .on_a11y_press(cx.entity().downgrade(), login),
+                    .on_press(cx, login),
             )
     }
 

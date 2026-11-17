@@ -18,12 +18,12 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, CursorStyle, DispatchPhase, Div, Entity, EntityId,
-    Focusable as _, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, StyleRefinement,
-    Subscription, Task, Window, canvas, div, point, prelude::*, px, size,
+    Focusable as _, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, ResizeEdge, Size, Subscription, Task,
+    Window, canvas, div, point, prelude::*, px, size,
 };
 
 use super::{
-    ToggleRemoteDesktop, WindowView, drag_out,
+    ToggleRemoteDesktop, WindowView, cached_page, drag_out,
     float_frame::{self, clamp_frame, resize_frame},
     project::{TOGGLE_HEIGHT, TOGGLE_WIDTH},
 };
@@ -485,7 +485,8 @@ impl WindowView {
         cx.notify();
     }
 
-    /// 占满内容区时窗口的内容：侧栏加右边整块的远程桌面页（`render_page_body`）。
+    /// 占满内容区时窗口的内容：侧栏加右边整块的远程桌面页（`render_page_body`）。画面铺到页面底边，视频帧又
+    /// 画不出圆角，放它的那块底下两个角要是直的。
     pub(super) fn render_screen_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(view) = self.screen_viewers.docked().map(|open| open.view.clone()) else { return Vec::new() };
         let page = cached_page(view, window);
@@ -679,16 +680,6 @@ impl WindowView {
 /// 窗口里的 `position` 在窗口的内容里。
 fn inside(window: &Window, position: Point<Pixels>) -> bool {
     Bounds::new(Point::default(), window.viewport_size()).contains(&position)
-}
-
-/// 远程桌面页：缓存，来一帧画面只通知这一页，窗口跟着终端输出重画时照搬上一帧。辅助工具开着时不缓存：照搬上一帧
-/// 时跳过 prepaint，报给辅助工具的节点就丢了。画面铺到页面底边，视频帧又画不出圆角，放它的那块底下两个角要是直的。
-fn cached_page(view: Entity<ScreenViewer>, window: &Window) -> AnyElement {
-    if window.is_a11y_active() {
-        view.into_any_element()
-    } else {
-        view.cached(StyleRefinement::default().size_full()).into_any_element()
-    }
 }
 
 /// 换上远程桌面页的 `Input`，变了时叫它重画（它是缓存的视图）。

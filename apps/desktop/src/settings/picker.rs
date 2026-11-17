@@ -18,6 +18,7 @@ use super::SettingsView;
 use crate::ui::popover::Popover;
 use crate::ui::theme::ActiveTheme as _;
 use crate::ui::{
+    a11y::{Press as _, StaticText as _},
     font_size::{FontSize, scaled},
     input::{Input, InputEvent, InputState},
 };
@@ -79,7 +80,7 @@ pub(super) struct Picker {
     highlighted: usize,
     /// 挑主题时键盘挪过高亮、先换上看过效果，没选就关掉时要换回文件里的配置。
     previewed: bool,
-    /// 等着换上键盘挪到的主题，见 `PREVIEW_DELAY`；跟着浮层一起丢掉就不换了。
+    /// 等着换上键盘挪到的主题；跟着浮层一起丢掉就不换了。
     preview: Option<Task<()>>,
     scroll: UniformListScrollHandle,
     _subscription: Subscription,
@@ -279,8 +280,7 @@ impl SettingsView {
                                 el.hover(|el| el.bg(row_hover))
                             }
                         })
-                        // 用 on_click 而不是按下就选：辅助工具点它时走的也是这个。
-                        .on_click(cx.listener(move |this, _, window, cx| this.pick(ix, window, cx)))
+                        .on_press(cx, move |this, window, cx| this.pick(ix, window, cx))
                         .child(div().w(px(12.)).flex_none().text_color(theme.ring).children(
                             current.then(|| gpui::svg().path(CHECK_ICON).size(px(11.)).text_color(theme.ring)),
                         ))
@@ -310,11 +310,14 @@ impl SettingsView {
         .h(scaled(ROW_HEIGHT * VISIBLE_ROWS.min(count.max(1) as f32) + 8.))
         .p(px(4.));
         let empty = (count == 0).then(|| {
+            let text = rust_i18n::t!("settings.no_matches").into_owned();
             div()
+                .id("picker-empty")
+                .aria_static_text(text.clone())
                 .px(px(12.))
                 .py(px(10.))
                 .text_color(theme.foreground.opacity(0.5))
-                .child(rust_i18n::t!("settings.no_matches").into_owned())
+                .child(text)
         });
         let panel = Popover::new("picker")
             .role(Role::Dialog)

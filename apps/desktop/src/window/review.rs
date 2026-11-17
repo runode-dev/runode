@@ -3,9 +3,9 @@
 //! 或「回到终端」就收起。每次画之前交给它当前项目的 git 状态、在忙的仓库和刚提交好的那几次；它要办的 git
 //! 操作交给 Git 面板跑，和面板上的操作一起按仓库排队，本机和远端的项目都走这一条路。
 
-use gpui::{AnyElement, Context, Entity, Focusable as _, StyleRefinement, Subscription, Window, div, prelude::*};
+use gpui::{AnyElement, Context, Entity, Focusable as _, Subscription, Window, div, prelude::*};
 
-use super::{Page, WindowView, cards, project::SidePanel};
+use super::{Page, WindowView, cached_page, cards, project::SidePanel};
 use crate::{
     review::{Input, Review, ReviewEvent},
     ui::{card::Card, theme::ActiveTheme as _},
@@ -103,11 +103,7 @@ impl WindowView {
             let view = view.clone();
             cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
         }
-        let page = if window.is_a11y_active() {
-            view.into_any_element()
-        } else {
-            view.cached(StyleRefinement::default().size_full()).into_any_element()
-        };
+        let page = cached_page(view, window);
         let page = if cards(cx) {
             Card::new().size_full().overflow_hidden().child(page).into_any_element()
         } else {

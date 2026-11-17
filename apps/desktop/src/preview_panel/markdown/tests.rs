@@ -259,6 +259,34 @@ fn widest_cells_count_wide_characters() {
     assert_eq!(widest_cells(2, &[rich("ab"), rich("1")], &rows, cell_width), [2, 1]);
 }
 
+/// 行键按内容取：上面多出一块时下面各行的键不变，同样内容的行各有各的键。
+#[test]
+fn row_keys_follow_content() {
+    let keys = |doc: &Doc| doc.rows.iter().map(|row| row.key).collect::<Vec<_>>();
+    let body = "# Title\n\nsame\n\n```\ncode\n```\n\n| a |\n|---|\n| b |\n\n---\n\nsame\n";
+    let before = keys(&doc(body));
+    let after = keys(&doc(&format!("inserted\n\n{body}")));
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(after[1..], before[..]);
+    // 两段 `same` 各有各的键。
+    assert_eq!(before.len(), 6);
+    assert_ne!(before[1], before[5]);
+    assert_eq!(before.iter().collect::<HashSet<_>>().len(), before.len());
+}
+
+/// 链接的键按地址和文字取，同一个链接出现两次时各有各的键。
+#[test]
+fn link_keys_follow_url_and_text() {
+    let paragraph = |text: &str| match &doc(text).rows[0].leaf {
+        Leaf::Paragraph(rich) => link_keys(rich),
+        _ => panic!("not a paragraph"),
+    };
+    let keys = paragraph("[a](x) [b](y) [a](x)");
+    assert_eq!(keys.len(), 3);
+    assert_eq!(keys.iter().collect::<HashSet<_>>().len(), 3);
+    assert_eq!(paragraph("[c](z) [a](x) [b](y) [a](x)")[1..], keys[..]);
+}
+
 /// 表格只画露出来（连同上下多画的 `OVERDRAW`）的表体行：表头 30 高、表体每行 20 高、1000 行，列表 600 高。
 #[test]
 fn shown_rows_cover_the_viewport() {

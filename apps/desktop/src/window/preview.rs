@@ -1,5 +1,5 @@
 //! 把预览栏接到窗口上。预览栏本身在 `preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
-//! 的文件标签都在它里面。文件标签和终端标签一起排在标题栏里（`titlebar` 照 `PreviewPanel::file_tabs` 画），
+//! 的文件标签都在它里面。文件标签和终端标签一起排在标题栏里，
 //! 点中文件标签时预览盖满终端区，切到终端标签时退到后面。这里每次对它做什么之前告诉它当前是哪个
 //! workspace、交给它那个 workspace 最近读到的 git 状态，画的时候交给它字体、宽度和配置里的预览字号（颜色
 //! 它自己从主题读）；它要窗口办的事（文件树定位、出现收起和到最前时重排窗口、开关变了要存档、把路径打进
@@ -13,13 +13,13 @@ use std::{
 use crate::preview_panel::{Input, PreviewEvent, PreviewPanel};
 use gpui::{
     AnyElement, App, Context, Empty, Entity, EntityId, Focusable as _, IntoElement as _, ParentElement as _, Pixels,
-    Point, StyleRefinement, Styled as _, Window, div,
+    Point, Styled as _, Window, div,
 };
 use runode_config::PreviewClick;
 
 pub(in crate::window) use crate::preview_panel::DiffTarget;
 
-use super::{WindowView, cards, status_bar};
+use super::{WindowView, cached_page, cards, status_bar};
 use crate::WorkspaceId;
 use crate::{config::AppConfig, project_host::ProjectHost};
 
@@ -231,7 +231,7 @@ impl WindowView {
     /// 当前 workspace 的预览，宽 `width`，盖满终端区。没有标签时什么也不画。
     ///
     /// 缓存：它盖着的终端一输出窗口就重画，预览只在自己的标签、编辑、高亮这些变了时重画。辅助工具开着时
-    /// 不缓存，理由同 `cached_slot`。
+    /// 不缓存：照搬上一帧时跳过 prepaint，报给辅助工具的节点就丢了。
     pub(super) fn render_preview(&mut self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.preview_shown(cx) {
             return Empty.into_any_element();
@@ -249,11 +249,7 @@ impl WindowView {
             let preview = self.preview.clone();
             cx.defer(move |cx| preview.update(cx, |_, cx| cx.notify()));
         }
-        let preview = if window.is_a11y_active() {
-            self.preview.clone().into_any_element()
-        } else {
-            self.preview.clone().cached(StyleRefinement::default().size_full()).into_any_element()
-        };
+        let preview = cached_page(self.preview.clone(), window);
         div().absolute().top_0().left_0().size_full().child(preview).into_any_element()
     }
 

@@ -12,8 +12,8 @@ use std::{
 
 use gpui::{
     Action, AnyElement, App, Context, CursorStyle, Div, DragMoveEvent, EntityId, ExternalPaths, Focusable, FontWeight,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, StyleRefinement, Window, canvas, div,
-    prelude::*, px, relative,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Role, SharedString, Stateful, Window, canvas, div, prelude::*, px,
+    relative,
 };
 use runode_protocol::SessionId;
 use runode_types::{
@@ -72,7 +72,7 @@ pub(super) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64)
 }
 
-/// 驱动方怎么称呼：`name_of` 给出它所在会话的称呼（见 `WindowView::session_label`），找不到那个
+/// 驱动方怎么称呼：`name_of` 给出它所在会话的称呼，找不到那个
 /// 终端时是会话标识的前 8 位；不在 runode 的终端里跑的程序为 `None`。
 fn driver_name(by: Option<&str>, name_of: impl Fn(SessionId) -> Option<String>) -> Option<String> {
     let by = by?;
@@ -339,16 +339,8 @@ impl WindowView {
             .relative()
             .when(!cards, |terminal| terminal.size_full())
             // 终端自己没变时复用上一帧画好的内容：别的终端有输出、分屏标题上的转圈每动一格，上面的
-            // `WindowView` 都要重画，不缓存的话每一下都要把所有终端格子重新排一遍。辅助工具在读时
-            // 不缓存：GPUI 复用缓存时不重新报无障碍节点，没重画的那几帧里整个终端（屏幕文字）
-            // 会从树里消失。
-            .map(|terminal| {
-                if window.is_a11y_active() {
-                    terminal.child(view.clone())
-                } else {
-                    terminal.child(view.clone().cached(StyleRefinement::default().size_full()))
-                }
-            })
+            // `WindowView` 都要重画，不缓存的话每一下都要把所有终端格子重新排一遍。
+            .child(super::cached_page(view, window))
             .child(
                 canvas(
                     move |bounds, _, _| {
@@ -396,7 +388,7 @@ impl WindowView {
             return pane_group(terminal.id(("pane", id)), label, mark, split, focused).into_any_element();
         }
         let group = SharedString::from(format!("pane-{}", id.as_u64()));
-        // 折叠的分屏只画标题条（摆在终端区底部，见 `render_panes`），终端不画；位置照样记下，按方向
+        // 折叠的分屏只画标题条（摆在终端区底部），终端不画；位置照样记下，按方向
         // 切换时能切过去。
         if split && tab.folded(id) {
             let layout = self.layout.clone();
@@ -621,7 +613,7 @@ impl WindowView {
                     this.confirm_close_pane(id, window, cx);
                 },
             ))
-            // 不能用 display 切换，见 `render_tab` 里关闭按钮的说明。
+            // 不能用 display 切换：悬停状态在 prepaint 和 paint 之间可能变化，会去画没 prepaint 过的子元素。
             .when(!(current && split) && !folded && !floating, |buttons| buttons.reveal_on_hover(group));
         let dragged = DraggedPane::new(id, name.clone());
         // 报成以分屏名字命名的一组，里面的按钮在辅助工具里有了所属，各分屏的同一种按钮分得清。
@@ -716,7 +708,7 @@ impl WindowView {
         }
     }
 
-    /// 快捷键和菜单：折叠当前分屏；切过去看的折叠分屏（见 `Tab::folded`）就地展开。经典样式没有
+    /// 快捷键和菜单：折叠当前分屏；切过去看的折叠分屏就地展开。经典样式没有
     /// 标题条可收，放大着时别的分屏都看不见，都不办。
     pub(super) fn toggle_pane_fold(&mut self, _: &TogglePaneFold, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tab_mut() else {

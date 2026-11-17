@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 
 use crate::host_client::hosts::HostId;
 use crate::kanban::{AgentMarks, Host, Input, Kanban, KanbanEvent, TodoDialog};
-use gpui::{AnyElement, App, Context, Entity, Focusable as _, StyleRefinement, Subscription, Window, prelude::*};
+use gpui::{AnyElement, App, Context, Entity, Focusable as _, Subscription, Window, prelude::*};
 use runode_protocol::{SessionId, todo::Todo};
 
 use super::{
     AGENT_MARK_SIZE, NewTodo, ToggleKanban, ToggleSchedules, WindowView,
     agents::{self, Mark},
-    remote,
+    cached_page, remote,
     titlebar::agent_mark,
 };
 use crate::{config::AppConfig, host_client, terminal_view::TerminalView};
@@ -34,7 +34,7 @@ const AGENT_MARKS: AgentMarks = AgentMarks {
     describe: |agent| Mark::new(agent, false).describe(),
 };
 
-/// 在后台跟着看板，见 `kanban::watch`：经 `host_client` 和宿主说话，宿主说变了就重问。
+/// 在后台跟着看板：经 `host_client` 和宿主说话，宿主说变了就重问。
 pub fn watch_todos(cx: &mut App) {
     let host = Host {
         ask: |step| host_client::ask_todos(step),
@@ -281,13 +281,7 @@ impl WindowView {
             let board = board.clone();
             cx.defer(move |cx| board.update(cx, |_, cx| cx.notify()));
         }
-        // 缓存：窗口跟着终端输出、标题、转圈几乎每帧都重画，看板只在自己的数据、悬停、动画变了时重画。辅助工具
-        // 开着时不缓存，理由同 `cached_slot`。
-        let page = if window.is_a11y_active() {
-            board.into_any_element()
-        } else {
-            board.cached(StyleRefinement::default().size_full()).into_any_element()
-        };
+        let page = cached_page(board, window);
         self.render_page_body(page, true, window, cx)
     }
 
