@@ -10,8 +10,9 @@ description: 提交前把 Android app 的改动真正跑起来验证：先做单
 几条规矩：
 
 - **宿主只用沙盒里的。** app 要连的宿主一律经本目录的 `scripts/android.sh host` 起，它交给根目录 verify skill 的 `sandbox.sh`（换掉 `HOME`，不碰用户正在用的 `~/.runode`）。远程访问只听 `127.0.0.1`，端口用 `REMOTE_PORT`（默认和正式版的不同），局域网里看不到它。不要让 app 去配对用户自己的电脑。
-- **只用模拟器。** 脚本只认 `emulator-*`，连着的真机不碰。真机验证要用户自己连好手机、点头之后另说，不是默认做法。
-- **不动模拟器上已有的东西。** 不卸载、不 `pm clear`、不清 logcat（日志按时间过滤）；`installDebug` 是覆盖安装，app 原有的数据留着。配对会往 app 的电脑列表里加一台，`stop` 时还原成配对前的样子。模拟器由脚本起时不读写快照，AVD 平时的快速启动存档不受影响。
+- **只用专用的 AVD。** 用户自己的模拟器上的 app 可能已经和用户的电脑配过对，在那里装、启动、点按会连上用户真的终端，所以脚本只用一台专用 AVD（名字见脚本说明里的 `RUNODE_VERIFY_AVD`），别的模拟器、AVD 和连着的真机一律不碰；专用 AVD 被别处开着时 `boot` 报错，不去用它。真机验证要用户自己连好手机、点头之后另说，不是默认做法。
+- **每轮从干净的 app 开始。** `boot` 清掉专用模拟器上 app 的数据（`pm clear`），这一轮的 app 只认得沙盒宿主；`pair` 给 app 开相机权限（模拟器的相机是假的），免得配对页的权限框盖住确认页。不清 logcat，日志按时间过滤。
+- **专用 AVD 留着复用。** 第一次 `boot` 时没有它就用本机已装的系统镜像建一台（ABI 和这台电脑相同、API 不低于 app 的 `minSdk`，优先不高于 `targetSdk` 的最高版本），不下载镜像；一个合适的都没装时报错，说要装哪一份。它放在 `~/.android/avd/`（设了 `ANDROID_AVD_HOME` 时在那下面），跑过一轮约占 3 GB。不想要了就在 `stop` 之后 `avdmanager delete avd -n <专用 AVD 的名字>`，下次 `boot` 再建。
 - **自己起的自己关。** 不管验证成败，最后一定跑 `android.sh stop`。
 
 下面的 `$A` 指 `apps/android/.claude/skills/verify/scripts/android.sh`。Bash 工具的每条命令不保留变量，`A=` 要和用到它的命令写在同一条里，或者直接写路径。
@@ -30,7 +31,7 @@ description: 提交前把 Android app 的改动真正跑起来验证：先做单
 
 lint 报告（`<模块>/build/reports/lint-results-debug.txt`）里本来就有一批 warning，看总数判断不了；`lint-changed` 只列改动的文件（相对 HEAD，含未跟踪的）上的问题，有就退出码为 1，报告比改动旧时会提醒重跑。lint 的 error（比如译文缺了、多了的 `MissingTranslation`、`ExtraTranslation`）直接让 `check` 失败。Kotlin 编译的 `w:` 行也算 warning。新的 warning 一律当失败处理。
 
-拨号库的 clippy 要按 Android 目标跑才走得到 `cfg(target_os = "android")` 的代码，经 cargo-ndk，且要用 `rust-toolchain.toml` 定的那个工具链（PATH 上另有 Homebrew 的 cargo 时会报缺 Android 目标）：
+拨号库的 clippy 要按 Android 目标跑才走得到 `cfg(target_os = "android")` 的代码，经 cargo-ndk，且要用 `rust-toolchain.toml` 定的那个工具链（PATH 上另有 Homebrew 的 cargo 时会报缺 Android 目标）。第一次要把 iroh 一整棵依赖按 Android 目标查一遍，约 5 分钟，之后不到 1 秒：
 
 ```sh
 PATH="$(dirname "$(rustup which cargo)"):$HOME/.cargo/bin:$PATH" \
@@ -38,7 +39,7 @@ ANDROID_NDK_HOME="$ANDROID_HOME/ndk/<libs.versions.toml 里 ndk 的版本>" CARG
 cargo ndk -t arm64-v8a -P 31 clippy -p runode-android-tunnel --locked -- -D warnings
 ```
 
-设备测试（`androidTest`，`terminal`、`connection`、`features`、`speech` 有）要先 `$A boot`，再在 `apps/android` 里跑 `ANDROID_SERIAL=<序列号> ./gradlew connectedDebugAndroidTest`；改了这几个模块里有设备测试覆盖的部分（JNI、VT、Keystore、录音）时跑。它只装、卸各模块自己的测试包，不动 app。识别模型的测试在设备上没放模型时跳过。
+设备测试（`androidTest`，`terminal`、`connection`、`features`、`speech` 有）要先 `$A boot`，再在 `apps/android` 里跑 `ANDROID_SERIAL=<序列号> ./gradlew connectedDebugAndroidTest`，约 40 秒；改了这几个模块里有设备测试覆盖的部分（JNI、VT、Keystore、录音）时跑。跑完模拟器上装的包和跑之前一样，开着的 app 也不受影响。识别模型的测试在设备上没放模型时跳过。
 
 ## 第二步：准备和构建
 
@@ -56,7 +57,7 @@ $A prereqs
 | --- | --- | --- | --- |
 | libghostty-vt | `vendor/ghostty` 在编完之后换过提交（子模块的 HEAD 比产物新），或者子模块里有比产物新的未提交改动 | `make android-vt` | 约 1 分钟 |
 | librunode_tunnel.so | `apps/android/tunnel` 下有比它新的文件。`Cargo.lock` 比它新时只提醒：iroh、jni、tokio 这些它用的依赖变了才要重编 | `make android-tunnel` | 两个 ABI 约 1.5 分钟 |
-| sherpa-onnx | 取出来的 `VERSION` 和 `scripts/fetch-sherpa-onnx.sh` 里写的版本不同 | `make android-speech` | 下载过的按哈希核对后直接解压 |
+| sherpa-onnx | 取出来的 `VERSION` 和 `scripts/fetch-sherpa-onnx.sh` 里写的版本不同 | `make android-speech` | `build/downloads` 里已有那个版本时不到 1 秒，否则要下载 |
 
 调试包：`./gradlew :app:assembleDebug`，产物 `app/build/outputs/apk/debug/app-debug.apk`。下一步的 `$A install` 会顺带构建，一般不用单独跑。
 
@@ -64,8 +65,8 @@ $A prereqs
 
 ```sh
 A=apps/android/.claude/skills/verify/scripts/android.sh
-$A boot      # 没有开着的模拟器时起一台 AVD（不开窗口），等到开机完成；已经开着就用它
-$A install   # ./gradlew :app:installDebug 覆盖安装到这台模拟器
+$A boot      # 起专用 AVD（没有就先建；不开窗口），等到开机完成，清掉 app 的数据；本脚本起的还开着就接着用
+$A install   # ./gradlew :app:installDebug 覆盖安装到专用模拟器
 $A launch    # 冷启动 app，等到进程在、MainActivity 在前台
 $A host      # 沙盒宿主 + 远程访问（只听 127.0.0.1）
 $A pair      # 把配对链接交给 app，等到确认页出来；接着让 mobile-operator 点「配对」
@@ -73,16 +74,17 @@ $A paired    # 等宿主那边报配好了
 $A rn ...    # 在沙盒里跑命令行，比如 $A rn list、$A rn open --cwd <沙盒目录>
 $A logs      # app 的崩溃、ANR、E/F 行，和宿主日志；有问题时退出码为 1
 $A shot /tmp/x.png   # 截一张屏
-$A status    # 模拟器、app、宿主、配对进程现在怎样
-$A stop      # 还原 app 的电脑列表，关宿主、删沙盒，关掉 boot 起的模拟器
+$A status    # 专用 AVD、app、宿主、配对进程现在怎样
+$A stop      # 结束配对进程，关宿主、删沙盒，关掉 boot 起的模拟器
 ```
 
 不带参数运行看完整说明和环境变量。要点：
 
-- **模拟器。** `boot` 用 `AVD` 指定的那台，没给时用 `emulator -list-avds` 的第一台；开着好几台时用 `ANDROID_SERIAL` 选。它打印序列号（一般是 `emulator-5554`），后面交给 mobile-operator。不读写快照，每次冷启动，本机量的是 17～42 秒；上限 `BOOT_SECS`。想看着它跑时 `WINDOW=1 $A boot`。只有 `boot` 自己起的模拟器 `stop` 才关；`KEEP_EMULATOR=1 $A stop` 留着它下一轮接着用，之后的 `stop` 照样关。
-- **装和启动。** `install` 约 11～16 秒（APK 有一百多 MB，原生库占大头）。`launch` 带 `am start -S`，每次都是新进程，约 2～3 秒；它记下第一次启动的时刻，`logs` 从那里看起。
+- **模拟器。** `boot` 挑一个空闲的模拟器端口起专用 AVD，序列号就是 `emulator-<端口>`，打印出来，后面交给 mobile-operator；之后的命令按 AVD 名字认这台，不用给序列号。不读写快照，每次冷启动，约 20 秒，第一次建好后的头一回开机约 1 分钟；上限 `BOOT_SECS`。想看着它跑时 `WINDOW=1 $A boot`。只有 `boot` 自己起的模拟器 `stop` 才关，关之前核对进程和 AVD 名字；`KEEP_EMULATOR=1 $A stop` 留着它下一轮接着用，下一轮的 `boot` 照样清 app 的数据，之后的 `stop` 照样关。
+- **装和启动。** `install` 约 10～15 秒（APK 有一百多 MB，原生库占大头）。`launch` 带 `am start -S`，每次都是新进程，约 2～3 秒；它记下第一次启动的时刻，`logs` 从那里看起。
 - **连宿主。** 模拟器里的 `10.0.2.2` 就是这台电脑的 `127.0.0.1`。`host` 往沙盒的配置文件写远程访问的几项（只听 `127.0.0.1`、端口 `REMOTE_PORT`、电脑名 `runode-verify`），宿主几秒内自己开监听，`host` 等到端口开出来，约 1～2 秒。`pair` 在沙盒里后台跑 `runode remote pair --addr 10.0.2.2`，把它打印的 `runode://pair?…` 链接经 `am start` 交给 app，等到界面里出现电脑名才返回，约 1～3 秒。配对链接几分钟后过期，过期了重跑 `pair`。
-- **沙盒目录** 默认 `/tmp/runode-verify-android-<工作树路径的短哈希>`，和桌面验证用的分开；脚本的状态（模拟器的 pid 和日志、配对输出、启动时刻）在它旁边的 `.state` 目录。
+- **沙盒目录** 默认 `/tmp/runode-verify-android-<工作树路径的短哈希>`，和桌面验证用的分开；脚本的状态（模拟器的 pid、序列号和日志、配对输出、启动时刻）在它旁边的 `.state` 目录。`KEEP=1 $A stop` 留着沙盒目录、配对输出和模拟器日志。
+- **超时。** 每条等待都有上限，单次 adb 调用（`getprop`、`am start -W`、界面树、截图）也有，卡住时报「等了 … 秒还没完」和那条命令。
 
 ## 第四步：走主流程
 
@@ -91,13 +93,13 @@ $A stop      # 还原 app 的电脑列表，关宿主、删沙盒，关掉 boot 
 - 设备是 `$A boot` 打印的序列号，App 是 `dev.runode.mobile`。
 - 界面语言跟着模拟器的系统语言，下面写的是中文界面的字，英文界面对应 `features/src/main/res/values/strings.xml` 里的那条。
 - 截图存到会话的 scratchpad 目录，不放进沙盒（`stop` 会删沙盒）。
-- 不做不可逆的事：不卸载、不清数据、不改系统设置、不在 app 里删别的电脑、不给 app 开通知以外的系统权限；配对只配 `runode-verify` 这一台。
+- 只在这台专用模拟器上操作，不碰别的设备；不改系统设置，不给 app 开通知以外的系统权限（相机权限 `pair` 已经给了）；配对只配 `runode-verify` 这一台。
 
 ### 启动和首页（任何改动都走）
 
-`$A boot && $A install && $A launch`，然后 `$A shot` 截一张自己看，或者让 mobile-operator 读屏：没有配对过的电脑时首页是「连接你的电脑」和「配对电脑」按钮；模拟器上原来就配过别的电脑时是电脑列表，照样算正常。
+`$A boot && $A install && $A launch`，然后 `$A shot` 截一张自己看，或者让 mobile-operator 读屏：`boot` 清过数据，首页是「连接你的电脑」和「配对电脑」按钮；同一轮里配过 `runode-verify` 之后是电脑列表。
 
-只改了界面、又用不着真的宿主时，可以用调试构建的演示模式，不起宿主：`DEMO=<词> $A launch`，词见 `DemoComposition` 的文档（`list` 会话列表、`terminal` 等回答的终端、`shell` 普通 shell、`git`、`picker` 选目录、`settings` 设置页、`pair`、`paired` 配对页，加 `light` 浅色主题、`offline` 断线），用逗号连几个。演示的数据是写死的，换词要重新 `launch`。
+只改了界面、又用不着真的宿主时，可以用调试构建的演示模式，不起宿主：`DEMO=<词> $A launch`，词见 `DemoComposition` 的文档（`list` 会话列表、`terminal` 等回答的终端、`shell` 普通 shell、`git`、`picker` 选目录、`settings` 设置页、`pair`、`paired` 配对页，加 `light` 浅色主题、`offline` 断线），用逗号连几个。演示的数据是写死的，换词要重新 `launch`；`launch` 返回时假连接可能还没「连上」，页面显示「未连接」，过一两秒才有内容。
 
 ### 配对（`connection` 的 `Pairing`、`GateClient`、`Link`，`protocol` 的 `PairingInvitation`、`Gate`，`PairingModel`、`PairingView`）
 
@@ -140,7 +142,7 @@ mkdir -p "$D" && git -C "$D" init -q && echo a >"$D/a.txt" && git -C "$D" add a.
 $A rn open --cwd "$D"
 ```
 
-mobile-operator 在会话列表里打开这个会话的 Git 页：`a.txt` 在未暂存的改动里，点开看到加了一行 `b`。界面细节可以先用 `DEMO=git` 看。
+mobile-operator 在会话列表里点开路径是 `…/repo` 的那一行，终端页右上的「…」菜单里点「Git」：标题 `repo`，「改动 1」下有 `a.txt`，标 `M`、`+1`。改到 diff 或提交时再点开文件、在「提交说明」里写字后点「提交全部 1 个改动」，`git -C "$D" log --oneline` 里多一条。界面细节可以先用 `DEMO=git` 看。
 
 ### 这里验不到的
 
@@ -154,7 +156,7 @@ mobile-operator 在会话列表里打开这个会话的 Git 页：`a.txt` 在未
 - `prereqs` 全是 `ok`（重编过的写明重编了哪份）；
 - `launch` 成功；走过的每条流程，mobile-operator 的逐步结果和截图都和预期一致，配对时 `paired` 成功；
 - `$A logs` 退出码为 0：crash 缓冲区里没有 `dev.runode.mobile`，没有 ANR，沙盒宿主没有 ERROR、panic；app 的 E 行逐条看过、能解释；
-- `$A stop` 之后 `$A status` 显示没有本脚本起的模拟器、远程访问没在听、沙盒没有了。
+- `$A stop` 之后 `$A status` 显示专用模拟器没开、远程访问没在听、沙盒没有了。
 
 `logs` 里常见、和改动无关的行：没有 `google-services.json` 时 `FirebaseApp` 的初始化 warning，`ashmem` 的 `Pinning is deprecated`，`hiddenapi` 访问 `AccessibilityNodeInfo` 的 selection（mobile-operator 读界面树时出现），离开配对页时相机预览的 `BufferQueue has been abandoned` 和 CameraX 的 `underreport`；宿主日志里只听 `127.0.0.1` 时 `cannot advertise remote access over Bonjour` 的 WARN。
 
@@ -163,8 +165,8 @@ mobile-operator 在会话列表里打开这个会话的 Git 页：`a.txt` 在未
 失败时先看哪里：
 
 - Gradle 报「找不到 …libghostty-vt.a / librunode_tunnel.so / sherpa-onnx」：照 `prereqs` 说的 `make android-*` 重编。
-- `boot` 超时或模拟器退出：看 `.state` 目录里的 `emulator.log`（`KEEP=1 $A stop` 留着它）；同一台 AVD 已经在 Android Studio 里开着时会撞锁，直接用开着的那台。
-- `install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`：模拟器上装的是签名不同的包（比如 release 构建），卸载会丢 app 的数据，先问用户。
+- `boot` 超时或模拟器退出：看 `.state` 目录里的 `emulator.log`（`KEEP=1 $A stop` 留着它）。`boot` 报专用 AVD 已经开着、不是这个工作树起的：别的工作树在用时等它 `stop`；没人用时（比如 Android Studio 里开着它）关掉再来。报没有能用的系统镜像：照它说的在 SDK Manager 里装一份。
+- `install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`：专用模拟器上装的是签名不同的包（比如 release 构建），`adb -s <序列号> uninstall dev.runode.mobile` 再装。
 - `launch` 等不到前台、或 `logs` 报崩溃：crash 缓冲区那段就是堆栈；原生崩溃看 `adb -s <序列号> logcat -d -b crash` 里的 `Fatal signal` 和 backtrace，多半是三份原生库和代码对不上，先 `prereqs`。
 - `pair` 等不到确认页：`$A shot` 看停在哪；`$A logs` 看宿主日志里有没有 `remote access listening on [127.0.0.1:<端口>]`。`paired` 超时：确认页上的「配对」点了没有；app 里报配对失败时看宿主日志里 `runode_remote::gate` 的行。
 - `host` 报端口被占：换个 `REMOTE_PORT`（`host`、`pair`、`status` 都要带同一个值）。

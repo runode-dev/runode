@@ -19,12 +19,13 @@
 #   shot     模拟器截图存到 FILE
 #   down     停 pair、关沙盒宿主（删沙盒目录）、关 app；模拟器在 up 之前关着就关机；删状态目录
 #
+# 专用模拟器只有一台，同一时间只给一个工作树用：up 记下是哪个工作树，在它 down 之前，别的工作树跑读状态的
+# 子命令（up、launch、pair、paired、status、logs、shot、down）都报错。
+#
 # 环境变量：
 #   RUNODE_VERIFY_SIM       专用模拟器的名字，默认 Runode Verify，要以它开头
 #   RUNODE_VERIFY_SIM_TYPE  建专用模拟器时的机型名，比如 "iPad Pro 11-inch (M5)"；默认最新 iOS 上第一台 iPhone 的机型
 #   RUNODE_VERIFY_HOME      沙盒目录，默认 /tmp/runode-ios-<工作树路径的短哈希>，和桌面验证的沙盒分开
-#
-# 专用模拟器只有一台，同一时间只给一个工作树用：up 记下是哪个工作树，别的工作树的 up 在它 down 之前报错。
 #   READY_SECS              等 app 连上界面、等远程访问监听的上限，默认 30 秒
 #   BOOT_SECS               等模拟器开机的上限，默认 180 秒
 #   PAIR_SECS               paired 等配对的上限，默认 60 秒
@@ -117,8 +118,17 @@ print("Missing")
 ' "$1"
 }
 
+# 状态目录归别的工作树（它跑的 up）时报错；没有状态或归本工作树时什么都不做。
+check_owner() {
+    local owner
+    owner="$(cat "$STATE/root" 2>/dev/null || true)"
+    [ -z "$owner" ] || [ "$owner" = "$ROOT" ] ||
+        die "专用模拟器正被工作树 ${owner} 用着（状态目录 ${STATE}），到那边操作，或等那边 sim.sh down 之后再来；那个工作树已经不在时，删掉 ${STATE} 再来"
+}
+
 # up 记下的 UDID；没跑过 up 时报错。
 state_udid() {
+    check_owner
     [ -s "$STATE/udid" ] || die "还没跑 sim.sh up"
     cat "$STATE/udid"
 }
@@ -145,16 +155,16 @@ gui_running() { pgrep -qx DeviceHub || pgrep -qx Simulator; }
 # 等 app 进程 $1 连上界面：SpringBoard 记下它的场景连上了（启动参数处理完、首页开始画）。最多 READY_SECS 秒，
 # 进程先退出就报错。$2 是启动前的时间，查日志从这里开始。
 wait_ready() {
-    local udid pid="$1" since="$2" deadline
+    local udid pid="$1" since="$2" deadline connected
     udid="$(state_udid)"
     deadline=$((SECONDS + READY_SECS))
     while :; do
         kill -0 "$pid" 2>/dev/null || die "app（pid ${pid}）在连上界面前退出了，看 sim.sh logs"
-        if xcrun simctl spawn "$udid" log show --start "$since" --style compact --predicate \
+        # 先收完整输出再匹配：直接管给 grep -q 时 grep 提前退出，log show 吃 SIGPIPE，pipefail 下这一轮判失败。
+        connected="$(bounded "$READY_SECS" xcrun simctl spawn "$udid" log show --start "$since" --style compact --predicate \
             "process == \"SpringBoard\" AND eventMessage CONTAINS \"Client process connected\" AND eventMessage CONTAINS \":${pid}]\"" \
-            2>/dev/null | grep -q ":${pid}]"; then
-            return 0
-        fi
+            2>/dev/null || true)"
+        case "$connected" in *":${pid}]"*) return 0 ;; esac
         [ "$SECONDS" -lt "$deadline" ] || die "等了 ${READY_SECS} 秒 app（pid ${pid}）还没连上界面，截个图看看：sim.sh shot /tmp/x.png"
         sleep 0.5
     done
@@ -168,10 +178,8 @@ launched_pid() {
 }
 
 cmd_up() {
-    local udid since out pid
-    if [ -s "$STATE/root" ] && [ "$(cat "$STATE/root")" != "$ROOT" ]; then
-        die "专用模拟器正被 $(cat "$STATE/root") 用着，等那边 sim.sh down 之后再来"
-    fi
+    local udid since pid
+    check_owner
     mkdir -p "$STATE"
     echo "$ROOT" >"$STATE/root"
     udid="$(ensure_udid)"
@@ -188,8 +196,11 @@ cmd_up() {
     # 全新安装：配过的电脑、设置都清掉，只会连这次的沙盒宿主。
     xcrun simctl terminate "$udid" "$BUNDLE" 2>/dev/null || true
     xcrun simctl uninstall "$udid" "$BUNDLE"
-    out="$(IOS_SIM="$udid" "$IOS/scripts/run-simulator.sh")"
-    pid="$(launched_pid "$(tail -n 1 <<<"$out")")"
+    if ! IOS_SIM="$udid" "$IOS/scripts/run-simulator.sh" >"$STATE/build.log" 2>&1; then
+        tail -n 40 "$STATE/build.log" >&2
+        die "构建、安装或启动失败，上面是输出末尾，完整的在 $STATE/build.log"
+    fi
+    pid="$(launched_pid "$(grep "^${BUNDLE}: " "$STATE/build.log" | tail -n 1 || true)")"
     echo "$pid" >"$STATE/app.pid"
     wait_ready "$pid" "$since"
     echo "app 就绪：pid ${pid}，模拟器「${NAME}」${udid}，bundle id $BUNDLE"
@@ -199,7 +210,7 @@ cmd_launch() {
     local udid since out pid
     udid="$(state_udid)"
     since="$(now)"
-    out="$(xcrun simctl launch --terminate-running-process "$udid" "$BUNDLE" "$@")"
+    out="$(bounded "$READY_SECS" xcrun simctl launch --terminate-running-process "$udid" "$BUNDLE" "$@")"
     pid="$(launched_pid "$out")"
     echo "$pid" >"$STATE/app.pid"
     wait_ready "$pid" "$since"
@@ -231,20 +242,28 @@ cmd_host() {
     echo "远程访问就绪：127.0.0.1:$(listener_field port)，电脑名 $HOST_NAME"
 }
 
+# 进程 $1 是不是 cmd_pair 起的那个 sandbox.sh：pair 配上后自己退出，记下的进程号可能已被别的进程复用。
+pair_alive() {
+    case "$(ps -p "$1" -o command= 2>/dev/null || true)" in
+        *"$SANDBOX_SH rn remote pair") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # 停掉还在等手机的 pair：它是 sandbox.sh 的子进程，收到 SIGTERM 时删掉口令文件再退出。
 stop_pair() {
     local pid i
     [ -s "$STATE/pair.pid" ] || return 0
     pid="$(cat "$STATE/pair.pid")"
     rm -f "$STATE/pair.pid"
-    kill -0 "$pid" 2>/dev/null || return 0
+    pair_alive "$pid" || return 0
     pkill -TERM -P "$pid" 2>/dev/null || true
     for ((i = 0; i < 50; i++)); do
-        kill -0 "$pid" 2>/dev/null || { echo "已停 pair（pid ${pid}）"; return 0; }
+        pair_alive "$pid" || { echo "已停 pair（pid ${pid}）"; return 0; }
         sleep 0.1
     done
     pkill -KILL -P "$pid" 2>/dev/null || true
-    kill -KILL "$pid" 2>/dev/null || true
+    if pair_alive "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
     echo "pair（pid ${pid}）5 秒内没退出，强制结束" >&2
 }
 
@@ -272,11 +291,13 @@ cmd_pair() {
 
 cmd_paired() {
     local deadline pid
+    check_owner
     [ -e "$STATE/pair.out" ] || die "还没跑 sim.sh pair"
     pid="$(cat "$STATE/pair.pid" 2>/dev/null || true)"
     deadline=$((SECONDS + PAIR_SECS))
     until grep -q '^Paired with' "$STATE/pair.out"; do
-        if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        # 退出前可能刚打完那一行，再看一眼。
+        if { [ -z "$pid" ] || ! pair_alive "$pid"; } && ! grep -q '^Paired with' "$STATE/pair.out"; then
             die "pair 没配上就退出了：$(tail -n 3 "$STATE/pair.out")"
         fi
         [ "$SECONDS" -lt "$deadline" ] || die "等了 ${PAIR_SECS} 秒还没配上；截个图看模拟器停在哪：sim.sh shot /tmp/x.png"
@@ -288,13 +309,14 @@ cmd_paired() {
 
 cmd_status() {
     local udid pid
+    check_owner
     echo "专用模拟器：${NAME}"
     udid="$(find_udid)"
     if [ -z "$udid" ]; then echo "  还没建"; else echo "  ${udid}，$(device_state "$udid")"; fi
     pid="$(cat "$STATE/app.pid" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "app：pid $pid"; else echo "app：没在跑（或已由别处重启）"; fi
+    if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q "/Runode.app/Runode"; then echo "app：pid $pid"; else echo "app：没在跑（或已由别处重启）"; fi
     pid="$(cat "$STATE/pair.pid" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "pair：在等手机，pid $pid"; else echo "pair：没在跑"; fi
+    if [ -n "$pid" ] && pair_alive "$pid"; then echo "pair：在等手机，pid $pid"; else echo "pair：没在跑"; fi
     # sandbox.sh 那行「app」说的是桌面 app，这里用不到。
     if [ -d "$SANDBOX" ]; then "$SANDBOX_SH" status | grep -v '^app：'; else echo "沙盒：不在（${SANDBOX}）"; fi
 }
@@ -320,13 +342,16 @@ cmd_logs() {
 }
 
 cmd_shot() {
+    local udid
     [ -n "${1:-}" ] || die "用法：sim.sh shot FILE"
-    xcrun simctl io "$(state_udid)" screenshot "$1" >/dev/null 2>&1 || die "截图失败"
+    udid="$(state_udid)"
+    xcrun simctl io "$udid" screenshot "$1" >/dev/null 2>&1 || die "截图失败"
     echo "截图：$1"
 }
 
 cmd_down() {
     local udid
+    check_owner
     stop_pair
     if [ -d "$SANDBOX" ]; then "$SANDBOX_SH" stop; fi
     if [ -s "$STATE/udid" ]; then

@@ -70,7 +70,7 @@ $I down                        # 停 pair、关沙盒宿主并删沙盒、关 ap
 - 耗时：没改代码时 `up` 约 40 秒，大头是 xcodebuild；第一次建模拟器那回开机要多等几十秒，再加上整个构建。`launch` 约 3 秒，`host` 加 `pair` 约 4 秒，`down` 约 2 秒。
 - 「连上界面」指 SpringBoard 的日志里出现了这个进程的场景连上，靠有上限的轮询（`READY_SECS`），进程先退出或超时都报错。这时首页刚开始画，演示数据和宿主的会话要再过一会儿才出来，截图或交给 mobile-operator 时让它等内容出现，不要据此判断空白。
 - `up` 时模拟器窗口（Xcode 里的 DeviceHub）会打开；`down` 时它原本没开、也没有别的模拟器开着就一起关掉。
-- 专用模拟器同一时间只给一个工作树用，另一个工作树 `up` 会报错，等这边 `down`。
+- 专用模拟器同一时间只给一个工作树用：一个工作树 `up` 之后、`down` 之前，另一个工作树跑 `up`、`launch`、`pair`、`paired`、`status`、`logs`、`shot`、`down` 都报错并说出是哪个工作树在用，不会动到那边的 app、pair 和状态。
 - 不管验证成败，**最后一定跑 `$I down`**，再用 `$I status` 确认 app、pair、宿主都没在跑。专用模拟器本身留着，下次开机只要几秒；不想要了用 `xcrun simctl delete "$($I device)"` 删掉。
 
 ## 第四步：走主流程
@@ -142,7 +142,7 @@ xcrun simctl spawn "$($I device)" log show --last 5m --style compact --predicate
 
 失败时先看哪里：
 
-- `up` 卡在构建：去掉 `-quiet` 手动跑 `IOS_SIM="$($I device)" apps/ios/scripts/run-simulator.sh` 看完整报错；报找不到 ghostty 的头文件或 xcframework 时重跑 `apps/ios/scripts/build-ghostty-vt.sh`。
+- `up` 构建失败：它打印构建输出的末尾和完整日志的路径（状态目录里，`down` 时一起删）；还看不明白就去掉 `-quiet` 手动跑 `IOS_SIM="$($I device)" apps/ios/scripts/run-simulator.sh` 看完整报错；报找不到 ghostty 的头文件或 xcframework 时重跑 `apps/ios/scripts/build-ghostty-vt.sh`。
 - 「在连上界面前退出了」：多半是启动就崩，等几秒跑 `$I logs` 看崩溃报告（报告写出来有延迟），打开 `.ips` 看 `exception` 和崩溃线程的栈。
 - 「还没连上界面」：`$I shot` 截图看停在哪，常见是系统弹窗挡着。
 - `paired` 超时：截图看手机停在哪一步；`$I status` 看 pair 还在不在等（配对口令过期就重跑 `$I pair`）；手机报连不上时看 `$I sandbox logs` 里宿主的远程访问日志，和 `$I host` 打印的端口对不对得上。

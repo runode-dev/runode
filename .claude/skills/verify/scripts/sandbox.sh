@@ -70,7 +70,7 @@ exe_of() { ps -p "$1" -o comm= 2>/dev/null || true; }
 # 拿着沙盒宿主锁文件的进程号，不管它是谁起的。
 lock_holder() {
     [ -e "$LOCK" ] || return 0
-    lsof -t -- "$LOCK" 2>/dev/null | head -n 1
+    lsof -t -- "$LOCK" 2>/dev/null | head -n 1 || true
 }
 
 # 沙盒的宿主：拿着锁、跑的是 $BIN 的那个进程。
