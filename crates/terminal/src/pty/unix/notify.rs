@@ -85,10 +85,10 @@ impl Notifier {
     }
 
     /// 结束 shell：先给终端的前台进程组 `foreground` 发 SIGHUP（shell 已经退出、前台程序还在时
-    /// 也发），再给 shell 的进程组发 SIGHUP，等一会儿还没退出就 SIGKILL。和自己的子进程那支的
-    /// `kill` 一样就在调用方的线程里等（最多 `HANGUP_GRACE`），SIGKILL 因此一定在进程退出前发出。shell 已经退出的
+    /// 也发），再给 shell 的进程组发 SIGHUP，等一会儿还没退出就 SIGKILL。就在调用方的
+    /// 线程里等（最多 `HANGUP_GRACE`），SIGKILL 因此一定在进程退出前发出。shell 已经退出的
     /// 不再给它发信号，免得进程号被别的进程重用后误杀；`foreground` 由调用方当场从终端读出、确认过
-    /// 属于 shell 的会话，见 `Pty` 的 `Drop`。
+    /// 属于 shell 的会话。
     pub(super) fn terminate(&self, foreground: Option<libc::pid_t>) {
         let Some(pid) = self.pid else {
             return;
@@ -265,12 +265,30 @@ fn gone(pid: libc::pid_t) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::process::{Command, Stdio};
+    use std::{
+        os::unix::process::CommandExt as _,
+        process::{Command, Stdio},
+    };
 
     use super::*;
 
+    /// `/bin/sleep 30`，按默认处理 SIGHUP：跑测试的进程可能忽略着 SIGHUP（`nohup`、后台任务），忽略会经 exec
+    /// 传给子进程，`terminate` 的 SIGHUP 就结束不了它。
+    fn sleep_command() -> Command {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30").stdin(Stdio::null());
+        // SAFETY: fork 之后的子进程里只调 async-signal-safe 的 `signal`。
+        unsafe {
+            command.pre_exec(|| {
+                libc::signal(libc::SIGHUP, libc::SIG_DFL);
+                Ok(())
+            });
+        }
+        command
+    }
+
     fn sleeper() -> std::process::Child {
-        Command::new("/bin/sleep").arg("30").stdin(Stdio::null()).spawn().unwrap()
+        sleep_command().spawn().unwrap()
     }
 
     fn pid_of(child: &std::process::Child) -> libc::pid_t {
@@ -333,9 +351,9 @@ mod tests {
     /// 结束一个进程组：SIGHUP 就够的话不再 SIGKILL。
     #[test]
     fn terminate_hangs_up_the_process_group() {
-        use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+        use std::os::unix::process::ExitStatusExt as _;
 
-        let mut child = Command::new("/bin/sleep").arg("30").stdin(Stdio::null()).process_group(0).spawn().unwrap();
+        let mut child = sleep_command().process_group(0).spawn().unwrap();
         let notifier = Notifier::new(Some(pid_of(&child))).unwrap();
         notifier.terminate(None);
         assert_eq!(child.wait().unwrap().signal(), Some(libc::SIGHUP));
@@ -345,7 +363,7 @@ mod tests {
     /// 也不会把它留下。
     #[test]
     fn terminate_kills_a_process_ignoring_sighup_before_returning() {
-        use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+        use std::os::unix::process::ExitStatusExt as _;
 
         // 忽略的信号经 exec 仍然忽略。
         let mut child = Command::new("/bin/sh")
@@ -373,11 +391,10 @@ mod tests {
     /// shell 已经退出、前台程序还在时，前台进程组照样收到 SIGHUP。
     #[test]
     fn terminate_hangs_up_the_foreground_after_the_shell_exited() {
-        use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+        use std::os::unix::process::ExitStatusExt as _;
 
         let mut shell = sleeper();
-        let mut foreground =
-            Command::new("/bin/sleep").arg("30").stdin(Stdio::null()).process_group(0).spawn().unwrap();
+        let mut foreground = sleep_command().process_group(0).spawn().unwrap();
         let notifier = Notifier::new(Some(pid_of(&shell))).unwrap();
         shell.kill().unwrap();
         shell.wait().unwrap();

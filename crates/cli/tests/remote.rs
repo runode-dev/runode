@@ -216,6 +216,10 @@ const CHILD_ROOT: &str = "RUNODE_TEST_PAIR_ROOT";
 #[test]
 fn ctrl_c_withdraws_the_pairing_code() {
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        // 被测的 `pair` 要按默认处理 SIGINT 才接得住它：跑测试的进程可能忽略着 SIGINT（后台任务），忽略会经 exec
+        // 传到这里。
+        // SAFETY: 只把一个信号换回默认处理，这时还没装别的处理函数。
+        unsafe { libc::signal(libc::SIGINT, libc::SIG_DFL) };
         let env = Env { dirs: Dirs::from_vars(|_| Some(root.clone())), build: "test".into(), ..Env::default() };
         std::process::exit(run("remote pair --addr 127.0.0.1", &env).0);
     }

@@ -143,8 +143,12 @@ mod tests {
         if let Ok(v6) = TcpListener::bind((Ipv6Addr::LOCALHOST, 0)) {
             assert!(!free(v6.local_addr().unwrap().port()));
         }
-        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
-        assert!(free(port));
+        // 放开的端口可能马上被并行的测试挑走，换几个再看。
+        let free_found = (0..8).any(|_| {
+            let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
+            free(port)
+        });
+        assert!(free_found);
     }
 
     #[test]
