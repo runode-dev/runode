@@ -235,6 +235,7 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{}: not a regular file", src.display())));
     }
     // 复制的过程中只有自己进得去，里面的都复制完了才设上源的权限：只读的目录先设上就写不进去了。
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);

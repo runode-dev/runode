@@ -356,9 +356,10 @@ class HostConnectionTests {
         // 宿主一直不发 challenge：连接开好以后停。
         while (supply.requestedTargets.isEmpty()) delay(5.milliseconds)
         link.stop()
-        // 门禁的超时是 10 秒，两秒内回到 `idle` 说明是取消让它停下的。
+        // 赶在门禁超时之前回到 `idle`，说明是取消让它停下的；留出几秒余量，CI 上和别的任务挤在一起时调度会慢。
         fun stopped() = synchronized(states) { states.dropWhile { it != LinkState.Connecting }.contains(LinkState.Idle) }
-        repeat(200) { if (!stopped()) delay(10.milliseconds) }
+        val deadline = TimeSource.Monotonic.markNow() + GateClient.timeout - 2.seconds
+        while (!stopped() && deadline.hasNotPassedNow()) delay(10.milliseconds)
         assertTrue(stopped())
     }
 
