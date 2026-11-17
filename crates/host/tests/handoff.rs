@@ -378,9 +378,38 @@ fn wait_file(path: &Path) -> String {
         {
             return text;
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {}", path.display());
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {}\n{}", path.display(), stuck_report(path.parent().unwrap()));
+        }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// 等不到角色进程的结果时报出现场：`dir` 里各角色的日志和 stderr，以及这个测试进程拉起的、还在跑的
+/// 角色进程此刻的调用栈（macOS 上用 `sample`）。交接偶尔在 CI 上卡住，失败输出里要带够找原因的东西。
+fn stuck_report(dir: &Path) -> String {
+    use std::fmt::Write as _;
+    let mut report = String::new();
+    let mut files: Vec<PathBuf> =
+        std::fs::read_dir(dir).map(|entries| entries.flatten().map(|entry| entry.path()).collect()).unwrap_or_default();
+    files.sort();
+    for file in files.iter().filter(|file| file.extension().is_some_and(|ext| ext == "log" || ext == "stderr")) {
+        let text = std::fs::read_to_string(file).unwrap_or_default();
+        if !text.trim().is_empty() {
+            let _ = writeln!(report, "--- {}\n{}", file.display(), text.trim_end());
+        }
+    }
+    if cfg!(target_os = "macos")
+        && let Ok(children) = Command::new("pgrep").args(["-P", &std::process::id().to_string()]).output()
+    {
+        for pid in String::from_utf8_lossy(&children.stdout).split_whitespace() {
+            let Ok(sample) = Command::new("/usr/bin/sample").args([pid, "1"]).output() else { continue };
+            let text = String::from_utf8_lossy(&sample.stdout);
+            let stacks = text.split("Binary Images:").next().unwrap_or_default();
+            let _ = writeln!(report, "--- stacks of process {pid}\n{}", stacks.trim_end());
+        }
+    }
+    report
 }
 
 /// 起一个单独进程的旧宿主，等它开始监听，返回它和 socket。
