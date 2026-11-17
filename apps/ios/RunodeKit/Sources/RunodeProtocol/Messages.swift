@@ -1,9 +1,10 @@
 import Foundation
 
-/// 宿主协议的版本，和宿主的 `PROTOCOL_VERSION` 一致。宿主在 `Hello` 里比对，对不上回 `Incompatible`。
+/// 宿主协议的版本，要等于宿主的 `runode_protocol::PROTOCOL_VERSION`：宿主在 `Hello` 里比对，对不上回
+/// `Incompatible`。
 public let protocolVersion: UInt32 = 4
 
-/// 连上会话时要什么，见宿主的 `AttachMode`。
+/// 连上会话时要什么，取值以宿主的 `runode_protocol::AttachMode` 为准。
 public enum AttachMode: String, Hashable, Sendable, Codable {
     /// 同一个构建才解得了的快照；iOS 的构建和宿主不同，用不上。
     case snapshot
@@ -13,7 +14,7 @@ public enum AttachMode: String, Hashable, Sendable, Codable {
     case metaOnly = "meta_only"
 }
 
-/// `Open` 的新终端放在桌面 app 里的哪里，见宿主的 `Placement`。
+/// `Open` 的新终端放在桌面 app 里的哪里，取值以宿主的 `runode_protocol::Placement` 为准。
 public enum Placement: String, Hashable, Sendable, Codable {
     /// 紧跟在旁边那个终端的标签后面的新标签。
     case tab
@@ -46,23 +47,23 @@ public enum ClientKind: String, Hashable, Sendable, Encodable {
     case mobile
 }
 
-/// 推送 token 所属的 APNs 环境，见宿主的 `push::ApnsEnv`：App Store、TestFlight 装的是 `production`，
-/// Xcode 直接装的是 `development`。
+/// 推送 token 所属的 APNs 环境，取值以 `runode_protocol::push::ApnsEnv` 为准：App Store、TestFlight
+/// 装的是 `production`，Xcode 直接装的是 `development`。
 public enum ApnsEnv: String, Hashable, Sendable, Encodable {
     case production
     case development
 }
 
-/// 推送经哪家的服务送到手机：iPhone 是 `apns`，Android 是 `fcm`。是 `apns` 时
-/// 不写出来，只认 APNs 的电脑和中转照旧读得懂。
+/// 推送经哪家的服务送到手机，取值以 `runode_protocol::push::PushService` 为准：iPhone 是 `apns`，
+/// Android 是 `fcm`。是 `apns` 时不写出来，只认 APNs 的电脑和中转照旧读得懂。
 public enum PushService: String, Hashable, Sendable, Encodable {
     case apns
     case fcm
 }
 
 /// 前端发给宿主的消息。只定义手机这个前端会发的几种；宿主对手机连接上的 `Shutdown`、交接、`UiReply`、
-/// `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。JSON 的样子和宿主的
-/// `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。
+/// `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。线上格式以宿主的
+/// `runode_protocol::ClientMsg` 为准，可缺省的字段也照宿主序列化的样子写出 `null`。
 public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 连上后的第一条消息。手机的 `client` 是 `mobile`，`caps` 只要 VT 重放。
     case hello(protocol: UInt32, build: String, client: ClientKind, caps: Caps, session: SessionId?, device: String?)
@@ -77,8 +78,8 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     /// 第一个终端；已经有这个目录的工作区时在它里面新开一个标签，回这个新终端。`focus` 为假时电脑上不切
     /// 过去。`name` 是新工作区在侧栏里的名字，为空时按目录取；已经有这个目录的工作区时不改它的名字。
     case openWorkspace(req: UInt32, dir: String, focus: Bool, name: String? = nil)
-    /// 把第 `window` 个窗口里的第 `workspace` 个工作区改名为 `name`，序号见 `WindowLayout`、
-    /// `WorkspaceLayout`。宿主转给桌面的界面，办好回 `Done`，办不成回带编号的 `Error`。
+    /// 把第 `window` 个窗口里的第 `workspace` 个工作区改名为 `name`，序号是 `WindowLayout`、
+    /// `WorkspaceLayout` 的序号。宿主转给桌面的界面，办好回 `Done`，办不成回带编号的 `Error`。
     case renameWorkspace(req: UInt32, window: UInt32, workspace: UInt32, name: String)
     /// 列电脑上一个目录（绝对路径）里的子目录，为空时是家目录，宿主回 `Dirs`，出错时回 `Error`。
     case listDirs(req: UInt32, path: String?)
@@ -90,7 +91,7 @@ public enum ClientMsg: Hashable, Sendable, Encodable {
     case findCommands(req: UInt32, path: String?, programs: [String])
     /// 新开一个会话；宿主回 `Spawned`，开好的会话要另外 `Attach`。
     case spawn(req: UInt32, size: GridSize, cwd: String?, integration: IntegrationMode, start: Bool)
-    /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互（见宿主的尺寸归属）。
+    /// 连上会话。`size` 为空时不改会话的尺寸，也不算一次交互。
     case attach(id: SessionId, size: GridSize?, mode: AttachMode)
     case detach(id: SessionId)
     /// 视图的尺寸变了：宿主改好后在输出流里标出 `Resized`。
@@ -338,14 +339,15 @@ public struct ShellReport: Hashable, Sendable, Decodable {
     }
 }
 
-/// 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 `unknown`（和宿主的
-/// `#[serde(other)]` 一样），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
+/// 宿主发给前端的消息，线上格式以宿主的 `runode_protocol::HostMsg` 为准。不认识的种类读成 `unknown`（宿主的
+/// `#[serde(other)]`），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的
 /// 请求、交接、跑完的命令）只解出编号，内容不读；`Welcome` 只读 `keep_awake`、`shells` 和 `paste_path`。
 public enum HostMsg: Hashable, Sendable, Decodable {
-    /// `error` 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。对应宿主的
-    /// `runode_protocol::ERROR_BACKED_UP`，是认错误种类的约定。
+    /// `error` 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。要是宿主的
+    /// `runode_protocol::ERROR_BACKED_UP` 的开头，否则认不出这种错误。
     public static let backedUpPrefix = "the connection is backed up"
-    /// `error` 以它开头：会话已经没了。对应宿主的 `runode_protocol::ERROR_NO_SESSION`。
+    /// `error` 以它开头：会话已经没了。要是宿主的 `runode_protocol::ERROR_NO_SESSION` 的开头，
+    /// 否则认不出这种错误。
     public static let noSessionPrefix = "no session"
 
     /// `keepAwake`：宿主认得 `ClientMsg.keepAwake`；`findsCommands`：宿主认得 `ClientMsg.findCommands`；

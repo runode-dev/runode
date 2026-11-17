@@ -488,4 +488,17 @@ import Testing
         try? await Task.sleep(for: TerminalModel.keepAwakeInterval * 2)
         #expect(link.keepAwakes == stopped)
     }
+
+    /// 断开时不发 `keepAwake`，连上了接着发。
+    @Test func keepAwakeWaitsForTheConnection() async throws {
+        let link = FakeLink()
+        link.isConnected = false
+        let model = TerminalModel(sessionId: sessionA, title: "zsh", link: link, onClose: { _ in })
+        model.open()
+        try? await Task.sleep(for: TerminalModel.keepAwakeInterval * 3)
+        #expect(link.keepAwakes == 0)
+        link.isConnected = true
+        #expect(await eventually { link.keepAwakes >= 1 })
+        model.close()
+    }
 }

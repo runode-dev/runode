@@ -162,7 +162,7 @@ public final class PushRegistration {
     /// 这台电脑连上了（`HostEvent.ready`）：登记一次；打开着提醒时先看系统还允不允许发通知，有了结果再登记。
     func connected(_ machine: MachineRecord, link: any HostLink) {
         peers[machine.id] = Peer(name: machine.name, link: link)
-        // 删掉了、等着注销的（见 `unregister`），连上了也不再登记。
+        // 删掉了、等着注销的，连上了也不再登记。
         if machine.deletedAt != nil { leaving.insert(machine.id) }
         if enabled {
             authorize(registering: [machine.id])
@@ -319,7 +319,7 @@ public final class PushRegistration {
     {
         /// 点开了一条等回答的通知。
         public var onOpen: @MainActor (SessionLink) -> Void = { _ in }
-        /// App 在前台时这条通知弹不弹，见 `AppModel.showsNotification(for:)`。
+        /// App 在前台时这条通知弹不弹。
         public var shows: @MainActor (SessionLink) -> Bool = { _ in true }
         private let tokens: AsyncStream<Data>
         private let tokenSink: AsyncStream<Data>.Continuation

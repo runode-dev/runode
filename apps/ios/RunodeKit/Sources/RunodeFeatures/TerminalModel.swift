@@ -4,7 +4,7 @@ import RunodeConnection
 import RunodeProtocol
 import RunodeTerminal
 
-/// 谁的视图尺寸决定这个会话的尺寸，见宿主的 `HostMsg::SizeOwner`。
+/// 谁的视图尺寸决定这个会话的尺寸（宿主的 `runode_protocol::HostMsg::SizeOwner`）。
 public enum SizeOwnership: Hashable, Sendable {
     case unknown
     /// 这部手机。
@@ -98,7 +98,7 @@ public final class TerminalModel {
     @ObservationIgnored private var generation: UInt64?
     @ObservationIgnored private var channel: UInt32?
     @ObservationIgnored private var awaitingAttach = false
-    /// 这一次 `Attach` 是怎么来的，见类型文档的「重新连上时不抢尺寸」。
+    /// 这一次 `Attach` 是怎么来的。
     @ObservationIgnored private var rejoin: Rejoin?
     /// 收到过 `Attached`：之后的 `ready` 是断线重连。
     @ObservationIgnored private var everAttached = false
@@ -115,18 +115,18 @@ public final class TerminalModel {
     @ObservationIgnored private let onOpen: @MainActor (SessionId) -> Void
     @ObservationIgnored private let onClose: @MainActor (SessionId) -> Void
     @ObservationIgnored private let onAnswerScreenChange: @MainActor (SessionId) -> Void
-    /// Claude Code 全屏界面的滚轮：按它的加速规则攒着发，见 `ClaudeWheelPacer`。
+    /// Claude Code 全屏界面的滚轮：按它的加速规则攒着发。
     @ObservationIgnored private var claudeWheel = ClaudeWheelPacer()
     @ObservationIgnored private var claudeWheelAnchor = (column: 0, row: 0)
     @ObservationIgnored private var claudeWheelRetry: Task<Void, Never>?
     /// 宿主因为积压不接订阅时，过一会儿再连的那次；关页面、断线、重新连时撤掉。
     @ObservationIgnored private var attachRetry: Task<Void, Never>?
-    /// 页面开着时按 `keepAwakeInterval` 发 `keepAwake`。
+    /// 页面开着、连接连着时按 `keepAwakeInterval` 发 `keepAwake`。
     @ObservationIgnored private var keepAwake: Task<Void, Never>?
     /// 间隔够短，iPhone 的 Wi-Fi 才一直醒着，不会省电到收发卡一两秒。
     static let keepAwakeInterval: Duration = .milliseconds(200)
 
-    /// `onOpen`、`onClose` 告诉会话列表终端页开始、不再看这个会话（见 `SessionListModel.screenOpened`）。
+    /// `onOpen`、`onClose` 告诉会话列表终端页开始、不再看这个会话。
     /// `ownerProbeDelay` 是 `ownerHint` 不为 `none` 时，重放完以后等宿主报 `SizeOwner` 的时间，等不到
     /// 就当作没有 owner。`linkState` 是这台电脑的连接状态，订阅到第一个事件之前标题下面照它显示。
     /// `onAnswerScreenChange` 在等回答（`isAwaitingAnswer`）时每收到一段输出调一次，来得很勤，要自己节流。
@@ -197,7 +197,7 @@ public final class TerminalModel {
         }
         keepAwake = Task {
             while !Task.isCancelled {
-                link.send(.keepAwake)
+                if link.isConnected { link.send(.keepAwake) }
                 try? await Task.sleep(for: Self.keepAwakeInterval)
             }
         }

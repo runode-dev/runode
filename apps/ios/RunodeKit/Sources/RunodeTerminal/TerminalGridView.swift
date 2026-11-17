@@ -286,7 +286,7 @@
         }
 
         /// 有直接字形的格子按同字体、同颜色攒成一段，一次 `CTFontDrawGlyphs` 画完，省掉逐格的状态保存、
-        /// 字形查找和排版。其余的格子（见 `plainGlyph`）由 `drawText` 逐格画。
+        /// 字形查找和排版。`plainGlyph` 给不出字形的格子由 `drawText` 逐格画。
         private func drawPlainGlyphs(row: Int, baseline: CGFloat, in context: CGContext) {
             context.saveGState()
             defer { context.restoreGState() }
@@ -322,8 +322,7 @@
             flush()
         }
 
-        /// 一个能直接画的字形：等宽字体里的画在格子左边；后备字体里的（中文等）带着宽度，在格子里居中
-        /// （同 `drawGlyphs` 的 CTLine 路径）。
+        /// 一个能直接画的字形：等宽字体里的画在格子左边；后备字体里的（中文等）带着宽度，在格子里居中。
         private struct PlainGlyph {
             let font: CTFont
             let glyph: CGGlyph
@@ -344,7 +343,7 @@
                 if CTFontGetGlyphsForCharacters(ctFont, &units, &glyphs, units.count), glyphs[0] != 0 {
                     plain = PlainGlyph(font: ctFont, glyph: glyphs[0], centeredAdvance: nil)
                 } else if !SymbolFont.isPrivateUse(scalar) {
-                    // 默认按文字画的字带上文字样式选择符去找，免得挑中彩色 emoji 字体（见 `TextPresentation`）。
+                    // 默认按文字画的字带上文字样式选择符去找，免得挑中彩色 emoji 字体。
                     let query = TextPresentation.prefersText(scalar) ? text + String(TextPresentation.selector) : text
                     let fallback = CTFontCreateForString(
                         ctFont, query as CFString, CFRange(location: 0, length: query.utf16.count))
@@ -359,7 +358,7 @@
             return plain
         }
 
-        /// 制表符、块元素和 Powerline 的几何分隔符按格子自己画（见 `BoxDrawing`、`BlockElement`、
+        /// 制表符、块元素和 Powerline 的几何分隔符按格子自己画（`BoxDrawing`、`BlockElement`、
         /// `PowerlineGlyph`）；不是这类字符时返回 false。Powerline 的形状左右各多画半个像素，盖住格子宽度
         /// 不是整像素时和相邻格子背景之间露出的缝。
         private func drawPowerline(_ text: String, in rect: CGRect, color: CGColor, context: CGContext) -> Bool {

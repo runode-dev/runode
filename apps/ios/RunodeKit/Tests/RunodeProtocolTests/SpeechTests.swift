@@ -2,7 +2,7 @@ import Foundation
 import RunodeProtocol
 import Testing
 
-/// 电脑那边 `runode_protocol::speech` 的样例，两边的测试读同一批文件。
+/// 宿主 `runode_protocol::speech` 的样例，两边的测试读同一批文件。
 enum SpeechSamples {
     static let directory = PushSamples.repository.appending(path: "crates/protocol/tests/fixtures/speech")
 

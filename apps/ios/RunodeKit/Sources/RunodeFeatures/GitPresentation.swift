@@ -3,7 +3,7 @@ import RunodeProtocol
 
 /// Git 页上给人看的文字。
 extension Presentation {
-    /// 文件状态的单字母标记，和电脑上 Git 面板的一样。
+    /// 文件状态的单字母标记，要和电脑上 Git 面板用的字母相同。
     public static func gitLetter(_ status: GitFileStatus) -> String {
         switch status {
         case .modified: "M"
@@ -126,7 +126,7 @@ public enum GitTreeItem: Hashable, Sendable {
 }
 
 extension Presentation {
-    /// 把一段改动的文件按目录分层排成行，和电脑上 Git 面板的树形式一样（`file_tree`）：目录在前、
+    /// 把一段改动的文件按目录分层排成行，排法要和电脑上 Git 面板的树形式（`file_tree`）相同：目录在前、
     /// 文件在后，各自按名字排（不分大小写）；只有一个子目录、没有文件的目录和子目录并成一行。
     /// `collapsed` 里的目录（并成一行的按最深的那个认）收起，下面的不排。
     public static func gitFileTree(_ files: [GitFile], collapsed: Set<String>) -> [GitTreeItem] {
@@ -236,11 +236,11 @@ extension Presentation {
         return segments
     }
 
-    /// 制表符对齐到这么多列的倍数，和电脑上 `runode_preview::TAB_WIDTH` 一样。
+    /// 制表符对齐到这么多列的倍数；要等于电脑上的 `runode_preview::TAB_WIDTH`，否则两边的 diff 对不齐。
     public static let gitTabWidth = 4
 
-    /// `old` 改成 `new` 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则和电脑上
-    /// 的 `changed_words` 一样，改一边要跟着改另一边。
+    /// `old` 改成 `new` 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则要等于电脑上
+    /// 的 `runode_git::changed_words`，否则手机和电脑上标出的改动不一样。
     public static func gitChangedWords(_ old: String, _ new: String) -> ([Range<String.Index>], [Range<String.Index>]) {
         let (rangesA, rangesB) = (wordTokens(old), wordTokens(new))
         // 词换成编号再比，免得在最长公共子序列的内层循环里比字符串。按字节认：`Substring` 的相等把

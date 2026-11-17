@@ -13,12 +13,14 @@ import RunodeProtocol
 /// 归谁管：libghostty 的句柄不能跨线程用，所以这是个非 `Sendable` 的类，由主 actor 上的
 /// `TerminalModel` 持有，只在主 actor 上建、喂、读和释放；编译器保证它不会被送到别的隔离域。
 public final class VTerminal {
-    /// 回滚历史最多留多少行，和宿主的 `SCROLLBACK_LINES` 一致；另有字节上限，见 `scrollbackBytesCap`。
+    /// 回滚历史最多留多少行，不少于宿主的 `SCROLLBACK_LINES`，重放的历史才放得下；另有字节上限
+    /// `scrollbackBytesCap`。
     static let scrollbackLines = 10_000
     /// 回滚历史的字节上限取宿主下发的 `TermSettings.scrollbackLimit` 和它中小的那个：这份 VT 从宿主的
     /// 重放起步，用不着和桌面留一样多；iPhone 内存紧，一个会话占太多会被 jetsam 杀掉。
     static let scrollbackBytesCap: UInt64 = 4 << 20
-    /// 未知 OSC 最多留多少字节，和宿主的 `UNKNOWN_SEQUENCE_MAX_BYTES` 一致。
+    /// 未知 OSC 最多留多少字节，不少于宿主的 `UNKNOWN_SEQUENCE_MAX_BYTES`，宿主转过来的序列才不会在这里
+    /// 被截断。
     static let unknownSequenceMaxBytes = 256 * 1024
     /// 每块屏幕最多存多少字节 Kitty 图片的像素，超了先丢最老的。比宿主存得少，因为 iPhone 内存紧；
     /// 这边丢了的只是画不出来，查询由宿主应答，两份 VT 不会因此分叉。
@@ -56,11 +58,11 @@ public final class VTerminal {
     /// Kitty 图形协议的 Unicode 占位符。
     private static let kittyPlaceholder: UInt32 = 0x10EEEE
     private let hold = RenderHold()
-    /// 最近一次改尺寸、最近一次喂字节的时刻，见 `isRenderHeld`。
+    /// 最近一次改尺寸、最近一次喂字节的时刻。
     private var resizedAt = ContinuousClock.now - .seconds(10)
     private var fedAt = ContinuousClock.now - .seconds(10)
     /// 平滑滚动时视口之外再往回看的零点几行：画的时候整屏往下错开这么多，露出视口上面那一行的
-    /// 一部分。和桌面 `Session` 的 `scroll_offset` 一样，取值在 [0, 1)，视口在历史最顶上时为 0。
+    /// 一部分。取值在 [0, 1)，视口在历史最顶上时为 0。
     private var scrollFraction: Double = 0
 
     public private(set) var size: GridSize
@@ -166,8 +168,8 @@ public final class VTerminal {
             handle, newSize.cols, newSize.rows, UInt32(newSize.cellWidthPx), UInt32(newSize.cellHeightPx))
     }
 
-    /// 在宿主套用主题的位置（`HostMsg.themeApplied`）套用同一份主题，步骤和宿主的 `vt::apply_theme`
-    /// 一致，两份 VT 才不会分叉。
+    /// 在宿主套用主题的位置（`HostMsg.themeApplied`）套用同一份主题。步骤要和宿主的
+    /// `vt::apply_theme` 相同，否则两份 VT 会分叉。
     public func applyTheme(_ newSettings: TermSettings) {
         settings = newSettings
         ghostty_terminal_set(handle, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, nil)
@@ -297,7 +299,7 @@ public final class VTerminal {
     }
 
     /// 按像素滚动回滚历史：`lines` 为正往回看更早的内容，可以是零点几行。凑够整行的部分挪视口，
-    /// 剩下的记成错开量（`ScreenFrame.scrollOffset`），做法同桌面的 `Session::scroll_smoothly`。
+    /// 剩下的记成错开量（`ScreenFrame.scrollOffset`）。
     /// 返回画面是否变了；到了历史顶上或者已经在最底下、挪不动时为假。
     @discardableResult
     public func scrollSmoothly(lines: Double) -> Bool {
@@ -340,7 +342,7 @@ public final class VTerminal {
     }
 
     /// 在第 `row` 行第 `column` 列滚 `lines` 行（负数往上看更早的内容）要发给程序的字节：开着鼠标上报
-    /// 时每行一个滚轮事件（同桌面的 `Session::scroll`），否则按备用滚动每行一个方向键。程序不管滚动时为空。
+    /// 时每行一个滚轮事件，否则按备用滚动每行一个方向键。程序不管滚动时为空。
     public func encodeWheel(lines: Int, column: Int, row: Int) -> [UInt8] {
         guard lines != 0 else { return [] }
         guard mouseTracking else {
@@ -573,7 +575,7 @@ public final class VTerminal {
         return images.sorted { ($0.image.layer, $0.z) < ($1.image.layer, $1.z) }.map(\.image)
     }
 
-    /// `readImages` 用 `ghostty_render_state_image_get_multi` 一次取齐的字段，顺序同 `imageKeys`。
+    /// `readImages` 用 `ghostty_render_state_image_get_multi` 一次取齐的字段，按 `imageKeys` 的顺序排。
     private struct ImagePlacement {
         var `protocol` = GHOSTTY_IMAGE_PROTOCOL_KITTY
         var id: UInt32 = 0

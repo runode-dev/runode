@@ -67,7 +67,7 @@
             }
         }
         private var refreshScheduled = false
-        /// 下一次刷新最早在这时候，见 `scheduleRefresh`。
+        /// 下一次刷新最早在这时候。
         private var nextRefresh = ContinuousClock.now
         /// 图片动画到点画下一帧的计时，每次刷新按新的到期时间换掉。
         private var imageFrame: Task<Void, Never>?
@@ -82,6 +82,10 @@
         /// 拖动开始时手指所在的格子，程序自己管滚动时滚轮事件报在这里。
         private var scrollAnchor = (column: 0, row: 0)
         private var repeatTask: Task<Void, Never>?
+        /// 正在连发的键：只有松开或取消的是它才停，按下、松开别的键（比如 Shift）不打断连发。
+        private var repeatingKey: UIKeyboardHIDUsage?
+        /// 按下时自己处理、没交给 `super` 的按键：它们松开、取消时也不交给 `super`，下一个响应者收到的按下和松开才成对。
+        private var handledPresses: Set<UIPress> = []
         /// 硬件键盘上按着的 Option 键（左、右）：`UIKey` 的修饰键标志分不出是哪一边。
         private var heldOptions: Set<UIKeyboardHIDUsage> = []
         private let bellFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -378,7 +382,7 @@
                 grid.setNeedsDisplay()
                 return
             }
-            // 程序在同步输出、改尺寸后还在重画：留着上一帧，一会儿再看（见 `VTerminal.isRenderHeld`）。
+            // 程序在同步输出、改尺寸后还在重画：留着上一帧，一会儿再看。
             if terminal.isRenderHeld {
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .milliseconds(50))
@@ -1380,8 +1384,9 @@
                         input.rightAlt =
                             heldOptions.contains(.keyboardRightAlt) && !heldOptions.contains(.keyboardLeftAlt)
                     }
+                    handledPresses.insert(press)
                     emit(.key(input))
-                    startRepeating(input)
+                    startRepeating(input, key: key.keyCode)
                 } else {
                     unhandled.insert(press)
                 }
@@ -1393,14 +1398,27 @@
 
         public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             trackOptions(presses, down: false)
-            stopRepeating()
-            super.pressesEnded(presses, with: event)
+            stopRepeating(releasing: presses)
+            let forwarded = releaseHandled(presses)
+            if !forwarded.isEmpty {
+                super.pressesEnded(forwarded, with: event)
+            }
         }
 
         public override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             trackOptions(presses, down: false)
-            stopRepeating()
-            super.pressesCancelled(presses, with: event)
+            stopRepeating(releasing: presses)
+            let forwarded = releaseHandled(presses)
+            if !forwarded.isEmpty {
+                super.pressesCancelled(forwarded, with: event)
+            }
+        }
+
+        /// 松开或取消的按键里去掉按下时自己处理过的，返回剩下要交给 `super` 的。
+        private func releaseHandled(_ presses: Set<UIPress>) -> Set<UIPress> {
+            let forwarded = presses.subtracting(handledPresses)
+            handledPresses.subtract(presses)
+            return forwarded
         }
 
         /// 记下按下、松开的 Option 键。别的键按下时修饰键标志里没有 Option，说明松开时没收到事件（焦点被
@@ -1418,8 +1436,9 @@
         }
 
         /// 按住不放时连发：0.4 秒后每 50 毫秒一次。
-        private func startRepeating(_ input: KeyInput) {
+        private func startRepeating(_ input: KeyInput, key: UIKeyboardHIDUsage) {
             repeatTask?.cancel()
+            repeatingKey = key
             repeatTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(400))
                 while !Task.isCancelled {
@@ -1434,6 +1453,13 @@
         private func stopRepeating() {
             repeatTask?.cancel()
             repeatTask = nil
+            repeatingKey = nil
+        }
+
+        /// 松开或取消的键里有正在连发的那个时停。
+        private func stopRepeating(releasing presses: Set<UIPress>) {
+            guard let repeatingKey, presses.contains(where: { $0.key?.keyCode == repeatingKey }) else { return }
+            stopRepeating()
         }
 
         /// 硬件键盘上要自己编码的键：功能键、方向键，以及按着 Ctrl 或 Option 的组合；普通打字交给系统，
@@ -1466,7 +1492,7 @@
             if let special {
                 return KeyInput(key: special, modifiers: modifiers)
             }
-            // Shift+回车带着 Shift 按 VT 的模式编码，和桌面一样（程序据此分出换行和提交）；交给系统的话
+            // Shift+回车带着 Shift 按 VT 的模式编码（程序据此分出换行和提交）；交给系统的话
             // 经 `insertText` 成了不带修饰键的回车。
             if key.keyCode == .keyboardReturnOrEnter, modifiers == .shift {
                 return KeyInput(key: .enter, modifiers: modifiers)

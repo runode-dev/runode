@@ -1,6 +1,6 @@
 import Foundation
 
-/// 请宿主在一个会话所在的仓库里办的 git 操作，和宿主 `runode_protocol::git` 的 `GitRequest` 一致，
+/// 请宿主在一个会话所在的仓库里办的 git 操作，线上格式以宿主的 `runode_protocol::git::GitRequest` 为准，
 /// 放在 `ClientMsg.git` 里发。宿主按会话 shell 当前的目录找仓库；改仓库的操作办完回改完后的 `GitStatus`。
 public enum GitRequest: Hashable, Sendable, Encodable {
     case status

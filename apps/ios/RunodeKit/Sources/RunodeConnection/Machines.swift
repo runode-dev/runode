@@ -56,7 +56,7 @@ public protocol MachineStore: Sendable {
     func upsert(_ machine: MachineRecord) async throws
     /// 只改存着的那条的 `lastAddress`，别的字段（用户改过的名字）照旧；这条已经删了时什么也不做。
     func updateLastAddress(id: UUID, _ address: String) async throws
-    /// 只改存着的那条的 `node`，同 `updateLastAddress`。
+    /// 只改存着的那条的 `node`，别的字段（用户改过的名字）照旧；这条已经删了时什么也不做。
     func updateNode(id: UUID, _ node: String) async throws
     /// 只改存着的那条的 `name`：连接在后台记下的 `node`、`lastAddress` 照旧；这条已经删了时什么也不做。
     func updateName(id: UUID, _ name: String) async throws

@@ -201,18 +201,23 @@ import Testing
         await link.stop()
     }
 
-    /// 记着的地址都连不上时经 iroh 按公钥拨过去，门禁照常走。
+    /// 记着的地址都连不上时经 iroh 按公钥拨过去，用这台电脑存着的端点私钥，门禁照常走。
     @Test func fallsBackToTheTunnel() async throws {
         var remote = machine
         remote.node = Self.node
+        var key = try #require(try keys.key(for: machine.id))
+        key.tunnel = Data(repeating: 9, count: 32)
+        try keys.save(key, for: machine.id)
         let tunnelled = FakeTransport(remoteAddress: nil)
         let dialed = Mutex<[String]>([])
+        let secrets = Mutex<[Data]>([])
         let link = HostConnection(
             machine: remote, keyStore: keys, machines: store, discovery: NoDiscovery(),
             identity: ClientIdentity(build: "ios-test", deviceName: "测试 iPhone"),
             policy: ReconnectPolicy(base: .milliseconds(10), maximum: .milliseconds(20)), open: supply.opener,
-            tunnel: { node, _ in
+            tunnel: { node, _, secret in
                 dialed.withLock { $0.append(node) }
+                secrets.withLock { $0.append(secret) }
                 return tunnelled
             })
         var events = await link.events().makeAsyncIterator()
@@ -221,6 +226,7 @@ import Testing
         _ = try await admit(&host)
         _ = try #require(await waitReady(&events))
         #expect(dialed.withLock { $0 } == [Self.node])
+        #expect(secrets.withLock { $0 } == [Data(repeating: 9, count: 32)])
         await link.stop()
     }
 

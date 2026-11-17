@@ -1,12 +1,15 @@
 import Foundation
 
-/// 交图片、视频给电脑的这套消息的版本，和电脑那边 `runode_protocol::media::MEDIA_VERSION` 一样。
+/// 交图片、视频给电脑的这套消息的版本，要等于宿主的 `runode_protocol::media::MEDIA_VERSION`，
+/// 否则电脑回 `Incompatible` 后断开。
 public let mediaVersion: UInt32 = 1
 
-/// 一个文件最多这么多字节，`len` 超了电脑回 `failed` 后断开。
+/// 一个文件最多这么多字节，要等于宿主的 `runode_protocol::media::MAX_MEDIA_BYTES`，否则手机放行的文件可能
+/// 被电脑回 `failed` 后断开。
 public let maxMediaBytes = 200 << 20
 
-/// 一帧 `FrameKind.media` 的载荷最多这么多字节。
+/// 一帧 `FrameKind.media` 的载荷最多这么多字节，要等于宿主的 `runode_protocol::media::MAX_MEDIA_FRAME`，否则
+/// 手机发的帧可能超了电脑的上限，被电脑断开。
 public let maxMediaFrame = 1 << 20
 
 /// 手机发给电脑的消息。文件的内容另由 `FrameKind.media` 帧带着。

@@ -22,8 +22,8 @@ public final class SpeechConnection: Sendable {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
-        tunnel: @escaping TunnelOpener = { node, fingerprint in
-            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        tunnel: @escaping TunnelOpener = { node, fingerprint, secret in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint, secret: secret)
         }
     ) async throws -> SpeechConnection {
         let deviceId = machine.deviceId

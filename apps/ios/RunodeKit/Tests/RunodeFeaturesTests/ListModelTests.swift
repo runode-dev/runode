@@ -1,6 +1,7 @@
 import Foundation
 import RunodeConnection
 import RunodeProtocol
+import Synchronization
 import Testing
 
 @testable import RunodeFeatures
@@ -669,6 +670,21 @@ extension LinkState {
         await model.delete(machine.id)
         #expect(model.machines.isEmpty)
         #expect(deleted == [machine.id])
+        #expect(try keys.key(for: machine.id) == nil)
+    }
+
+    /// 删掉电脑时，跨网络连它的 iroh 端点按它的私钥一起关掉。
+    @Test func deletingAMachineClosesItsTunnel() async throws {
+        let keys = MemoryDeviceKeyStore()
+        let closed = Mutex<[Data]>([])
+        let model = MachineListModel(
+            store: MemoryMachineStore(), keyStore: keys,
+            closeTunnel: { secret in closed.withLock { $0.append(secret) } })
+        let machine = machineRecord()
+        try keys.save(StoredDeviceKey(kind: .software, data: Data([1]), tunnel: Data(repeating: 4, count: 32)), for: machine.id)
+        try await model.add(machine)
+        await model.delete(machine.id)
+        #expect(closed.withLock { $0 } == [Data(repeating: 4, count: 32)])
         #expect(try keys.key(for: machine.id) == nil)
     }
 

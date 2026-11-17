@@ -20,15 +20,20 @@ public final class MachineListModel {
 
     @ObservationIgnored private let store: any MachineStore
     @ObservationIgnored private let keyStore: any DeviceKeyStore
+    @ObservationIgnored private let closeTunnel: TunnelCloser
     /// 删掉一台电脑之前先请电脑忘掉这部手机（解除配对，电脑不认得时只注销推送）、断开它的连接、退出它的页面；
     /// 电脑那边办好了（或者本来就没登记推送）时为真。
     @ObservationIgnored public var willDelete: @MainActor (UUID) async -> Bool = { _ in true }
     /// 每次重新读完列表（配对、改名、删除之后都会读）以后调，`AppModel` 据此给每台电脑建好连接。
     @ObservationIgnored public var didLoad: @MainActor () -> Void = {}
 
-    public init(store: any MachineStore, keyStore: any DeviceKeyStore) {
+    public init(
+        store: any MachineStore, keyStore: any DeviceKeyStore,
+        closeTunnel: @escaping TunnelCloser = IrohDialer.forget(secret:)
+    ) {
         self.store = store
         self.keyStore = keyStore
+        self.closeTunnel = closeTunnel
     }
 
     /// 删掉这么久还没连上注销推送的电脑（卖了、重装了）不再等，真删掉：留着私钥只会一直拿它去连。
@@ -57,7 +62,7 @@ public final class MachineListModel {
         do {
             try await store.upsert(machine)
         } catch {
-            try? keyStore.deleteKey(for: machine.id)
+            await deleteKey(for: machine.id)
             await load()
             throw error
         }
@@ -120,6 +125,13 @@ public final class MachineListModel {
     /// 记录删掉了才删私钥：删记录失败时电脑照样能用；删私钥失败只留下一把用不上的钥匙。
     private func remove(_ id: UUID) async throws {
         try await store.remove(id: id)
-        try? keyStore.deleteKey(for: id)
+        await deleteKey(for: id)
+    }
+
+    /// 删私钥，跨网络连它用的端点一起关掉。
+    private func deleteKey(for id: UUID) async {
+        for secret in keyStore.deleteKeyAndTunnel(for: id) {
+            await closeTunnel(secret)
+        }
     }
 }

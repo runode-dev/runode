@@ -142,8 +142,8 @@ public enum OptionAsAlt: String, Hashable, Sendable, Codable {
     case right
 }
 
-/// 宿主 VT 套着的主题，`HostMsg.attached`、`HostMsg.themeApplied` 里带来。和宿主的 `TermSettings`
-/// 字段一一对应；编码时每个字段都写（宿主那边这些字段都是必填的）。
+/// 宿主 VT 套着的主题，`HostMsg.attached`、`HostMsg.themeApplied` 里带来。线上格式以宿主的
+/// `runode_types::settings::TermSettings` 为准；编码时每个字段都写（宿主那边这些字段都是必填的）。
 public struct TermSettings: Hashable, Sendable, Codable {
     public var background: Rgb
     public var foreground: Rgb
@@ -165,7 +165,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
     public var optionAsAlt: OptionAsAlt
     /// 回滚历史最多占多少字节。
     public var scrollbackLimit: UInt64
-    /// 宿主给 shell 集成打开哪些功能；手机不用，只为编解码和宿主一致。
+    /// 宿主给 shell 集成打开哪些功能；手机不用，留着只为编解码时不丢这一项。
     public var shellFeatures: ShellFeatures
 
     /// 宿主 `ShellFeatures` 的线上样子；缺的项按打开读。
@@ -206,7 +206,7 @@ public struct TermSettings: Hashable, Sendable, Codable {
         }
     }
 
-    /// 宿主没配置时的设置，和 `TermSettings::default()`（`runode_types::theme` 的默认配色）一致。
+    /// 宿主没配置时的设置，取值以宿主的 `runode_types::settings::TermSettings::default()` 为准。
     public static let `default` = TermSettings(
         background: Rgb(hex: 0x171618),
         foreground: Rgb(hex: 0xE6E1D8),
@@ -365,7 +365,8 @@ public struct AgentKind: Hashable, Sendable, Codable {
         try container.encode(label)
     }
 
-    /// 给人看的名字，和宿主的 `AgentKind::display_name` 一致；不认识的原样显示。
+    /// 给人看的名字，要等于宿主的 `runode_types::agent::AgentKind::display_name`，否则同一个 agent 在手机和
+    /// 电脑上叫法不同；不认识的原样显示。
     public var displayName: String {
         let names: [String: String] = [
             "pi": "Pi", "claude": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI", "cursor": "Cursor Agent",
@@ -383,8 +384,8 @@ public struct AgentKind: Hashable, Sendable, Codable {
         return names[label] ?? label
     }
 
-    /// 工作中的转圈各帧和每帧的秒数，和宿主的 `AgentKind::spinner` 一致：跟各 agent 自己界面里的工作
-    /// 动画一样，没有专门动画的用盲文点阵转圈。
+    /// 工作中的转圈各帧和每帧的秒数，要等于宿主的 `runode_types::agent::AgentKind::spinner`，否则手机和电脑上
+    /// 转得不一样；没有专门动画的用盲文点阵转圈。
     public var spinner: (frames: [String], frameTime: Double) {
         switch label {
         case "claude": (["·", "✢", "✳", "✶", "✻", "✽", "✽", "✻", "✶", "✳", "✢", "·"], 0.12)
@@ -393,7 +394,8 @@ public struct AgentKind: Hashable, Sendable, Codable {
         }
     }
 
-    /// 转圈的颜色，和宿主的 `AgentKind::spinner_color` 一致；为空时沿用文字颜色。
+    /// 转圈的颜色，要等于宿主的 `runode_types::agent::AgentKind::spinner_color`，否则手机和电脑上颜色不一样；
+    /// 为空时沿用文字颜色。
     public var spinnerColor: Rgb? {
         label == "claude" ? Rgb(0xD7, 0x77, 0x57) : nil
     }

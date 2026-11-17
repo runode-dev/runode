@@ -1,11 +1,12 @@
 import Foundation
 
-/// 官方 App 为一台电脑向中转服务换推送句柄的请求体（宿主的 `push::RelayRegister`）。电脑只拿得到句柄，
-/// 拿不到 device token。
+/// 官方 App 为一台电脑向中转服务换推送句柄的请求体，线上格式以中转服务的 `runode_protocol::push::RelayRegister`
+/// 为准。电脑只拿得到句柄，拿不到 device token。
 public struct RelayRegister: Hashable, Sendable, Encodable {
-    /// 宿主的 `push::RELAY_REGISTER`。
+    /// 要等于中转服务的 `runode_protocol::push::RELAY_REGISTER`，否则中转服务没有这个接口，换不到句柄。
     public static let path = "/v1/register"
-    /// 宿主的 `push::OFFICIAL_BUNDLE`：只有这个 App 的推送经中转服务发。
+    /// 只有这个 App 的推送经中转服务发。要等于 `runode_protocol::push::OFFICIAL_BUNDLE`，否则电脑不把这个
+    /// App 的推送交给中转服务。
     public static let officialBundle = "dev.runode.mobile"
 
     public var v: UInt32 = 1
@@ -38,12 +39,12 @@ public struct RelayRegister: Hashable, Sendable, Encodable {
     }
 }
 
-/// 中转服务换句柄的回话（宿主的 `push::RelayHandle`）。
+/// 中转服务换句柄的回话，线上格式以中转服务的 `runode_protocol::push::RelayHandle` 为准。
 public struct RelayHandle: Hashable, Sendable, Decodable {
     public var handle: String
 }
 
-/// 中转服务出错时的响应体（宿主的 `push::PushError`）。
+/// 中转服务出错时的响应体，线上格式以中转服务的 `runode_protocol::push::PushError` 为准。
 public struct PushError: Hashable, Sendable, Decodable {
     public var reason: String
 }

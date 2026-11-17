@@ -2,9 +2,10 @@ import Foundation
 
 // 远程访问的门禁：TLS 握手之后、`Hello` 之前在同一条连接上来回的几条消息。都是通道 0 的
 // `FrameKind.control` 帧，载荷是带 `type` 字段的 JSON，二进制字段一律 base64url 不带填充。
-// 字节格式两端必须一致，见远程访问规格（v1）。
+// 线上格式以宿主的 `runode_protocol::remote` 为准。
 
-/// 门禁的版本。宿主的 `remote_challenge` 里报的版本不是它时断开，提示升级。
+/// 门禁的版本，要等于宿主的 `runode_protocol::remote::GATE_VERSION`，否则宿主的 `remote_challenge` 里报的
+/// 版本不是它，手机断开、提示升级。
 public let gateVersion: UInt32 = 1
 
 /// 电脑在 Bonjour TXT 记录里写门禁版本的键。
@@ -50,7 +51,7 @@ public enum GateRejection: Hashable, Sendable, Codable {
     }
 }
 
-/// 跨网络连接的 ALPN，和电脑那边 `runode_protocol::remote::TUNNEL_ALPN` 一样。
+/// 跨网络连接的 ALPN，要等于宿主的 `runode_protocol::remote::TUNNEL_ALPN`，否则跨网络连不上。
 public let tunnelALPN = "runode/remote/1"
 
 /// 门禁阶段的消息，两个方向的都在这里。

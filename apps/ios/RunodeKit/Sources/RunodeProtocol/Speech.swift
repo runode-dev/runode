@@ -1,6 +1,7 @@
 import Foundation
 
-/// 交给电脑识别的这套消息和录音格式的版本，和电脑那边 `runode_protocol::speech::SPEECH_VERSION` 一样。
+/// 交给电脑识别的这套消息和录音格式的版本，要等于宿主的 `runode_protocol::speech::SPEECH_VERSION`，
+/// 否则电脑回 `Incompatible` 后断开。
 public let speechVersion: UInt32 = 1
 
 /// `FrameKind.audio` 的采样率：载荷是这个采样率的单声道 16 位小端 PCM。

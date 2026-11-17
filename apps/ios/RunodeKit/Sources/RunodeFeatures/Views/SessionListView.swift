@@ -316,9 +316,8 @@
         }
     }
 
-    /// 菜单里会话目录的命令：Makefile、package.json 各一个子菜单，点一条就跑（见
-    /// `SessionListModel.runTask`），在这个会话里跑了时调 `onRun`，在新终端里跑时由会话列表打开
-    /// 新终端。终端结束了时子菜单点不开。会话卡片的长按菜单和终端页的「⋯」菜单都用它。
+    /// 菜单里会话目录的命令：Makefile、package.json 各一个子菜单，点一条就跑，在这个会话里跑了时调
+    /// `onRun`，在新终端里跑时由会话列表打开新终端。终端结束了时子菜单点不开。会话卡片的长按菜单和终端页的「⋯」菜单都用它。
     struct TasksSection: View {
         let model: SessionListModel
         let session: SessionInfo

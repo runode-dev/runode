@@ -39,9 +39,11 @@ func dial<Connection: Sendable>(
             return try await attempt { try await open(found, fingerprint) }
         }
         if let node = machine.node {
+            let id = machine.id
             group.addTask {
                 try await Task.sleep(for: tunnelDelay)
-                return try await attempt { try await tunnel(node, fingerprint) }
+                let secret = try keyStore.tunnelSecret(for: id)
+                return try await attempt { try await tunnel(node, fingerprint, secret) }
             }
         }
         var winner: Connection?

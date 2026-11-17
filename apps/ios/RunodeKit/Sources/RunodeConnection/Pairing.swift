@@ -23,6 +23,7 @@ public struct RemotePairing: Pairing {
     private let discovery: any HostDiscovery
     private let open: TransportOpener
     private let tunnel: TunnelOpener
+    private let closeTunnel: TunnelCloser
     private let generateKey: @Sendable () throws -> StoredDeviceKey
 
     public init(
@@ -30,21 +31,25 @@ public struct RemotePairing: Pairing {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
-        tunnel: @escaping TunnelOpener = { node, fingerprint in
-            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        tunnel: @escaping TunnelOpener = { node, fingerprint, secret in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint, secret: secret)
         },
+        closeTunnel: @escaping TunnelCloser = IrohDialer.forget(secret:),
         generateKey: @escaping @Sendable () throws -> StoredDeviceKey = { try StoredDeviceKey.generate() }
     ) {
         self.keyStore = keyStore
         self.discovery = discovery
         self.open = open
         self.tunnel = tunnel
+        self.closeTunnel = closeTunnel
         self.generateKey = generateKey
     }
 
     public func pair(with invitation: PairingInvitation, deviceName: String) async throws -> MachineRecord {
         guard !invitation.isExpired() else { throw LinkFailure.invitationExpired }
-        let key = try generateKey()
+        var key = try generateKey()
+        let secret = try key.tunnel ?? StoredDeviceKey.newTunnelSecret()
+        key.tunnel = secret
         let targets = await discovery.targets(
             for: invitation.fingerprint,
             then: invitation.addresses.compactMap { TransportTarget.address($0, port: invitation.port) })
@@ -69,11 +74,22 @@ public struct RemotePairing: Pairing {
             throw CancellationError()
         } catch {
             guard let node = invitation.node else { throw error }
-            return try await attempt(try await tunnel(node, invitation.fingerprint))
+            do {
+                return try await attempt(try await tunnel(node, invitation.fingerprint, secret))
+            } catch {
+                // 没配成（拒绝、存私钥失败、被取消）就没有记录认领这把端点私钥，它的端点不能留在池里占名额。
+                await closeTunnel(secret)
+                throw error
+            }
         }
     }
 
     public func discard(_ machine: MachineRecord) {
-        try? keyStore.deleteKey(for: machine.id)
+        let secrets = keyStore.deleteKeyAndTunnel(for: machine.id)
+        guard !secrets.isEmpty else { return }
+        let closeTunnel = closeTunnel
+        Task {
+            for secret in secrets { await closeTunnel(secret) }
+        }
     }
 }

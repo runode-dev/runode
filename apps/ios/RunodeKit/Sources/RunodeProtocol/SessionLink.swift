@@ -31,8 +31,8 @@ public struct SessionLink: Hashable, Sendable {
         self.init(machine: machine, session: session)
     }
 
-    /// 从电脑推来的等回答通知的 `userInfo` 读：宿主的 `push::notify_payload` 在 `aps` 外面带着 `machine`
-    /// （登记时报的 UUID）和 `session`。不是这种通知、`machine` 不是 UUID、`session` 为空时为空。
+    /// 从电脑推来的等回答通知的 `userInfo` 读：`runode_protocol::push::notify_payload` 在 `aps` 外面
+    /// 带着 `machine`（登记时报的 UUID）和 `session`。不是这种通知、`machine` 不是 UUID、`session` 为空时为空。
     public init?(userInfo: [AnyHashable: Any]) {
         guard let machine = (userInfo["machine"] as? String).flatMap(UUID.init(uuidString:)),
             let session = userInfo["session"] as? String, !session.isEmpty

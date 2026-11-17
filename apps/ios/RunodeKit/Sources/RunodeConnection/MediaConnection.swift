@@ -20,8 +20,8 @@ public final class MediaConnection: Sendable {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
-        tunnel: @escaping TunnelOpener = { node, fingerprint in
-            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        tunnel: @escaping TunnelOpener = { node, fingerprint, secret in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint, secret: secret)
         }
     ) async throws -> MediaConnection {
         let deviceId = machine.deviceId
@@ -69,8 +69,9 @@ public final class MediaConnection: Sendable {
         }
     }
 
-    /// 从文件里一块块读着发，不整个读进内存；别的同 `send(_:progress:)`。读不出文件时报文件的错，什么都不发；
-    /// 发到一半文件变短了报错，连接不能再用。
+    /// 从文件里一块块读着发，不整个读进内存，返回它在电脑上的绝对路径。读不出文件时报文件的错，空的或超过
+    /// `maxMediaBytes` 时报 `MediaTooLarge`，都什么都不发；电脑存不了时报 `MediaFailure`；发到一半文件变短了、
+    /// 超时或出了别的错，连接就不能再用了。
     public func send(file: URL, progress: Progress? = nil) async throws -> String {
         let size = try FileManager.default.attributesOfItem(atPath: file.path(percentEncoded: false))[.size] as? Int ?? 0
         let handle = try FileHandle(forReadingFrom: file)

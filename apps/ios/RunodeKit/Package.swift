@@ -71,7 +71,7 @@ let package = Package(
         .target(
             name: "RunodeFeatures",
             dependencies: ["RunodeProtocol", "RunodeConnection", "RunodeTerminal", "RunodeSpeech"],
-            // 各家 agent 的 logo：图片是桌面资源里那几个 SVG 的符号链接，出处和许可见桌面那边的 LICENSE。
+            // 各家 agent 的 logo：图片是桌面资源里那几个 SVG 的符号链接。
             resources: [.process("Resources/AgentLogos.xcassets")]
         ),
         .testTarget(name: "RunodeProtocolTests", dependencies: ["RunodeProtocol"]),

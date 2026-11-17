@@ -69,7 +69,7 @@ public enum LinkFailure: Error, Hashable, Sendable, LocalizedError {
     }
 
     /// 电脑离线：连不上、超时、没有地址，或者远程访问没开（正在关掉）。这种失败不按退避一遍遍试，等电脑
-    /// 重新上线（见 `ReconnectPolicy.offlineRetry`）。
+    /// 重新上线（`ReconnectPolicy.offlineRetry`）。
     public var isOffline: Bool {
         switch self {
         case .timeout, .noAddress, .connectionFailed, .rejected(.disabled): true

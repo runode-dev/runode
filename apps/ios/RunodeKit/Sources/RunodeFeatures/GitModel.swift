@@ -91,7 +91,7 @@ public final class GitModel {
         return status.staged.isEmpty && status.unstaged.isEmpty
     }
 
-    /// 能提交：有说明、有改动、没别的操作在办。没有暂存的改动时提交全部改动，见 `commit`。
+    /// 能提交：有说明、有改动、没别的操作在办。没有暂存的改动时提交全部改动。
     public var canCommit: Bool {
         running == nil && isReady && !isClean
             && !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

@@ -1,6 +1,7 @@
 import Foundation
 
-/// 远程桌面这套消息和画面格式的版本，和电脑那边 `runode_protocol::screen::SCREEN_VERSION` 一样。
+/// 远程桌面这套消息和画面格式的版本，要等于宿主的 `runode_protocol::screen::SCREEN_VERSION`，
+/// 否则电脑回 `Incompatible` 后断开。
 public let screenVersion: UInt32 = 2
 
 /// 远程桌面的修饰键。
@@ -203,7 +204,7 @@ public enum ScreenHostMsg: Hashable, Sendable, Decodable {
                 display: try c.decode(UInt32.self, forKey: .display), width: try c.decode(UInt32.self, forKey: .width),
                 height: try c.decode(UInt32.self, forKey: .height))
         case "stopped":
-            // 不带 `cause` 的电脑（老版本，或者分了这边不认得的类）照两个标志归类。
+            // `cause` 缺省或不认得时，按 `signed_out`、`no_encoder` 两个标志归类。
             let cause = try c.decodeIfPresent(String.self, forKey: .cause).flatMap(ScreenStopCause.init(rawValue:))
             let signedOut = try c.decodeIfPresent(Bool.self, forKey: .signedOut) ?? false
             let noEncoder = try c.decodeIfPresent(Bool.self, forKey: .noEncoder) ?? false

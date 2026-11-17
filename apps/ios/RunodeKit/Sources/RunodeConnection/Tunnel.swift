@@ -7,26 +7,59 @@ import Synchronization
 /// 局域网和跨网络一起试时，iroh 晚这么久才拨：在同一个局域网里时直连先过门禁，不白占中继。
 let tunnelDelay: Duration = .milliseconds(500)
 
-/// 经 iroh 按电脑的公钥（`MachineRecord.node`）开一条连接；真的实现是 `IrohDialer.open`，测试换成假的。
+/// 经 iroh 按电脑的公钥（`MachineRecord.node`）开一条连接，手机这头的端点用 `secret` 这把私钥；真的实现是
+/// `IrohDialer.open`，测试换成假的。
 public typealias TunnelOpener =
-    @Sendable (_ node: String, _ fingerprint: CertificateFingerprint) async throws -> any FrameTransport
+    @Sendable (_ node: String, _ fingerprint: CertificateFingerprint, _ secret: Data) async throws -> any FrameTransport
+
+/// 关掉用 `secret` 建的 iroh 端点；真的实现是 `IrohDialer.forget(secret:)`，测试换成假的。
+public typealias TunnelCloser = @Sendable (_ secret: Data) async -> Void
+
+/// 同时留着的 iroh 端点最多几个。
+let tunnelEndpointLimit = 8
 
 /// 跨网络连电脑：iroh 按电脑的公钥拨号，先打洞直连，打不通走中继。连接上开一条双向流，流上跑的和局域网的
 /// TCP 一样是 TLS 加门禁。Network.framework 的 TLS 只能开在真的网络连接上，所以在本机回环地址上起一个只接
-/// 一条连接的代理接到流上，`TLSChannel` 连它。整个 app 共用一个 iroh 端点，第一次拨号时建。
+/// 一条连接的代理接到流上，`TLSChannel` 连它。每把私钥一个 iroh 端点，第一次用它拨号时建，最多留
+/// `tunnelEndpointLimit` 个（`TunnelEndpointPool`）。
 public actor IrohDialer {
     public static let shared = IrohDialer()
-    /// 正在建或者建好了的端点；几台电脑同时拨号时共用同一次建。
-    private var binding: Task<Endpoint, any Error>?
+    /// 正在建或者建好了的端点；同一把私钥同时拨号时共用同一次建。
+    private var pool = TunnelEndpointPool<Task<Endpoint, any Error>>(limit: tunnelEndpointLimit)
 
-    public func open(node: String, fingerprint: CertificateFingerprint) async throws -> any FrameTransport {
-        let endpoint = try await bound()
+    public func open(node: String, fingerprint: CertificateFingerprint, secret: Data) async throws -> any FrameTransport {
         let id: EndpointId
         do {
             id = try EndpointId.fromString(s: node)
         } catch {
             throw LinkFailure.protocolViolation(String(localized: "电脑报的跨网络地址不对"))
         }
+        let (endpoint, lease) = try await bound(secret: secret)
+        do {
+            return try await Self.connect(endpoint, to: id, fingerprint: fingerprint) {
+                Task { await self.giveBack(lease) }
+            }
+        } catch {
+            giveBack(lease)
+            throw error
+        }
+    }
+
+    /// 关掉 `secret` 的端点，经它开着的连接一起断掉。
+    public func forget(secret: Data) {
+        close(pool.remove(secret).map { [$0] } ?? [])
+    }
+
+    /// 在 `shared` 上 `forget`。
+    public static func forget(secret: Data) async {
+        await shared.forget(secret: secret)
+    }
+
+    /// 在 `endpoint` 上开一条到 `id` 的连接；连接关掉时调 `release`。
+    private static func connect(
+        _ endpoint: Endpoint, to id: EndpointId, fingerprint: CertificateFingerprint,
+        release: @escaping @Sendable () -> Void
+    ) async throws -> any FrameTransport {
         let connection: Connection
         let stream: BiStream
         do {
@@ -56,7 +89,7 @@ public actor IrohDialer {
         }
         do {
             let tls = try await TLSChannel.open(to: proxy.target, fingerprint: fingerprint)
-            return TunnelledTransport(tls: tls, proxy: proxy, connection: connection)
+            return TunnelledTransport(tls: tls, proxy: proxy, connection: connection, release: release)
         } catch {
             proxy.close()
             try? connection.close(errorCode: 0, reason: Data())
@@ -64,19 +97,36 @@ public actor IrohDialer {
         }
     }
 
-    private func bound() async throws -> Endpoint {
-        if let binding, let endpoint = try? await binding.value, !endpoint.isClosed() { return endpoint }
+    /// `secret` 的端点和借它的凭据，用完要 `giveBack`。等着的时候凭据也拿着，端点不会被收掉。
+    private func bound(secret: Data) async throws -> (Endpoint, TunnelEndpointPool<Task<Endpoint, any Error>>.Lease) {
+        while let (binding, lease) = pool.borrow(secret) {
+            if let endpoint = try? await binding.value, !endpoint.isClosed() { return (endpoint, lease) }
+            // 建失败了或者已经关了；别的拨号已经换上了新的时不动它，再借一遍。
+            _ = pool.remove(lease)
+        }
         let task = Task {
             let builder = EndpointBuilder()
             builder.applyN0()
+            try builder.secretKey(bytes: secret)
             return try await builder.bind()
         }
-        binding = task
+        let (lease, evicted) = pool.insert(task, for: secret)
+        close(evicted)
         do {
-            return try await task.value
+            return (try await task.value, lease)
         } catch {
-            binding = nil
+            _ = pool.remove(lease)
             throw LinkFailure.connectionFailed(error.localizedDescription)
+        }
+    }
+
+    private func giveBack(_ lease: TunnelEndpointPool<Task<Endpoint, any Error>>.Lease) {
+        close(pool.giveBack(lease))
+    }
+
+    private func close(_ endpoints: [Task<Endpoint, any Error>]) {
+        for endpoint in endpoints {
+            Task { try? await endpoint.value.close() }
         }
     }
 }
@@ -164,11 +214,19 @@ final class TunnelledTransport: FrameTransport {
     private let tls: TLSChannel
     private let proxy: LoopbackProxy
     private let connection: Connection
+    private let release: @Sendable () -> Void
+    private let released = OnceFlag()
 
-    init(tls: TLSChannel, proxy: LoopbackProxy, connection: Connection) {
+    /// `release` 在关掉（或者没关就放掉）时调一次。
+    init(tls: TLSChannel, proxy: LoopbackProxy, connection: Connection, release: @escaping @Sendable () -> Void) {
         self.tls = tls
         self.proxy = proxy
         self.connection = connection
+        self.release = release
+    }
+
+    deinit {
+        if released.claim() { release() }
     }
 
     func receive() async throws -> Data? { try await tls.receive() }
@@ -181,6 +239,7 @@ final class TunnelledTransport: FrameTransport {
         tls.close()
         proxy.close()
         try? connection.close(errorCode: 0, reason: Data())
+        if released.claim() { release() }
     }
 }
 

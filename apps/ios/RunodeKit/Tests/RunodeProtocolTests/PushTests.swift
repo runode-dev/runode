@@ -2,7 +2,7 @@ import Foundation
 import RunodeProtocol
 import Testing
 
-/// 宿主（Rust）`runode_protocol::push` 那批照规格写出的推送样例：电脑经 APNs 推来的等回答、任务做完的通知。
+/// 宿主 `runode_protocol::push` 照规格写出的推送样例：电脑经 APNs 推来的等回答、任务做完的通知。
 enum PushSamples {
     static let repository: URL = URL(filePath: #filePath)
         .deletingLastPathComponent()  // RunodeProtocolTests

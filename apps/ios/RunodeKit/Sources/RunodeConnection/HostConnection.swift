@@ -40,7 +40,7 @@ public actor HostConnection: HostLink {
     private let policy: ReconnectPolicy
     private let open: TransportOpener
     private let tunnel: TunnelOpener
-    /// 电脑离线时除了等 Bonjour，也等本机网络恢复或变化，见 `awaitNetworkChange`。
+    /// 电脑离线时除了等 Bonjour，也等本机网络恢复或变化。
     private let networkChange: @Sendable () async -> Void
 
     private var subscribers: [Int: Subscriber] = [:]
@@ -48,7 +48,7 @@ public actor HostConnection: HostLink {
     private var state: LinkState = .idle
     /// 门禁和握手都过了的连接；没连上时为空，排着的消息就丢掉。
     private var transport: (any FrameTransport)?
-    /// 这次连上的宿主认得 `ClientMsg.keepAwake`、`ClientMsg.findCommands`；不认得时不发，见 `write`。
+    /// 这次连上的宿主认得 `ClientMsg.keepAwake`、`ClientMsg.findCommands`；不认得时不发。
     private var hostKeepsAwake = false
     private var hostFindsCommands = false
     /// 最近一次连上的宿主认得 `ClientMsg.pastePath`；不经 actor，界面按它决定能不能发图片和视频。
@@ -56,7 +56,7 @@ public actor HostConnection: HostLink {
     /// 现在有一条连上的连接、写得出去；不经 actor，界面发消息前同步问。
     private nonisolated let linkConnected = Mutex(false)
     private var generation: UInt64 = 0
-    /// 一个订阅者转出去、还没取走的输出和快照最多这么多字节，再多就先不读，见 `readUntilClosed`。
+    /// 一个订阅者转出去、还没取走的输出和快照最多这么多字节，再多就先不读。
     private static let backlogLimit = 256 << 10
     /// 上层要不要连接：`start` 置真，`stop` 和不能重试的失败置假。
     private var wanted = false
@@ -64,7 +64,7 @@ public actor HostConnection: HostLink {
     private var backoffTask: Task<Void, any Error>?
     private var writerTask: Task<Void, Never>?
     private nonisolated let requestCounter = Mutex<UInt32>(0)
-    /// 用户在看这台电脑，见 `setFocused`。不经 actor，`AppModel` 在主线程上按导航栈同步设。
+    /// 用户在看这台电脑。不经 actor，`AppModel` 在主线程上按导航栈同步设。
     private nonisolated let focused = Mutex(true)
 
     /// 发出去的东西先排在这里，由 `writerTask` 按先后写；`send` 因此可以是同步的。
@@ -82,8 +82,8 @@ public actor HostConnection: HostLink {
         open: @escaping TransportOpener = { target, fingerprint in
             try await TLSChannel.open(to: target, fingerprint: fingerprint)
         },
-        tunnel: @escaping TunnelOpener = { node, fingerprint in
-            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint)
+        tunnel: @escaping TunnelOpener = { node, fingerprint, secret in
+            try await IrohDialer.shared.open(node: node, fingerprint: fingerprint, secret: secret)
         },
         networkChange: @escaping @Sendable () async -> Void = awaitNetworkChange
     ) {

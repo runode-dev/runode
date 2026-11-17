@@ -1,6 +1,6 @@
 import Foundation
 
-/// 帧的类型，和宿主的 `runode_protocol::FrameKind` 一一对应。帧头格式是冻结的：
+/// 帧的类型，取值以宿主的 `runode_protocol::FrameKind` 为准。帧头格式是冻结的：
 /// `u32 LE 载荷长度 | u8 类型 | u32 LE 通道 | 载荷`。
 public enum FrameKind: UInt8, Sendable, Hashable {
     /// 宿主发来的 PTY 输出，原样的字节。
@@ -11,22 +11,22 @@ public enum FrameKind: UInt8, Sendable, Hashable {
     case control = 2
     /// 快照或 VT 重放的一段，以 `HostMsg.snapshotEnd` 结束。
     case snapshot = 3
-    /// 远程桌面编好的一帧画面，载荷见 `VideoFrame(payload:)`。
+    /// 远程桌面编好的一帧画面（`VideoFrame`）。
     case video = 4
-    /// 交给电脑识别的一段录音，载荷见 `speechSampleRate`。
+    /// 交给电脑识别的一段录音。
     case audio = 5
-    /// 交给电脑的一个图片或视频文件的一段，见 `MediaClientMsg.media`。
+    /// 交给电脑的一个图片或视频文件的一段（`MediaClientMsg.media`）。
     case media = 6
 }
 
 public struct Frame: Sendable, Equatable {
     /// 帧头的字节数：载荷长度、类型、通道。
     public static let headerLength = 9
-    /// 载荷上限，和宿主的 `MAX_PAYLOAD` 一样；再长就是对面出了错。
+    /// 载荷上限，要等于宿主的 `runode_protocol::MAX_PAYLOAD`；再长就是对面出了错。
     public static let maxPayload: UInt32 = 64 << 20
-    /// 手机发的控制帧载荷的上限，和电脑那边远程访问的 `MAX_CONTROL_PAYLOAD` 一样；超了电脑断开整条连接。
+    /// 手机发的控制帧载荷的上限，要等于 `runode_remote` 的 `MAX_CONTROL_PAYLOAD`，超了电脑断开整条连接。
     public static let maxControlPayload = 1 << 20
-    /// 门禁阶段单帧载荷的上限，见远程访问规格。
+    /// 门禁阶段单帧载荷的上限，要等于宿主的 `runode_protocol::remote::GATE_MAX_PAYLOAD`。
     public static let gateMaxPayload: UInt32 = 16 << 10
 
     public var kind: FrameKind
@@ -75,7 +75,7 @@ public enum FrameError: Error, Equatable, Sendable {
 }
 
 /// 从字节流里切帧：网络上收到多少就 `append` 多少，再反复 `next` 直到返回 `nil`。
-/// 和宿主的 `read_frame` 一样先查长度再查类型，载荷按实际到达的字节攒，不照着声明的长度预先分配。
+/// 先查长度再查类型，载荷按实际到达的字节攒，不照着声明的长度预先分配。
 public struct FrameDecoder: Sendable {
     /// 单帧载荷的上限：门禁阶段是 `Frame.gateMaxPayload`，之后是 `Frame.maxPayload`。
     public var maxPayload: UInt32

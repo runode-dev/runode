@@ -91,7 +91,7 @@ public final class TLSChannel: FrameTransport {
             }, queue)
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
-        // 手机静默消失（锁屏后被挂起、切网）时要能及时发现，和电脑那边的 keepalive 一致：空闲的连接靠
+        // 手机静默消失（锁屏后被挂起、切网）时要能及时发现：空闲的连接靠
         // keepalive，有数据没送到的靠重传超时。
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 15

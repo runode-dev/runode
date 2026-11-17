@@ -2,7 +2,7 @@ import Foundation
 import RunodeProtocol
 import Testing
 
-/// 电脑那边 `runode_protocol::media` 的样例，两边的测试读同一批文件。
+/// 宿主 `runode_protocol::media` 的样例，两边的测试读同一批文件。
 enum MediaSamples {
     static let directory = PushSamples.repository.appending(path: "crates/protocol/tests/fixtures/media")
 

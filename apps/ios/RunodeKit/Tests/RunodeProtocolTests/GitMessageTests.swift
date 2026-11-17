@@ -3,7 +3,7 @@ import Testing
 
 @testable import RunodeProtocol
 
-/// 读写 git 的消息和宿主（Rust）序列化出来的一样，样例见测试资源里的 `git_*`。
+/// 读写 git 的消息和宿主（Rust）序列化出来的一样，样例是测试资源里的 `git_*`。
 @Suite struct GitMessageTests {
     let id = SessionId("0123456789abcdef0011223344556677")!
 

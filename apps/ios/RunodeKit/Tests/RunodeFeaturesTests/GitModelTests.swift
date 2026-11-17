@@ -301,7 +301,7 @@ import Testing
     }
 }
 
-/// 成对改动的行里改了哪些字，和电脑上 `changed_words` 的测试对得上。
+/// 成对改动的行里改了哪些字，和电脑上 `runode_git::changed_words` 的测试对得上。
 @Suite struct GitWordChangesTests {
     private func changed(_ old: String, _ new: String) -> ([String], [String]) {
         let (a, b) = Presentation.gitChangedWords(old, new)
