@@ -41,6 +41,55 @@ fn replaces_the_contents_and_keeps_the_permissions() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// 原文件拒绝某个用户读的 ACL 项，换上后还在。
+#[cfg(target_os = "macos")]
+#[test]
+fn keeps_the_extended_acl() {
+    let dir = scratch("acl");
+    let file = dir.join("config.conf");
+    std::fs::write(&file, "old\n").unwrap();
+    let status =
+        std::process::Command::new("chmod").arg("+a").arg("user:nobody deny read").arg(&file).status().unwrap();
+    assert!(status.success());
+
+    replace_file(&file, b"new\n").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "new\n");
+    let listing = std::process::Command::new("ls").arg("-le").arg(&file).output().unwrap();
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    // 目录服务一时答不上时 `ls` 把用户写成 UUID，不写名字，所以只认这一项。
+    assert!(
+        listing.lines().any(|line| line.trim_start().starts_with("0: ") && line.ends_with(" deny read")),
+        "{listing}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// 原文件的 POSIX ACL 换上后还在，属组的权限位仍是 mask。没装 `setfacl` 或文件系统不支持 ACL 时跳过。
+#[cfg(target_os = "linux")]
+#[test]
+fn keeps_the_posix_acl() {
+    let dir = scratch("acl");
+    let file = dir.join("config.conf");
+    std::fs::write(&file, "old\n").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let set = std::process::Command::new("setfacl").arg("-m").arg("u:nobody:r").arg(&file).status();
+    if !set.is_ok_and(|status| status.success()) {
+        std::fs::remove_dir_all(&dir).unwrap();
+        return;
+    }
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+
+    replace_file(&file, b"new\n").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "new\n");
+    let listing = std::process::Command::new("getfacl").arg("-c").arg(&file).output().unwrap();
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    assert!(listing.contains("user:nobody:r--"), "{listing}");
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, mode);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn creates_a_file_that_is_not_there_yet() {
     let dir = scratch("new");

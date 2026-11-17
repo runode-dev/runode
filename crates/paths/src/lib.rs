@@ -28,6 +28,9 @@ const TODOS_DB: &str = if cfg!(debug_assertions) { "todos-dev.db" } else { "todo
 /// 接不上，就会在原目录新开终端、把同一场 agent 对话再接回一次。
 const WINDOWS_FILE: &str = if cfg!(debug_assertions) { "windows-dev.json" } else { "windows.json" };
 
+/// 宿主自己改了、界面还没接过去的布局。调试构建另用一份，跟着各自的宿主走。
+const HOST_LAYOUT_FILE: &str = if cfg!(debug_assertions) { "host-layout-dev.json" } else { "host-layout.json" };
+
 /// 引导页的进度标记。调试构建另用一份：判断首次启动要看窗口存档在不在，标记得跟着同一构建的存档走。
 const ONBOARDING_FILE: &str = if cfg!(debug_assertions) { "onboarding-dev" } else { "onboarding" };
 
@@ -177,7 +180,7 @@ impl Dirs {
     }
 
     /// 放宿主进程的 socket 和锁的目录，即 `data` 下的 `run`；有 `machine` 时是 `run` 下以它为名的子目录。
-    /// 别的用户不能进这个目录，见 `create_runtime_dir`。
+    /// 别的用户不能进这个目录。
     pub fn runtime_dir(&self) -> Option<PathBuf> {
         let run = self.data_file("run")?;
         Some(match &self.machine {
@@ -196,18 +199,18 @@ impl Dirs {
     }
 
     /// 远程访问的东西：服务端证书和私钥、配对过的设备表、监听方的锁和状态、命令行交给监听方的
-    /// 配对口令，即 `data` 下的 `remote-access`。只有自己能进，见 `create_remote_access_dir`。
+    /// 配对口令，即 `data` 下的 `remote-access`。只有自己能进。
     /// 调试构建和发布构建共用：两者只有一个能占着端口，手机配对一次两边都认。
     pub fn remote_access_dir(&self) -> Option<PathBuf> {
         self.data_file("remote-access")
     }
 
-    /// 建好 `remote_access_dir`，权限和检查同 `create_runtime_dir`：里面有私钥和配对口令。
+    /// 建好 `remote_access_dir`，只让自己进：里面有私钥和配对口令。
     pub fn create_remote_access_dir(&self) -> std::io::Result<PathBuf> {
         create_private_dir(self.remote_access_dir())
     }
 
-    /// 远程访问的自签证书（DER），见 `remote_access_dir`。
+    /// 远程访问的自签证书（DER）。
     pub fn remote_access_cert_file(&self) -> Option<PathBuf> {
         self.remote_access_file("cert.der")
     }
@@ -314,6 +317,12 @@ impl Dirs {
         self.data_file(WINDOWS_FILE)
     }
 
+    /// 宿主在没有界面时自己改了布局、界面还没接过去时，把它记在这里，宿主重启后读回来。在
+    /// `runtime_dir` 里：它跟着这台机器的宿主，家目录跨机器共享时各台机器各记各的。
+    pub fn host_layout_file(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join(HOST_LAYOUT_FILE))
+    }
+
     /// 首次启动的引导页走到哪了：还没走完，还是已经走完或跳过。
     pub fn onboarding_file(&self) -> Option<PathBuf> {
         self.data_file(ONBOARDING_FILE)
@@ -334,7 +343,7 @@ impl Dirs {
         self.data_file("screen-restore-token")
     }
 
-    /// 用户自己加的命令：通用的，和按项目目录分开的，见 `runode_protocol::TaskSourceKind`。
+    /// 用户自己加的命令：通用的，和按项目目录分开的。
     pub fn tasks_file(&self) -> Option<PathBuf> {
         self.data_file("tasks.json")
     }
@@ -512,7 +521,7 @@ fn parse_machine_id(text: &str) -> Option<String> {
         .then(|| id[..12].to_ascii_lowercase())
 }
 
-/// 建好 `dir`（`None` 时报没有家目录），权限设成只有自己能进（0700），见 `Dirs::create_runtime_dir`。
+/// 建好 `dir`（`None` 时报没有家目录），权限设成只有自己能进（0700）。
 #[cfg(unix)]
 fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
     use std::{
@@ -553,6 +562,9 @@ fn create_private_dir(dir: Option<PathBuf>) -> std::io::Result<PathBuf> {
 #[cfg(windows)]
 mod acl;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod unix_acl;
+
 /// 建好 runode 自己放私密东西的目录 `dir`（连同还没有的上一级），只让自己进：Unix 上 0700，Windows 上只给
 /// 自己、SYSTEM 和管理员；已经有了时也收紧一遍。已有的不是真目录、Unix 上属主和上一级目录不一样时拒绝。
 pub fn create_private(dir: &Path) -> std::io::Result<()> {
@@ -580,7 +592,7 @@ pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     replace(path, contents, true)
 }
 
-/// 把 `contents` 整个换进只给自己看的文件 `path`（设备表、密钥这类）：和 `replace_file` 一样先写临时文件
+/// 把 `contents` 整个换进只给自己看的文件 `path`（设备表、密钥这类）：先写临时文件
 /// 再换上去，换上后不管原文件什么权限，都只有自己能读写。
 pub fn replace_private(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     replace(path, contents, false)
@@ -633,6 +645,8 @@ fn replace(path: &Path, contents: &[u8], keep_permissions: bool) -> std::io::Res
             #[cfg(windows)]
             acl::copy_dacl(&target, &temp)?;
             file.set_permissions(meta.permissions())?;
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            unix_acl::copy_acl(&target, &file)?;
         }
         file.write_all(contents)?;
         file.sync_all()?;
@@ -711,6 +725,7 @@ mod tests {
         let dirs = dirs(&[("HOME", "/home/me")]);
         assert_eq!(dirs.config_file(), Some("/home/me/.runode/config.conf".into()));
         assert_eq!(dirs.windows_file(), Some(PathBuf::from("/home/me/.runode").join(WINDOWS_FILE)));
+        assert_eq!(dirs.host_layout_file(), dirs.runtime_dir().map(|dir| dir.join(HOST_LAYOUT_FILE)));
         assert_eq!(dirs.onboarding_file(), Some(PathBuf::from("/home/me/.runode").join(ONBOARDING_FILE)));
         assert_eq!(dirs.todos_db(), Some(PathBuf::from("/home/me/.runode").join(TODOS_DB)));
         assert_eq!(dirs.themes_dir(), Some("/home/me/.runode/themes".into()));
