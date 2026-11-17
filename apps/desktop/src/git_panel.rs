@@ -8,8 +8,8 @@
 //! 标题栏的「更多」只留面板的显示设置（树形式、显示子模块和嵌套仓库、显示其他工作树）。块里的
 //! 按钮作用到这块的仓库；菜单和快捷键派发的动作作用到 `GitPanel::git_target` 选的仓库。
 //!
-//! 面板底部单独一栏是提交历史的图表，可以收起，上沿拖动改变高度，见 `graph`。同一个仓库的其他
-//! 工作树排在子仓库后面，各占一块，块头的菜单见 `worktree`。
+//! 面板底部单独一栏是提交历史的图表，可以收起，上沿拖动改变高度。同一个仓库的其他
+//! 工作树排在子仓库后面，各占一块。
 //!
 //! 排成行的状态在 `rows`，列表的各行在 `list`，在后台跑 git 在 `run`。git 命令本身由 `runode_git::Repo`
 //! 去跑。
@@ -163,7 +163,7 @@ enum PrimaryAction {
     Push,
 }
 
-/// app 每次画面板之前交进来的东西，见 `GitPanel::set_input`。
+/// app 每次画面板之前交进来的东西。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Input {
     /// 面板多宽：图表的行据此决定放不放得下日期和引用标签。
@@ -172,7 +172,7 @@ pub struct Input {
     pub status_bar_height: f32,
 }
 
-/// 整个窗口一份的设置，app 随窗口存档，见 `GitPanel::options`。
+/// 整个窗口一份的设置，app 随窗口存档。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
     /// 改动的文件以树形式查看，否则是列表。
@@ -233,11 +233,11 @@ pub enum GitPanelEvent {
     OptionsChanged,
 }
 
-/// Git 面板，见模块说明。
+/// Git 面板。
 pub struct GitPanel {
     /// 各 workspace 的面板，没交来过 git 状态、也没显示过面板的 workspace 不在表里。
     workspaces: HashMap<WorkspaceId, PanelState>,
-    /// 显示的、操作的是哪个 workspace 的面板，见 `set_workspace`。
+    /// 显示的、操作的是哪个 workspace 的面板。
     ws: WorkspaceId,
     /// 当前 workspace 还没有面板时读到的空面板。
     empty: PanelState,
@@ -248,7 +248,7 @@ pub struct GitPanel {
     menu: Option<Menu>,
     /// 最后点过或右键点过的改动文件的绝对路径。
     clicked: Option<PathBuf>,
-    /// 显示设置和图表，整个窗口一份，见 `Options`。
+    /// 显示设置和图表，整个窗口一份。
     tree: bool,
     show_subs: bool,
     show_worktrees: bool,
@@ -296,7 +296,7 @@ impl GitPanel {
         }
     }
 
-    /// 换上栏宽和状态栏的高度，见 `Input`。只记下来，不重画：app 在画的时候调。
+    /// 换上栏宽和状态栏的高度。只记下来，不重画：app 在画的时候调。
     pub fn set_input(&mut self, input: Input) {
         self.input = input;
     }
@@ -341,7 +341,7 @@ impl GitPanel {
     }
 
     /// 监听到 workspace `ws` 里 `paths` 变了：落在哪个仓库的引用上（新建、删除、移动分支或 tag，HEAD 变了），
-    /// 那个仓库读过或正在读的图表就要重读，展开着时下次显示就读，见 `PanelState::refs_changed`。
+    /// 那个仓库读过或正在读的图表就要重读，展开着时下次显示就读。
     pub fn refs_changed(&mut self, ws: WorkspaceId, paths: &[PathBuf], cx: &mut Context<Self>) {
         let marked = self.workspaces.get_mut(&ws).is_some_and(|state| state.refs_changed(paths));
         if marked && ws == self.ws {
@@ -349,8 +349,7 @@ impl GitPanel {
         }
     }
 
-    /// workspace `ws` 的监听丢了事件、说不准哪里变了：各仓库读过或正在读的图表都要重读，见
-    /// `PanelState::all_refs_changed`。
+    /// workspace `ws` 的监听丢了事件、说不准哪里变了：各仓库读过或正在读的图表都要重读。
     pub fn all_refs_changed(&mut self, ws: WorkspaceId, cx: &mut Context<Self>) {
         let marked = self.workspaces.get_mut(&ws).is_some_and(PanelState::all_refs_changed);
         if marked && ws == self.ws {

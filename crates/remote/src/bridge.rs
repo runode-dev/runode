@@ -93,7 +93,7 @@ const REPLIES_LIMIT: usize = 64 << 10;
 const TO_PHONE_LIMIT: usize = 1 << 20;
 /// 一次从 socket 读这么多。
 const CHUNK: usize = 64 << 10;
-/// `poll` 最多等这么久就回来看一眼 `cut`，见 `bridge`。
+/// `poll` 最多等这么久就回来看一眼 `cut`。
 const POLL_TICK: Duration = Duration::from_secs(1);
 
 /// 搬到两边都说完，或者 `cut` 被置上（撤销了设备、关了远程访问；置上的一方同时会 `shutdown` 手机的
@@ -135,7 +135,7 @@ pub(crate) fn bridge(
     }
 }
 
-/// 一条连接上搬字节的状态，见模块文档。
+/// 一条连接上搬字节的状态。
 struct Bridge {
     buf: Vec<u8>,
     /// 手机发来的明文按帧过筛。

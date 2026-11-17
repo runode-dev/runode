@@ -28,7 +28,7 @@ actions!(
     runode,
     [
         About,
-        /// 检查更新；新版本下好了时是重启以更新，见 `update::menu_clicked`。
+        /// 检查更新；新版本下好了时是重启以更新。
         CheckForUpdates,
         OpenSettings,
         /// 打开首次启动的引导页。

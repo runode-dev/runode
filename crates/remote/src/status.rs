@@ -18,13 +18,13 @@ use crate::files::{no_home, private_options, read_json};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListenerStatus {
     pub port: u16,
-    /// 证书指纹，见 `runode_protocol::remote::FINGERPRINT_LEN`。
+    /// 证书指纹。
     pub fingerprint: Bytes,
     pub host_name: String,
     /// 正连着（过了门禁）的设备，每台一次，按连上的先后。
     #[serde(default)]
     pub connected: Vec<DeviceId>,
-    /// 跨网络连接的地址，没开成时为空，见 `runode_protocol::remote::PairingUri::node`。
+    /// 跨网络连接的地址，没开成时为空。
     #[serde(default)]
     pub node: Option<String>,
     /// 只听这一个地址（`Bind::Addr`）时是它；听所有网卡时为空。

@@ -74,7 +74,7 @@ impl TerminalView {
             (InputEvent::Changed(query), Some(session)) => session.search(query),
             (InputEvent::Next, Some(session)) => session.search_step(false),
             (InputEvent::Previous, Some(session)) => session.search_step(true),
-            // 没有界面这份 VT 时没有可搜的，回到显示时按搜索栏里的词重新搜，见 `vt_replaced`。
+            // 没有界面这份 VT 时没有可搜的，回到显示时按搜索栏里的词重新搜。
             (_, None) => {}
         }
         cx.notify();

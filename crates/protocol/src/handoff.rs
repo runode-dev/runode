@@ -12,7 +12,7 @@
 //! 快照、重放这类大块的字节原样跟在头后面，不进 JSON。每种 `HandoffPart` 带哪些块、哪些描述符
 //! 写在它的文档里。
 //!
-//! 交接的两端是不同版本的宿主，这里的格式和 `message` 模块文档里列的消息一样冻结：已有字段的
+//! 交接的两端是不同版本的宿主，这里的格式是冻结的：已有字段的
 //! 名字、类型和含义不改，只能加带 `#[serde(default)]` 的字段，或者在已有的块后面加块；改了含义
 //! 才加 `HANDOFF_FORMAT`。嵌在里面的别处的类型（`TermSettings`、`GridSize`、`SessionMeta`、
 //! `BuildId`、`SessionId`）同样受这条约束：比如给 `TermSettings` 加不带默认值的字段，新宿主就读
@@ -29,7 +29,7 @@ use crate::{
     message::{BuildId, SessionId},
 };
 
-/// 这个版本的宿主交出会话时写的交接格式，见 `HostMsg::Welcome::handoff`。
+/// 这个版本的宿主交出会话时写的交接格式。
 pub const HANDOFF_FORMAT: u32 = 1;
 
 /// 这个版本的宿主接手时读得了的最旧的交接格式，和 `HANDOFF_FORMAT` 一起放进 `ClientMsg::Handoff`。
@@ -45,7 +45,7 @@ pub enum HandoffPart {
         format: u32,
         /// 旧宿主的构建。
         build: BuildId,
-        /// 旧宿主编的快照的格式版本，见 `HostMsg::Welcome::snapshot_format`；和新宿主的一样才解
+        /// 旧宿主编的快照的格式版本；和新宿主的一样才解
         /// `Session` 带的快照，否则用重放。
         snapshot_format: u16,
         /// 接下来有几条 `Session`。
@@ -53,7 +53,7 @@ pub enum HandoffPart {
         /// 前端用 `SetTheme` 设过的主题；没设过时为空，新宿主照旧等前端来设。
         #[serde(default)]
         theme: Option<TermSettings>,
-        /// 必填字段，宿主不看它，一律写 false；见 `ClientMsg::SetOptions`。
+        /// 必填字段，宿主不看它，一律写 false。
         record_history: bool,
         /// 监听的 socket 的路径。描述符传过去后路径不变，shell 里的 `RUNODE_SOCKET` 照样有效。
         #[serde(with = "os_path::required")]
@@ -86,7 +86,7 @@ pub enum HandoffPart {
         report_token: Option<ReportToken>,
         /// 宿主那份 VT 现在套着的主题。
         settings: TermSettings,
-        /// `Spawn` 时指定的程序，见 `ClientMsg::Spawn::shell`；还没启动的会话 `Start` 时用。
+        /// `Spawn` 时指定的程序；还没启动的会话 `Start` 时用。
         #[serde(default)]
         shell: Option<String>,
         /// 会话开在哪个目录。
@@ -219,7 +219,7 @@ impl std::error::Error for HandoffPartError {
     }
 }
 
-/// 交接里的路径照 `ShellReport::path` 的写法（`os_text`）：不是 UTF-8 时写成一串字节，原样交给新宿主，
+/// 交接里的路径用 `os_text` 的写法：不是 UTF-8 时写成一串字节，原样交给新宿主，
 /// 也不让整条消息编不成。合法 UTF-8 时和普通的字符串一样，旧版本照样读。`meta` 里的路径按发给前端的
 /// 写法有损地写，shell 下次报告目录时就又对了；`layout` 里工作区的目录也是有损的，要等桌面连上来报
 /// 新的布局才对。

@@ -380,7 +380,7 @@ impl SettingsView {
         report(self, &values, cx);
     }
 
-    /// 去掉一行上的一个键：默认的写一行解绑；自己写的删掉那一行（见 `remove_user_line`）。
+    /// 去掉一行上的一个键：默认的写一行解绑；自己写的删掉那一行。
     fn remove_bound(&mut self, bound: &Bound, cx: &mut Context<Self>) {
         self.keybinds.stop_recording();
         let mut values = self.file.values(KEY);
@@ -456,7 +456,7 @@ impl SettingsView {
         let mut seen: HashMap<String, usize> = HashMap::new();
         for (ix, line) in bad {
             let err = keybind::parse(&line).err().unwrap_or_default();
-            // id 按这一行的内容取（一样的第几次出现），不按行号，同上。
+            // id 按这一行的内容取（一样的第几次出现），不按行号：行挪了位置时 VoiceOver 的焦点不跳。
             let nth = seen.entry(line.clone()).or_default();
             *nth += 1;
             let id = SharedString::from(format!("remove-bad-keybind-{line}-{nth}"));

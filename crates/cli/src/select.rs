@@ -1,5 +1,5 @@
 //! 按写法找会话（命令行里的 SESSION）：标识或它的前缀、自己、按位置（左右上下、同一标签里的
-//! 前后、第几个窗口、工作区、标签和分屏），以及按标题、agent 和目录。写法见 `help::SESSION`。
+//! 前后、第几个窗口、工作区、标签和分屏），以及按标题、agent 和目录。
 //!
 //! 按位置找要 app 里各个终端摆在哪（`HostMsg::Layout`），由 app 的界面回答；app 没开窗口时
 //! 回不了，这时只有按位置的写法报错，别的照常。必须正好对上一个会话，对上几个时列出候选。
@@ -39,7 +39,7 @@ pub(crate) enum Selector {
     Title(String),
     /// 前台在跑这种 agent（`AgentKind::label`），给了状态时还要在这个状态。
     Agent { kind: String, state: Option<AgentState> },
-    /// 在这个目录里，按路径或目录名比，见 `Wanted`。
+    /// 在这个目录里，按路径或目录名比。
     Cwd(String),
 }
 
@@ -172,7 +172,7 @@ pub(crate) struct World {
     pub(crate) sessions: Vec<SessionInfo>,
     /// app 回答的布局；没问过，或者 app 没开窗口回答不了时为 `None`。
     pub(crate) layout: Option<Vec<WindowLayout>>,
-    /// 自己所在的会话，见 `Env::session`。
+    /// 自己所在的会话。
     pub(crate) own: Option<SessionId>,
     /// 家目录，来自 `Env::dirs`。
     pub(crate) home: Option<PathBuf>,

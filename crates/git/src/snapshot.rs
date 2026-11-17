@@ -106,7 +106,7 @@ pub struct FileDiff {
 }
 
 /// 一个仓库的状态。只管这一个仓库：里面的子模块只是一个记着提交号的条目，嵌套的仓库是一个
-/// 不往里看的未跟踪目录，它们各自另有一份，见 `Repos`。
+/// 不往里看的未跟踪目录，它们各自另有一份。
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Snapshot {
@@ -245,7 +245,7 @@ pub(crate) fn diff_args(extra: &[&str]) -> Vec<String> {
     args.into_iter().map(str::to_owned).collect()
 }
 
-/// `repo` 里的 `git diff`，参数见 `diff_args`，`filters` 是 `filter_overrides` 给的环境变量；
+/// `repo` 里的 `git diff`，参数由 `diff_args` 给，`filters` 是 `filter_overrides` 给的环境变量；
 /// git 报错时为空，不当成没有改动。
 pub(crate) fn diff(repo: &Path, filters: &[(OsString, OsString)], args: &[impl AsRef<OsStr>]) -> Option<Vec<FileDiff>> {
     let full: Vec<OsString> =
@@ -621,7 +621,7 @@ pub(crate) fn worktree_bytes(full: &Path, max_bytes: u64) -> Option<Vec<u8>> {
 /// 打开 `path`，打开的不是普通文件时报错。调用方先看过路径是普通文件，可看过以后路径还可能被换成
 /// 别的（命名管道、指向设备的符号链接），所以打开以后对着打开的这个再看一次，读的才一定是普通文件。
 /// 不阻塞地打开：换成了没有写端的命名管道时阻塞式的打开一直等，走不到这次检查；对普通文件这个标志
-/// 不起作用。也不跟着符号链接打开，换成了符号链接时报错，和 `worktree_bytes` 不跟过去读的规矩一致。
+/// 不起作用。也不跟着符号链接打开，换成了符号链接时报错。
 /// Windows 上没有命名管道这种文件，打开符号链接本身（`FILE_FLAG_OPEN_REPARSE_POINT`）不跟过去。
 fn open_regular(path: &Path) -> std::io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();

@@ -18,7 +18,7 @@ pub(crate) struct Scan {
     /// 这个仓库以及它里面的子模块和嵌套仓库。
     pub(crate) git: Option<git::Repos>,
     pub(crate) listings: Listings,
-    /// 监听 `root` 时还要另外听的 git 目录，见 `watch_git_dirs`。
+    /// 监听 `root` 时还要另外听的 git 目录。
     pub(crate) watch_git_dirs: Vec<PathBuf>,
     pub(crate) untracked: git::UntrackedCache,
     /// 读这一份花的时间。

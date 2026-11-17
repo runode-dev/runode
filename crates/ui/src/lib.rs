@@ -117,7 +117,7 @@ pub fn drop_render_image(image: Arc<RenderImage>, cx: &mut App) {
     cx.defer(move |cx| cx.drop_image(image, None));
 }
 
-/// 画过的位图（`Image::id`），见 `draw_bitmap`。
+/// 画过的位图（`Image::id`）。
 static DRAWN_BITMAPS: Mutex<BTreeSet<u64>> = Mutex::new(BTreeSet::new());
 
 /// 要交给 `img()` 或 `Image::use_render_image` 画的位图先经过它：记下画过，`release_bitmap` 才去放它。

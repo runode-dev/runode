@@ -1,4 +1,4 @@
-//! `todo` 和 `schedule` 命令：经宿主读写看板（见 `runode_protocol::todo`）上的任务和定时。
+//! `todo` 和 `schedule` 命令：经宿主读写看板上的任务和定时。
 
 use std::{
     io::Write,
@@ -28,7 +28,7 @@ use crate::{
 const GIT_TIMEOUT: Duration = Duration::from_secs(250);
 
 impl Spec {
-    /// 照 `open --cwd`：相对路径按命令行的当前目录算；没给 agent 时用 `DEFAULT_AGENT`，给了模型或强度时按桌面
+    /// 相对路径按命令行的当前目录算；没给 agent 时用 `DEFAULT_AGENT`，给了模型或强度时按桌面
     /// 挑出来的写法拼进 agent 的命令（`Pick::command`）。
     fn resolve(self) -> Result<TodoSpec> {
         let here = std::env::current_dir()?;

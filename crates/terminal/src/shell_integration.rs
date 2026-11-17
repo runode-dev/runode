@@ -23,7 +23,7 @@ pub(crate) const RELOAD_FUNCTION: &str = "runode-reload";
 /// 换成 ` runode-reload` 执行；绑着的函数叫这个名字，集成报告了它就说明绑上了。
 pub(crate) const RELOAD_KEY_FUNCTION: &str = "runode-reload-key";
 
-/// 见 `RELOAD_KEY_FUNCTION`。终端不会发出这个序列，用户也按不出来。
+/// 集成绑给 `RELOAD_KEY_FUNCTION` 的按键序列。终端不会发出这个序列，用户也按不出来。
 pub(crate) const RELOAD_KEY: &[u8] = b"\x1b[6973~";
 
 const ZSH_ENV: &str = include_str!("../shell-integration/zsh/.zshenv");
@@ -35,10 +35,10 @@ const NUSHELL_CONF: &str = include_str!("../shell-integration/nushell/runode.nu"
 const POWERSHELL_PROFILE: &str = include_str!("../shell-integration/powershell/runode.ps1");
 
 /// 按 `mode` 给启动 `program` 的命令加上集成，并补上登录 shell 的参数；集成脚本开哪些功能
-/// 按 `features`（见 `features`）。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
+/// 按 `features`。集成脚本写不出来或认不出 shell 时照常以登录 shell 启动，不注入。
 /// `mode` 指定了种类而 `program` 认得出是另一种 shell 时，按程序名认出的那种注入。
 ///
-/// 注入了集成时返回这个 shell 的报告口令和装着它的文件（见 `write_token_file`）。口令随机生成，
+/// 注入了集成时返回这个 shell 的报告口令和装着它的文件。口令随机生成，
 /// shell 报告 PATH 等信息时带上它，终端据此认出报告确实来自这个 shell，而不是被打印到屏幕上的
 /// 别的输出伪造的。口令本身不放进环境变量：macOS 的 `ps -E`、Linux 的 `/proc/<pid>/environ` 读的
 /// 是进程启动时的环境，脚本事后删掉变量也改不掉，同一用户的任何程序都读得到。环境里只给文件的
@@ -296,7 +296,7 @@ fn report_token() -> Option<String> {
 
 /// 把脚本写进 `dirs` 的集成目录，返回这个目录。每次起 shell 都写一遍，不记住写过：宿主跑着时用户
 /// 可能清掉了缓存目录，那样 zsh 的 ZDOTDIR、bash 的 --rcfile 就指着不存在的文件，连用户自己的
-/// 配置都不加载。内容没变时只读不写，几个会话同时起 shell 也不会互相踩（见 `install_into`）。
+/// 配置都不加载。内容没变时只读不写，几个会话同时起 shell 也不会互相踩。
 fn install(dirs: &runode_paths::Dirs) -> io::Result<PathBuf> {
     let dir = dirs.shell_integration_dir().ok_or_else(|| io::Error::other("no home directory"))?;
     install_into(&dir)?;

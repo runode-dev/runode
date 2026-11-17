@@ -17,7 +17,7 @@ use crate::{
     project_host::ProjectHost,
 };
 
-/// 文件树里显示哪些：被 git 忽略的、名字以 `.` 开头的。整个窗口一个设置，见 `FileTree::filter`。
+/// 文件树里显示哪些：被 git 忽略的、名字以 `.` 开头的。整个窗口一个设置。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeFilter {
     pub ignored: bool,
@@ -165,7 +165,7 @@ impl TreeState {
         self.read_at.get(dir).is_some_and(|&at| at > started)
     }
 
-    /// 记下要在后台读的 `dirs`（连同往下多看的一层，见 `list_dirs`）：大目录、慢的卷读起来会卡住界面。
+    /// 记下要在后台读的 `dirs`（连同往下多看的一层）：大目录、慢的卷读起来会卡住界面。
     fn list_later(&mut self, dirs: Vec<PathBuf>) {
         self.to_list.extend(dirs);
     }
@@ -193,7 +193,7 @@ impl TreeState {
             read.insert(dir);
         }
         self.rebuild_rows(root, filter);
-        // 选中的在收起的目录里面时改成这个目录（见 `toggle_dir`；它的行也没了时不留选中），免得看不见的
+        // 选中的在收起的目录里面时改成这个目录（它的行也没了时不留选中），免得看不见的
         // 选中项还被删除、改名用上。套着的几层都读不了时，里层的行跟着外层收起没了，改成还有行的那一层，
         // 不看读回来的先后。等着的 `reveal` 随后照样定位。
         let holding: Vec<_> = collapsed
@@ -456,8 +456,8 @@ impl TreeState {
         }
         if changed {
             self.rebuild_rows(&root, filter);
-            // 选中的那一项没了行（删掉了，或者在上面收起的目录里）时改成还有行的收起的目录（见
-            // `apply_listings`），没有的话不留选中，免得看不见的选中项还被删除、改名、新建用上。
+            // 选中的那一项没了行（删掉了，或者在上面收起的目录里）时改成还有行的收起的目录，
+            // 没有的话不留选中，免得看不见的选中项还被删除、改名、新建用上。
             if self.selected_row().is_none() {
                 let selected = self.selected.take();
                 self.selected = collapsed.into_iter().find(|dir| {

@@ -3,7 +3,7 @@
 //! 一份规则文件管一种 agent：
 //!
 //! ```toml
-//! id = "claude"              # agent 的短名，见 `AgentKind::label`
+//! id = "claude"              # agent 的短名
 //! aliases = ["claude-code"]  # 也认这些名字
 //! version = "2026.09.11.1"   # 以下三项只作记录
 //! min_engine_version = 2
@@ -13,7 +13,7 @@
 //! id = "live_prompt_box"
 //! state = "idle"             # idle、working、blocked 或 unknown
 //! priority = 950             # 几条都命中时取最大的，一样大取靠前的
-//! region = "prompt_box_body" # 在哪段文字里找，见 `Region`
+//! region = "prompt_box_body" # 在哪段文字里找
 //! visible_idle = true        # 命中就说明界面上确实摆着这个状态，不必再等确认
 //! line_regex = ['^\s*❯']
 //! not = [{ contains = ["esc to cancel"] }]
@@ -347,7 +347,7 @@ fn fold(text: &str) -> String {
 }
 
 impl Gate {
-    /// `lower` 是 `text` 给 `contains` 比对用的写法（见 `fold`），用到时才算。
+    /// `lower` 是 `text` 给 `contains` 比对用的写法，用到时才算。
     fn matches(&self, text: &str, lower: &OnceCell<String>) -> bool {
         (self.contains.is_empty() || {
             let lower = lower.get_or_init(|| fold(text));

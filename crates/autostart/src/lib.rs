@@ -1,5 +1,5 @@
 //! 登录时自启：macOS 写 launchd 的 LaunchAgent（`~/Library/LaunchAgents`），Linux 写 systemd 的
-//! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`，见 `systemd_unit_files`），Windows
+//! 用户服务（用户服务管理器自己查找的 `$XDG_CONFIG_HOME/systemd/user`），Windows
 //! 登记在当前用户的 `Run` 键下（`run_key`）。能拉起两样东西（`Kind`）：无界面的宿主
 //! （`runode --host`，手机远程访问靠它在后台等着）和桌面 app（Linux 上没有）。app 登记成系统的
 //! 登录项（`SMAppService`），登录项不可用（`login_item::available`）时也写 LaunchAgent。
@@ -91,7 +91,7 @@ impl Kind {
 
 /// `kind` 的服务文件放在哪；系统不支持、没有家目录时为 `None`，Windows 上没有服务文件，也是 `None`。app 登记成登录项时不写服务文件，
 /// 这里给的是登录项不可用时写的 LaunchAgent。Linux 上是 `systemd_unit_files` 里装着的那份，都没装时
-/// 是第一个候选；真装时写到哪由服务管理器定，见 `install`。
+/// 是第一个候选；真装时写到哪由服务管理器定。
 pub fn service_file(kind: Kind, dirs: &Dirs) -> Option<PathBuf> {
     if !kind.supported() || cfg!(windows) {
         return None;
@@ -346,8 +346,8 @@ pub fn install(kind: Kind, dirs: &Dirs, exe: &Path, start: Start) -> io::Result<
             enable().inspect_err(|_| {
                 match &previous {
                     Some(previous) => {
-                        // 同 `None` 那支，先照这次的服务文件 `disable` 再换回原来的。原来只在运行时启用的，
-                        // 这次的 `enable` 加了持久的链接，也要撤掉，不然只管这次开机的服务成了每次登录都起。
+                        // `disable` 照着服务文件的 [Install] 删链接，所以先照这次的服务文件 `disable`
+                        // 再换回原来的。原来只在运行时启用的，这次的 `enable` 加了持久的链接，也要撤掉，不然只管这次开机的服务成了每次登录都起。
                         if matches!(was_enabled, Some(Enablement::Disabled | Enablement::Runtime)) {
                             let _ = systemctl(&["disable", SYSTEMD_UNIT]);
                         }
@@ -407,7 +407,7 @@ pub fn uninstall(kind: Kind, dirs: &Dirs) -> io::Result<bool> {
         if registered {
             login_item::unregister()?;
         }
-        // 已有的 LaunchAgent 一起删，见 `is_installed`。
+        // 已有的 LaunchAgent 一起删。
         return Ok(remove_if_there(&path)? || registered);
     }
     // Linux 上候选的位置都看，在不同的环境里装过时一起删掉。

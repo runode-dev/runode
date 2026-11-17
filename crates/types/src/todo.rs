@@ -17,7 +17,7 @@ pub const DEFAULT_AGENT: &str = "claude";
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TodoSpec {
     pub title: String,
-    /// 交给 agent 的提示词；为空时用标题，见 `TodoSpec::prompt`。
+    /// 交给 agent 的提示词；为空时用标题。
     #[serde(default)]
     pub prompt: String,
     /// 在哪个目录里做，绝对路径。
@@ -29,7 +29,7 @@ pub struct TodoSpec {
     /// 给任务新开一个工作树和分支，不在 `dir` 里直接改；`dir` 要在 git 仓库里。
     #[serde(default)]
     pub worktree: bool,
-    /// 要 agent 用的 skill 的名字，列进提示词，见 `TodoSpec::instructions`。
+    /// 要 agent 用的 skill 的名字，列进提示词。
     #[serde(default)]
     pub skills: Vec<String>,
     /// 以哪个自定义 agent 的身份跑（Claude、Copilot 的 `--agent`）；为空时不指定，那家没有这个参数时不管它。
@@ -122,7 +122,7 @@ pub struct Todo {
     /// 宿主给的标识，8 个小写十六进制数字。
     pub id: String,
     /// 宿主给的编号：从 1 起按加的先后，删掉了也不再给别的任务，界面和命令行上写成 `#5`。要标识的消息
-    /// 也认编号（`5` 或 `#5`），见 `ClientMsg::GetTodo`。
+    /// 也认编号（`5` 或 `#5`）。
     #[serde(default)]
     pub number: u64,
     pub spec: TodoSpec,

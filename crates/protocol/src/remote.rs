@@ -12,8 +12,8 @@
 //! TLS 握手完成后，连接上跑的就是 `frame` 的帧。先是一段「门禁」：门禁消息全部是
 //! `FrameKind::Control`、通道 0 的帧，载荷是 JSON，带 `type` 字段区分种类，和 `ClientMsg`、
 //! `HostMsg` 一样的风格；宿主发的是 `GateHostMsg`，客户端发的是 `GateClientMsg`。门禁阶段从 TLS
-//! 握手开始算超时 `GATE_TIMEOUT`，单帧载荷上限 `GATE_MAX_PAYLOAD`（见 `read_frame_limited`）。
-//! 所有二进制字段一律 base64url、不带填充（RFC 4648 §5，见 `Bytes`、`encode_base64url`）。
+//! 握手开始算超时 `GATE_TIMEOUT`，单帧载荷上限 `GATE_MAX_PAYLOAD`。
+//! 所有二进制字段一律 base64url、不带填充（RFC 4648 §5）。
 //!
 //! # 门禁
 //!
@@ -30,22 +30,22 @@
 //!      `secret` 是二维码里的配对口令（`SECRET_LEN` 字节），`public_key` 是设备的 P-256 公钥，
 //!      X9.63 未压缩格式（`PUBLIC_KEY_LEN` 字节，`0x04` 开头）。
 //! 3. 签名是 ECDSA P-256 + SHA-256，DER 编码（CryptoKit 的 `derRepresentation`，ring 的
-//!    `ECDSA_P256_SHA256_ASN1`），被签的字节串见 `signed_bytes`：`SIGNATURE_DOMAIN`、`nonce`、
+//!    `ECDSA_P256_SHA256_ASN1`），被签的字节串（`signed_bytes`）是 `SIGNATURE_DOMAIN`、`nonce`、
 //!    这条 TLS 连接的 exporter（label `EXPORTER_LABEL`，不带 context，`EXPORTER_LEN` 字节）、
 //!    用途（`Purpose`）依次拼起来。exporter 把签名绑在这条 TLS 连接上，中间人转发不了。
 //!    TLS 1.3 里不带 context 和空 context 等价。Network.framework 用
 //!    `sec_protocol_metadata_create_secret`，rustls 用 `export_keying_material(…, None)`。
 //! 4. 宿主回 `GateHostMsg::RemoteAccepted`（`{"type":"remote_accepted","device_id":"…"}`，配对时是
 //!    新分配的标识），或者 `GateHostMsg::RemoteRejected`
-//!    （`{"type":"remote_rejected","reason":{"kind":"unknown_device"}}`，原因见 `RejectReason`），
+//!    （`{"type":"remote_rejected","reason":{"kind":"unknown_device"}}`，`reason` 是 `RejectReason`），
 //!    拒绝后宿主关闭连接。
 //! 5. 通过以后，客户端发的第一帧必须是 `ClientMsg::Hello`（终端）、`ScreenClientMsg::ScreenHello`（远程
-//!    桌面）、`SpeechClientMsg::SpeechHello`（语音识别）或 `MediaClientMsg::MediaHello`（交图片、视频），桌面设备还可以是 `ChannelHello`（见「桌面设备」），
+//!    桌面）、`SpeechClientMsg::SpeechHello`（语音识别）或 `MediaClientMsg::MediaHello`（交图片、视频），桌面设备还可以是 `ChannelHello`，
 //!    否则宿主直接断开。`Hello` 的 `client` 要和配对时报的 `DeviceKind` 对得上：手机是 `ClientKind::Mobile`，
 //!    桌面是 `ClientKind::Desktop`。终端的连接之后就是普通的连接，和本机 Unix socket 上的一样，只有一个例外：
 //!    `ClientMsg::remote_refusal` 挡下的请求不转给宿主，宿主在发往客户端的方向、两帧之间回一条
 //!    `HostMsg::Error`（挡下的都不带 `req` 和会话，`Error` 也就不带），连接照旧。登记推送的
-//!    `ClientMsg::PushRegister`（见 `push`）也不转给宿主，由监听方按这台设备记下，
+//!    `ClientMsg::PushRegister` 也不转给宿主，由监听方按这台设备记下，
 //!    同样在两帧之间回 `HostMsg::Done`（办不了时回带 `req` 的 `Error`）。解除配对的 `ClientMsg::Unpair`
 //!    也一样由监听方办，回 `Done` 后撤掉这台设备。
 //!
@@ -80,7 +80,7 @@
 //!
 //! # 以后怎么改
 //!
-//! 和 `message` 一样：已有字段的名字、类型和含义不改，新加的字段带 `#[serde(default)]`；
+//! 已有字段的名字、类型和含义不改，新加的字段带 `#[serde(default)]`；
 //! `RejectReason` 可以加新的取值，旧的一方读成 `RejectReason::Unknown`，当作一般的失败。改了
 //! 含义或者签名的拼法时加 `GATE_VERSION`。`tests/fixtures/remote` 里存着每种消息、签名字节串和
 //! 配对 URI 的样例，手机端的测试读同一批文件。
@@ -91,17 +91,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::frame::{Frame, FrameError, read_frame_limited};
 
-/// 门禁的版本，见 `GateHostMsg::RemoteChallenge::version`。
+/// 门禁的版本。
 pub const GATE_VERSION: u32 = 1;
 /// 配置项 `remote-access-port` 的默认值。
 pub const DEFAULT_PORT: u16 = 7866;
-/// 被签的字节串开头的 16 个 ASCII 字节，见 `signed_bytes`。
+/// 被签的字节串开头的 16 个 ASCII 字节。
 pub const SIGNATURE_DOMAIN: &[u8; 16] = b"runode-remote-v1";
-/// 取 TLS exporter 用的 label，不带 context，见 `signed_bytes`。
+/// 取 TLS exporter 用的 label，不带 context。
 pub const EXPORTER_LABEL: &[u8] = b"EXPORTER-runode-remote";
 /// TLS exporter 取多少字节。
 pub const EXPORTER_LEN: usize = 32;
-/// 跨网络连接的 ALPN，见模块文档的「跨网络」。
+/// 跨网络连接（经 iroh）的 ALPN。
 pub const TUNNEL_ALPN: &[u8] = b"runode/remote/1";
 /// `GateHostMsg::RemoteChallenge::nonce` 的字节数。
 pub const NONCE_LEN: usize = 32;
@@ -128,7 +128,7 @@ pub const BONJOUR_FINGERPRINT_KEY: &str = "fp";
 pub fn bonjour_txt(fingerprint: &[u8; FINGERPRINT_LEN]) -> [(&'static str, String); 2] {
     [(BONJOUR_VERSION_KEY, GATE_VERSION.to_string()), (BONJOUR_FINGERPRINT_KEY, encode_base64url(fingerprint))]
 }
-/// 配对 URI 的开头，见 `PairingUri`。
+/// 配对 URI 的开头。
 pub const PAIRING_URI_PREFIX: &str = "runode://pair?";
 
 impl crate::ClientMsg {
@@ -201,7 +201,7 @@ impl crate::ClientMsg {
     }
 }
 
-/// 读一帧门禁消息：载荷上限是 `GATE_MAX_PAYLOAD`，其余同 `read_frame`。
+/// 读一帧门禁消息，载荷上限是 `GATE_MAX_PAYLOAD`。
 pub fn read_gate_frame(reader: &mut impl std::io::Read) -> Result<Option<Frame>, FrameError> {
     read_frame_limited(reader, GATE_MAX_PAYLOAD)
 }
@@ -267,7 +267,7 @@ impl DeviceKind {
     }
 }
 
-/// 桌面设备过了门禁后可以发的第一帧，各开一条专用的连接，见模块文档的「桌面设备」。
+/// 桌面设备过了门禁后可以发的第一帧，各开一条专用的连接。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChannelHello {
@@ -306,7 +306,7 @@ pub enum ChannelRefusal {
     Unknown,
 }
 
-/// 宿主为什么拒绝，见 `GateHostMsg::RemoteRejected`。
+/// 宿主为什么拒绝。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RejectReason {
@@ -325,7 +325,7 @@ pub enum RejectReason {
     Unknown,
 }
 
-/// 签名的用途，拼在被签的字节串末尾，见 `signed_bytes`：登录的签名拿去配对（或者反过来）对不上。
+/// 签名的用途，拼在被签的字节串末尾：登录的签名拿去配对（或者反过来）对不上。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
     /// `GateClientMsg::RemoteAuth`，ASCII `auth`。
@@ -344,7 +344,7 @@ impl Purpose {
 }
 
 /// 设备要签的字节串：`SIGNATURE_DOMAIN`（16 字节）、`nonce`（32 字节，`RemoteChallenge` 里的）、
-/// `exporter`（32 字节，这条 TLS 连接的 exporter，见 `EXPORTER_LABEL`）、用途的 ASCII，依次拼接，
+/// `exporter`（32 字节，这条 TLS 连接按 `EXPORTER_LABEL` 取的 exporter）、用途的 ASCII，依次拼接，
 /// 中间没有分隔和长度。
 pub fn signed_bytes(nonce: &[u8; NONCE_LEN], exporter: &[u8; EXPORTER_LEN], purpose: Purpose) -> Vec<u8> {
     let purpose = purpose.as_bytes();
@@ -454,7 +454,7 @@ impl fmt::Display for InvalidBase64 {
 
 impl std::error::Error for InvalidBase64 {}
 
-/// 解 base64url、不带填充的字符串，只认规范的写法，见 `InvalidBase64`。
+/// 解 base64url、不带填充的字符串，只认规范的写法。
 pub fn decode_base64url(text: &str) -> Result<Vec<u8>, InvalidBase64> {
     let value = |c: u8| -> Result<u32, InvalidBase64> {
         BASE64URL.iter().position(|&a| a == c).map(|v| v as u32).ok_or(InvalidBase64)
@@ -486,8 +486,8 @@ pub fn decode_base64url(text: &str) -> Result<Vec<u8>, InvalidBase64> {
 /// ```
 ///
 /// 指纹和口令是 base64url、不带填充；`addr` 是生成时 Mac 所有非回环、非链路本地的 IPv4、IPv6
-/// 地址（IPv6 不带方括号），逗号隔开，可以为空；`exp` 是口令过期的时刻；`node` 见模块文档的
-/// 「跨网络」，没开时不带。读的时候参数的先后不限，不认识的参数忽略。
+/// 地址（IPv6 不带方括号），逗号隔开，可以为空；`exp` 是口令过期的时刻；`node` 是跨网络连接的 iroh
+/// 公钥，没开时不带。读的时候参数的先后不限，不认识的参数忽略。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PairingUri {
     pub host_name: String,

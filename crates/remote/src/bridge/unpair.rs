@@ -1,5 +1,5 @@
-//! 手机解除配对（`ClientMsg::Unpair`）：不转给宿主，在这里把过了门禁的这台设备从配对设备表里撤掉，
-//! 和 `runode remote revoke` 一样；撤掉以后这条连接随后断开。办好回 `Done`，办不了回带 `req` 的 `Error`。
+//! 手机解除配对（`ClientMsg::Unpair`）：不转给宿主，在这里把过了门禁的这台设备从配对设备表里撤掉；
+//! 撤掉以后这条连接随后断开。办好回 `Done`，办不了回带 `req` 的 `Error`。
 
 use runode_paths::Dirs;
 use runode_protocol::{ClientMsg, HostMsg, remote::DeviceId};
@@ -7,7 +7,7 @@ use runode_protocol::{ClientMsg, HostMsg, remote::DeviceId};
 use super::frames::LocalRequests;
 use crate::devices;
 
-/// 一条过了门禁的连接上解除配对的请求，见模块文档。
+/// 一条过了门禁的连接上解除配对的请求。
 pub(crate) struct UnpairRequests<'a> {
     pub(crate) dirs: &'a Dirs,
     pub(crate) device: DeviceId,

@@ -1,5 +1,5 @@
 //! 界面这边的配置：把加载好的配置和命令的快捷键（`TaskKeys`，在 `tasks.json` 里）放进全局，这些文件
-//! 保存后自动重载，系统深浅色变了时换到对应的主题，以及用文本编辑器打开配置文件。在界面里改设置见 `settings`。配置的读取和解析见 `runode_config`。
+//! 保存后自动重载，系统深浅色变了时换到对应的主题，以及用文本编辑器打开配置文件。
 
 use std::{
     io,
@@ -23,8 +23,8 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 /// 目录里有动静后先等这么久再比。
 pub(crate) const WATCH_DEBOUNCE: Duration = Duration::from_millis(100);
 
-/// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍（见
-/// `host_client::take_config`），拿它对得上系统外观时直接用，不再读。
+/// 加载配置并开始监视配置文件，保存后自动重载。启动时后台线程已经读过一遍
+/// （`host_client::take_config`），拿它对得上系统外观时直接用，不再读。
 pub fn install(cx: &mut App) {
     let dark = system_is_dark(cx);
     let loaded = crate::host_client::take_config().filter(|(config, _)| config.fits_appearance(dark));
@@ -143,7 +143,7 @@ impl FileWatch {
         Ok(Self { watcher, roots: [dirs.config, dirs.data].into_iter().flatten().collect(), dirs: Vec::new(), gone })
     }
 
-    /// 改成盯着 `paths` 所在的目录（见 `watch_dirs`）。盯不上的下次再试，这时返回 false。
+    /// 改成盯着 `paths` 所在的目录。盯不上的下次再试，这时返回 false。
     pub(crate) fn follow(&mut self, paths: &[PathBuf]) -> bool {
         let gone = std::mem::take(&mut *self.gone.lock().unwrap_or_else(|err| err.into_inner()));
         self.dirs.retain(|dir| {
@@ -210,10 +210,10 @@ fn watch_dirs(paths: &[PathBuf], roots: &[PathBuf]) -> Vec<PathBuf> {
     dirs
 }
 
-/// 各配置文件和看到的修改时间（不存在时为 `None`），见 `watch_stamp`。
+/// 各配置文件和看到的修改时间（不存在时为 `None`）。
 pub(crate) type Stamps = Vec<(PathBuf, Option<SystemTime>)>;
 
-/// 上次加载配置时各配置文件的修改时间，读之前取的（见 `seen_after`）。每次加载后按新配置重新记录：
+/// 上次加载配置时各配置文件的修改时间，读之前取的。每次加载后按新配置重新记录：
 /// 重载可能引入新的文件（比如换了主题），设置页写回后也会自己重载，这样监视的那一轮不会因为这些
 /// 再重载一次。
 struct Seen(Stamps);
@@ -265,7 +265,7 @@ fn apply(cx: &mut App, config: Config, seen: Stamps) {
     cx.set_global(AppConfig(Arc::new(config)));
 }
 
-/// 把 runode 配置文件里 `key` 的值换成 `value` 并重载配置，见 `write_values`。
+/// 把 runode 配置文件里 `key` 的值换成 `value` 并重载配置。
 pub fn set(key: &str, value: &str, cx: &mut App) -> anyhow::Result<()> {
     let path = runode_config::config_path().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
     write_values(&path, key, &[value.to_owned()], cx)?;

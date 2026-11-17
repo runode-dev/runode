@@ -1,10 +1,10 @@
 //! 对话框（照 shadcn 的 `Dialog`）的面板：圆角、浮层底色、描边和大阴影，自带 `Role::Dialog` 和报给辅助工具的
 //! 名字，按下鼠标不往外传（点在对话框里不算点到外面）。颜色在 render 里从主题读；调用方接着写的样式盖在
-//! 组件自己的上面，写法同 `Button`。
+//! 组件自己的上面。
 //!
 //! 铺满窗口的遮罩是 `backdrop`，点到外面关不关由调用方接着写；对话框开着时把下面的界面藏起来不给辅助工具读
-//! （`a11y` 的 `Hide`）由调用方管；焦点也由调用方管，面板要拿焦点时自己 `track_focus`。按什么键关掉见
-//! `is_dismiss_key`。
+//! （`a11y` 的 `Hide`）由调用方管；焦点也由调用方管，面板要拿焦点时自己 `track_focus`。按什么键关掉由
+//! `is_dismiss_key` 判断。
 
 use gpui::{
     AnyElement, App, Div, ElementId, Hsla, InteractiveElement, Interactivity, IntoElement, Keystroke, MouseButton,

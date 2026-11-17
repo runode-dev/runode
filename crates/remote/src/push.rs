@@ -1,5 +1,4 @@
-//! agent 停下来等回答、看板上的任务做完时给登记过的手机推一条通知（线上格式和整个流程见
-//! `runode_protocol::push`）。
+//! agent 停下来等回答、看板上的任务做完时给登记过的手机推一条通知。
 //!
 //! `Pusher` 跟着监听活在同一个进程里：开着推送、监听开着、设备表里至少有一条登记时，它像命令行一样
 //! 经 `Connect` 连上宿主（`ClientKind::Cli`），每 `POLL_INTERVAL` 要一次会话列表，宿主认得看板
@@ -79,7 +78,7 @@ pub struct PushSettings {
     pub direct: Option<ApnsKey>,
     /// 直连 FCM 用的 Firebase 服务账号 JSON；没配时为 `None`。
     pub fcm_account: Option<PathBuf>,
-    /// 中转服务的基址；这个构建没带中转时为 `None`，见 `RELAY_URL`。
+    /// 中转服务的基址；这个构建没带中转时为 `None`。
     pub relay: Option<String>,
 }
 
@@ -116,7 +115,7 @@ pub(crate) enum Listening {
     On,
 }
 
-/// 推送的后台线程，见模块文档。丢掉时线程自己结束，不等它。
+/// 推送的后台线程。丢掉时线程自己结束，不等它。
 pub(crate) struct Pusher {
     shared: Arc<Shared>,
 }
@@ -332,7 +331,7 @@ impl Poller {
                     }
                 }
             }
-            // 上一轮的会话列表还没回时这一轮不要，等它回来，见 `listing`。
+            // 上一轮的会话列表还没回时这一轮不要，等它回来。
             let ask = poll && !self.listing;
             if ask {
                 self.todo_req = self.todo_req.wrapping_add(1);
@@ -493,7 +492,7 @@ impl Poller {
     }
 }
 
-/// 登记 `registration` 走哪条路线，见模块文档。
+/// 登记 `registration` 走哪条路线。
 fn route(registration: &PushRegistration, settings: &PushSettings) -> Option<Route> {
     if registration.env == ApnsEnv::Unknown || registration.service == PushService::Unknown {
         return None;

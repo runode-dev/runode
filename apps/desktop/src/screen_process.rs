@@ -61,7 +61,7 @@ pub fn run() -> i32 {
     // SAFETY: `main` 直接交到这里，还没开别的线程。
     let disclaimed = unsafe { runode_host::disclaim_responsibility() };
     // 宿主可能跑在 ssh 的登录或用户服务里，没有图形会话的环境，采集前接过来。
-    // SAFETY: 同上，还没开别的线程。
+    // SAFETY: `main` 直接交到这里，还没开别的线程。
     #[cfg(target_os = "linux")]
     let desktop = unsafe { runode_screen::adopt_session() };
     let dirs = runode_paths::Dirs::from_env();

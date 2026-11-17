@@ -54,7 +54,7 @@ pub type Listings = Vec<(PathBuf, Option<Vec<DirEntry>>)>;
 /// `walk_files` 最多列这么多个文件，免得在家目录这种地方走个没完。
 const MAX_WALK: usize = 50_000;
 
-/// `root` 下的所有文件，相对 `root`：往下走，不跟符号链接，和 `read_dir` 一样跳过 `.git`、`.DS_Store`，最多
+/// `root` 下的所有文件，相对 `root`：往下走，不跟符号链接，跳过 `.git`、`.DS_Store`，最多
 /// `MAX_WALK` 个。不在 git 仓库里时按名称找文件用它。
 pub fn walk_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();

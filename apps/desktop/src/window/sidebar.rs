@@ -162,7 +162,7 @@ const HOST_STATUS_DOT: f32 = 6.;
 /// 叠在系统图标右上角的连接状态圆点，连同和图标隔开的那圈描边。
 const HOST_STATUS_BADGE: f32 = 7.;
 
-/// 快捷键要按着的修饰键，查法和 `shortcut_hint` 一样：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
+/// 快捷键要按着的修饰键：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
 /// 都取最后一个绑定的第一键。
 pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<Modifiers> {
     let keymap = cx.key_bindings();

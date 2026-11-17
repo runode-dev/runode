@@ -1,4 +1,4 @@
-//! 写仓库的操作：暂存、丢弃、提交、同步远端和 stash。分支见 `branch`，按块暂存见 `patch`。
+//! 写仓库的操作：暂存、丢弃、提交、同步远端和 stash。
 
 use std::{
     collections::HashMap,
@@ -20,7 +20,7 @@ use crate::{
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Repo {
-    /// 仓库的根目录，和 `Snapshot::root` 一样。
+    /// 仓库的根目录。
     pub root: PathBuf,
 }
 
@@ -86,7 +86,7 @@ impl Repo {
         Self { root }
     }
 
-    /// `dir` 所在仓库的句柄，根目录和 `snapshot` 读到的一样；`dir` 不在 git 仓库里时为空。只问一次
+    /// `dir` 所在仓库的句柄，根目录按 `dir` 的写法；`dir` 不在 git 仓库里时为空。只问一次
     /// git，不读状态。
     pub fn open(dir: &Path) -> Option<Self> {
         find_repo(dir).map(|(root, _)| Self::new(root))
@@ -130,7 +130,7 @@ impl Repo {
         run(dir, full, None).map(drop)
     }
 
-    /// 暂存这些文件的改动，含删掉的文件。路径相对 `root`，和 `FileDiff::path` 一样；落在
+    /// 暂存这些文件的改动，含删掉的文件。路径相对 `root`；落在
     /// 嵌套仓库里的转到那个仓库里暂存。
     pub fn stage(&self, paths: &[PathBuf]) -> Result {
         let groups = self.group(paths.iter().map(PathBuf::as_path))?;
@@ -414,7 +414,7 @@ impl Repo {
         run(&self.root, ["fetch"], None).map(drop)
     }
 
-    /// 同 `fetch`，给没人看着时用：要凭据时不弹任何要人回答的窗口，直接失败。空的 `GIT_ASKPASS`
+    /// 从默认的远端取最新的提交，不动工作区，给没人看着时用：要凭据时不弹任何要人回答的窗口，直接失败。空的 `GIT_ASKPASS`
     /// 让 git 不找问密码的程序，`SSH_ASKPASS_REQUIRE` 让 ssh 不弹问口令的窗，`GCM_INTERACTIVE`
     /// 让 Git Credential Manager 不弹登录窗。ssh agent 自己要的确认（1Password 授权、硬件密钥要碰一下）
     /// 拦不住。

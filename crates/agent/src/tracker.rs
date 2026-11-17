@@ -1,7 +1,7 @@
 //! 把各路信号合成前台 agent 的状态，并去抖。
 //!
 //! 信号有：前台进程认出来的 agent（`Tracker::foreground`）、标题开头的状态字符和 OSC 9;4 进度
-//! （`Tracker::title`、`Tracker::progress`，见 `crate::title`）、程序用 OSC 7501 报告的状态
+//! （`Tracker::title`、`Tracker::progress`）、程序用 OSC 7501 报告的状态
 //! （`Tracker::program_status`）、屏幕底部的文字和输出活动（`Tracker::output`）。合成的规则：
 //!
 //! - 是哪个 agent：前台进程认出来的优先，其次是标题前缀报告的，再次是 OSC 7501 报告的 `app`
@@ -69,7 +69,7 @@ pub struct Tracker {
     process: Option<AgentKind>,
     /// 认出它的时刻，启动宽限期从这里算；宽限期过完、求值过一次后清掉。
     grace_from: Option<Instant>,
-    /// 标题前缀报告的 agent，见 `title::split_status`。
+    /// 标题前缀报告的 agent。
     title_agent: Option<Agent>,
     /// 去掉前缀后的标题是 pi 的。
     pi_title: bool,
@@ -97,10 +97,10 @@ pub struct Tracker {
     by_activity: bool,
     /// 上次求值的工作中是规则盖过 agent 报告的空闲得来的。
     overriding: bool,
-    /// 交接前公布的 agent，见 `resume`：前台换程序或回到 shell 之前，别的信号认不出是哪个 agent
+    /// 交接前公布的 agent：前台换程序或回到 shell 之前，别的信号认不出是哪个 agent
     /// 时按它算；它的进程这时才被认出来的，不算刚启动，没有启动宽限期。
     carried: Option<Agent>,
-    /// 交接前那阵输出还算在继续，见 `resume`：输出重新流起来（`output_resumed` 或下一段输出）
+    /// 交接前那阵输出还算在继续：输出重新流起来（`output_resumed` 或下一段输出）
     /// 之前，按输出活动判的工作中不撤。
     held_burst: bool,
 }

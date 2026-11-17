@@ -330,7 +330,7 @@ impl WindowView {
         Some(view)
     }
 
-    /// 按了命令的快捷键（见 `keys`）：这里没绑时交给别的绑定或终端。绑着时现请宿主列一遍终端目录的命令
+    /// 按了命令的快捷键：这里没绑时交给别的绑定或终端。绑着时现请宿主列一遍终端目录的命令
     /// （菜单没打开过时还没列），找叫这个名字的（项目的键找不是通用的命令，通用的键只找通用命令），像在菜单里
     /// 点它一样跑；没有或者列不出来时响一声、记日志。列的期间切到了别的 workspace、按的时候或列完时有对话框
     /// 开着（`modal_dialog_open`、看板的 `dialog_open`）时不跑，免得终端开在对话框后面、焦点被换走。远端的 workspace
@@ -482,7 +482,7 @@ impl WindowView {
         self.dropdown_shown(super::Dropdown::Tasks)
     }
 
-    /// 在命令按钮下面弹出命令菜单，各项见 `tasks_menu_items`。上次跑的命令还在菜单里时选中它；不然从键盘
+    /// 在命令按钮下面弹出命令菜单。上次跑的命令还在菜单里时选中它；不然从键盘
     /// 打开时选中第一组里的第一条命令，那一组收着时往下找，一条都没有时选中添加命令。
     fn open_tasks_menu(&mut self, from_keyboard: bool, cx: &mut Context<Self>) {
         let (items, last) = self.tasks_menu_items(cx);

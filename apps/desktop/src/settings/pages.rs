@@ -702,8 +702,7 @@ impl SettingsView {
         })
     }
 
-    /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回的各行，见
-    /// `config::clear_first`。
+    /// 逗号隔开、各层叠加的列表键（`status-bar-hidden`、`agent-notifications-exclude`）要写回的各行。
     fn with_clear(&self, key: &str, values: Vec<String>) -> Vec<String> {
         crate::config::clear_first(&self.file.values(key), &self.config.values(key), values)
     }

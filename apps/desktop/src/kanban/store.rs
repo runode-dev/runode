@@ -143,7 +143,7 @@ pub(crate) fn host_below(cx: &App, level: u32) -> bool {
     (Host::get(cx).board)().is_some_and(|board| board < level)
 }
 
-/// 问到任务却没问到会话时，隔多久补问一次，见 `watch`。
+/// 问到任务却没问到会话时，隔多久补问一次。
 const SESSIONS_RETRY: Duration = Duration::from_secs(2);
 
 /// 在后台跟着看板：记下和宿主说话的 `host`，现在问一次，`changed`（宿主说看板变了、换了一条连接）来了

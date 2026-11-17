@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-/// 这些计时点的 tracing target。默认的日志过滤把它关掉，见 `main`。
+/// 这些计时点的 tracing target。默认的日志过滤把它关掉。
 pub const TARGET: &str = "runode::startup";
 
 /// `main` 第一行记下的时刻：单调时钟用来量之后的间隔，墙上时钟用来和内核记的进程启动时刻对齐。

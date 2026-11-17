@@ -1,4 +1,4 @@
-//! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度（见 `runode_agent::models`），
+//! 新建、编辑任务和定时的对话框：标题、提示词、在哪个工作区或目录里做、agent 和它的模型、强度，
 //! 要用的 skill、以哪个自定义 agent 的身份跑（`skills`）、附上的文件，免不免确认，要不要独立的工作树，做完要不要自动标完成，
 //! 开始后多久没做完就算没做成（时限）；新建的和还没开始的任务另挑什么时候做（`StartMode`）：马上开始、放进待办等我来
 //! 开始、排队（可以指定先等另一个任务做完），排队的存好以后另发 `ClientMsg::QueueTodo`；新建时还能挑定时，定时多一组
@@ -188,7 +188,7 @@ const LABEL_WIDTH: f32 = 110.;
 /// 下拉框、小签和左栏标签共用的一行高，按基准字号的点数。
 const CONTROL_HEIGHT: f32 = 30.;
 
-/// 新建、编辑任务和定时的对话框，见模块说明。
+/// 新建、编辑任务和定时的对话框。
 pub struct TodoDialog {
     /// 是定时（否则是任务）；新建时随「什么时候做」选没选定时变。
     pub(crate) schedule: bool,
@@ -226,7 +226,7 @@ pub struct TodoDialog {
     /// `dir` 所在仓库当前的分支，写在项目框里；后台读好前、不在仓库里时为空。
     branch: Option<String>,
     worktree: bool,
-    /// 挑上的 skill、自定义 agent 和附上的文件，见 `TodoSpec`；`found` 是在 `dir` 能找到的 skill 和自定义 agent。
+    /// 挑上的 skill、自定义 agent 和附上的文件；`found` 是在 `dir` 能找到的 skill 和自定义 agent。
     skills: Vec<String>,
     subagent: Option<String>,
     attachments: Vec<PathBuf>,

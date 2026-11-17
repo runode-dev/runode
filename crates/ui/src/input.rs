@@ -187,7 +187,7 @@ impl InputState {
         self
     }
 
-    /// 输密码用的输入框，见 `masked`。
+    /// 输密码用的输入框。
     pub fn with_masked(mut self) -> Self {
         self.masked = true;
         self
@@ -259,7 +259,7 @@ impl InputState {
         Snapshot { text: self.text.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
-    /// 编辑前记下当前状态供撤销，见 `History::record`。
+    /// 编辑前记下当前状态供撤销。
     fn record(&mut self, kind: Option<EditKind>) {
         let now = || Snapshot { text: self.text.clone(), selected: self.selected.clone(), reversed: self.reversed };
         self.history.record(kind, now);
@@ -421,7 +421,7 @@ impl InputState {
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         // 组字时输入法把 Cmd+V 交回来（`doCommandBySelector:`）也会派发到这里：换掉选区会把还没确定的字
-        // 当成已经打上的，之后输入法再改它就对不上了，同 `cut`、`undo`。
+        // 当成已经打上的，之后输入法再改它就对不上了。
         if self.marked.is_some() {
             return;
         }
@@ -469,7 +469,7 @@ pub(super) fn previous_char(text: &str, offset: usize) -> usize {
     }
 }
 
-/// 往右一个字，和 `previous_char` 一样按整段文字的字位簇算；光标在字中间时到这个字的结尾。
+/// 往右一个字，按整段文字的字位簇算；光标在字中间时到这个字的结尾。
 pub(super) fn next_char(text: &str, offset: usize) -> usize {
     match GraphemeCursor::new(offset, text.len(), true).next_boundary(text, 0) {
         Ok(boundary) => boundary.unwrap_or(text.len()),

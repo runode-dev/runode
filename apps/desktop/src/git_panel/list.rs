@@ -43,7 +43,7 @@ pub(super) const ROW_HEIGHT: f32 = 22.;
 /// 文件比段标题往右缩进的宽度，树形式里每深一层再缩进这么多。
 const INDENT: f32 = 12.;
 
-/// 点文件行时在预览栏里打开的 diff，见 `GitPanelEvent::OpenDiff`。
+/// 点文件行时在预览栏里打开的 diff。
 #[derive(Clone)]
 pub(super) struct Diff {
     pub root: PathBuf,
@@ -82,8 +82,7 @@ impl GitPanel {
             .collect()
     }
 
-    /// 第 `ix` 行；图表里的行 `ix` 是在 `PanelState::graph_rows` 里的下标。块头不在这里画，见
-    /// `render_repo_block`。
+    /// 第 `ix` 行；图表里的行 `ix` 是在 `PanelState::graph_rows` 里的下标。块头不在这里画。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_git_row(
         &self,

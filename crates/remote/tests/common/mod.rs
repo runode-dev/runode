@@ -51,11 +51,11 @@ pub struct Harness {
     pub fingerprint: [u8; 32],
     /// 门禁过了以后每要一条到宿主的连接，宿主那一端就送到这里。
     pub hosts: mpsc::Receiver<UnixStream>,
-    /// 同上，到远程桌面的采集进程的。
+    /// 门禁过了以后每要一条到远程桌面的采集进程的连接，采集进程那一端就送到这里。
     pub screens: mpsc::Receiver<UnixStream>,
-    /// 同上，到识别的。
+    /// 门禁过了以后每要一条到识别的连接，识别那一端就送到这里。
     pub speeches: mpsc::Receiver<UnixStream>,
-    /// 同上，到收图片、视频的。
+    /// 门禁过了以后每要一条到收图片、视频的连接，收文件那一端就送到这里。
     pub media: mpsc::Receiver<UnixStream>,
     /// 桌面设备要读写项目时，项目服务那一端送到这里；对面的构建是 `PROJECT_BUILD` 才给开。
     pub projects: mpsc::Receiver<UnixStream>,

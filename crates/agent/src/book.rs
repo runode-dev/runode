@@ -39,7 +39,7 @@ const BUILTIN: &[(&str, &str)] = &[
 /// 用户规则要重启才生效。
 #[derive(Debug)]
 pub struct RuleBook {
-    /// 用户规则的目录，见 `runode_paths::Dirs::agent_detection_dir`。
+    /// 用户规则的目录。
     user_dir: Option<PathBuf>,
     /// 按 `AgentKind::ALL` 的顺序。`None` 是这种 agent 没有规则。
     sets: [OnceLock<Option<Arc<RuleSet>>>; AgentKind::ALL.len()],

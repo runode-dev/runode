@@ -65,7 +65,7 @@ type HostsInUse = Box<dyn Fn(&App) -> HashSet<crate::host_client::hosts::HostId>
 /// 点了关闭、按了 Esc 或关分屏的键：窗口收起设置页。
 pub struct Close;
 
-// 关分屏的键在设置页里收起设置页，见 `keybinds::bind`。
+// 关分屏的键在设置页里收起设置页。
 gpui::actions!(runode, [CloseSettings]);
 
 /// 输入框里的文字改的是什么。

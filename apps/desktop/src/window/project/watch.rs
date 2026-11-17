@@ -66,7 +66,7 @@ impl ProjectWatch {
     }
 
     /// `path` 变了要不要重读。git 目录里只看暂存区、引用这些（写对象和锁文件之后总跟着改它们）；
-    /// 被忽略的文件只在它所在的目录正显示在文件树里（`listed`，见 `FileTree::is_listed`）时才算，免得
+    /// 被忽略的文件只在它所在的目录正显示在文件树里（`listed`）时才算，免得
     /// 产物目录一直在写、跟着一直重读；忽略与否按文件所在的那个仓库（`git`）算，不在 git 仓库里时所有
     /// 文件都按被忽略的算。
     pub(super) fn affects(&self, path: &Path, git: Option<&git::Repos>, listed: &dyn Fn(&Path) -> bool) -> bool {

@@ -107,7 +107,7 @@ impl ConfigFile {
         }
     }
 
-    /// 还没写过 `key` 时新行插在哪：见 `set`。
+    /// 还没写过 `key` 时新行插在哪；没有合适的位置时为 `None`。
     fn insert_at(&self, key: &str) -> Option<usize> {
         let mentions = |key: &str| {
             self.lines

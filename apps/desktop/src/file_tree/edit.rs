@@ -53,7 +53,7 @@ fn error_text(err: &OpError, name: &str) -> String {
 }
 
 impl FileTree {
-    /// workspace `ws`（为空时是当前的）的文件在哪台机器上，写法同 `ProjectHost::name`。
+    /// workspace `ws`（为空时是当前的）的文件在哪台机器上：远端主机的写法（`HostId::key`），本机为空。
     fn host_of(&self, ws: Option<WorkspaceId>) -> Option<String> {
         let state = ws.and_then(|ws| self.workspaces.get(&ws));
         state.map_or(self.input.project.name(), |state| state.project.name()).map(str::to_owned)
@@ -160,7 +160,7 @@ impl FileTree {
         self.start_file_edit_with(target, None, window, cx);
     }
 
-    /// 和 `start_file_edit` 一样，`typed` 不为空时输入框里填它：新建、改名没成时把刚才输的名字放回去改。
+    /// 打开新建或改名的输入框，`typed` 不为空时输入框里填它：新建、改名没成时把刚才输的名字放回去改。
     fn start_file_edit_with(
         &mut self,
         target: EditTarget,
@@ -265,7 +265,7 @@ impl FileTree {
             self.edit_failed(self.ws, target, name.to_owned(), detail, window, cx);
             return;
         };
-        // 同 `transfer`：在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
+        // 在后台建，网络卷挂住时不卡界面；完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树。
         let (ws, dir, name) = (self.ws, dir.to_path_buf(), name.to_owned());
         let project = self.project();
         let job = cx.background_spawn({
@@ -302,7 +302,7 @@ impl FileTree {
             self.edit_failed(self.ws, target, name.to_owned(), detail, window, cx);
             return;
         };
-        // 同 `create_entry`，在后台改。
+        // 在后台改，网络卷挂住时不卡界面。
         let (ws, from, name) = (self.ws, path.to_path_buf(), name.to_owned());
         let project = self.project();
         let job = cx.background_spawn({
@@ -570,7 +570,7 @@ impl FileTree {
 
     /// 在后台把 `src` 挪进（`cut`）或复制进 `dir`，目录可能很大；完了选中挪过去或复制出来的那一项。
     fn transfer(&mut self, src: PathBuf, dir: PathBuf, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // 同 `delete_file`：完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树，失败时也只重读它的目录。
+        // 完成时可能已经切走了，选中和定位的是发起的那个 workspace 的树，失败时也只重读它的目录。
         let (ws, project) = (self.ws, self.project());
         let job = cx.background_spawn({
             let (src, dir) = (src.clone(), dir.clone());
@@ -606,7 +606,7 @@ impl FileTree {
         self.show_file_error_then(title, detail, window, cx, |_, _, _| {});
     }
 
-    /// 和 `show_file_error` 一样，框关掉以后再做 `then`。
+    /// 弹框说哪个操作没成、为什么，框关掉以后再做 `then`。
     fn show_file_error_then(
         &self,
         title: &str,

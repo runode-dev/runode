@@ -86,7 +86,7 @@ fn snapshot() -> Vec<(u32, u32)> {
     let mut more = unsafe { Process32FirstW(snap, &mut entry) } != 0;
     while more {
         pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-        // SAFETY: 同上。
+        // SAFETY: `snap` 开着，`entry` 是本地变量、`dwSize` 已经填好。
         more = unsafe { Process32NextW(snap, &mut entry) } != 0;
     }
     // SAFETY: 快照句柄只关这一次。

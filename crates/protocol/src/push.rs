@@ -10,7 +10,7 @@
 //!    交 APNs 的 device token，带中转的官方构建（iOS 和 Android 都是 `OFFICIAL_BUNDLE`）交中转服务给的句柄，
 //!    没带中转的官方 iOS 构建也交 device token，没带中转的 Android 构建交 FCM 的 registration token
 //!    原文。电脑记在配对设备表里，手机断开后照样能推。注销是 `token` 为空的同一条消息。这条消息只在手机经
-//!    远程访问连上来时由监听方办，不到宿主那里，见 `remote` 的模块文档。
+//!    远程访问连上来时由监听方办，不到宿主那里。
 //! 2. 那台电脑上有会话的 agent 停下来等回答时，电脑给每台登记过的手机发一条通知（`notify_payload`）。
 //!    一次等回答只推一次，等的时候屏幕上的问题变了不再推。通知的 `apns-collapse-id` 是会话标识
 //!    （`Notification::collapse_id`），同一个会话再等时新通知替掉通知中心里的旧的；`thread-id` 是电脑，
@@ -33,7 +33,7 @@
 //!
 //! APNs payload 里 `aps` 的键是 APNs 规定的 kebab-case；`aps` 外面的 `machine`、`session` 由手机端读，
 //! 点开通知时据此打开那个会话。时间是 Unix 秒，由调用方传入 `now`。payload 超过 `MAX_APNS_PAYLOAD`
-//! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`，见 `notify_payload`。
+//! 字节时先从最上面一行起删 `lines`，删完还超就缩短 `title`。
 //!
 //! 发给 FCM 的是只带 `data` 的消息（`fcm_message`），不用 FCM 的 `notification`：标题、副标题由 Android
 //! App 按 `data` 里的字段用自己的本地化文案拼，`data` 里的值都是字符串。`data` 超过 `MAX_FCM_DATA` 字节时
@@ -60,7 +60,8 @@ pub const MAX_APNS_PAYLOAD: usize = 4096;
 pub const TEXT_LIMIT: usize = 48;
 /// 屏幕上的一行最多留这么多个字。
 pub const LINE_LIMIT: usize = 100;
-/// 等回答时带几行屏幕底部的文字（问题），和手机端 `SessionListModel.waitingPreviewLines` 一样。
+/// 等回答时带几行屏幕底部的文字（问题）。要等于手机端的 `SessionListModel.waitingPreviewLines`，否则通知里
+/// 和 App 卡片上的预览行数不同。
 pub const BLOCKED_LINES: usize = 3;
 /// 通知在 APNs 那里最多留这么多秒（`apns-expiration`）：手机这段时间一直连不上就不送了，等回答的事
 /// 过时了。
@@ -97,7 +98,7 @@ const UNTITLED: &str = "终端";
 const TITLE_KEY: &str = "agent.blocked.title";
 const TITLE_KEY_UNNAMED: &str = "agent.blocked.title.unnamed";
 const SUBTITLE_KEY: &str = "agent.blocked.body";
-/// 任务做完、没做成的通知的标题，不带参数；副标题和等回答的一样用 `SUBTITLE_KEY`。
+/// 任务做完、没做成的通知的标题，不带参数；副标题用 `SUBTITLE_KEY`。
 const TODO_DONE_TITLE_KEY: &str = "todo.done.title";
 const TODO_FAILED_TITLE_KEY: &str = "todo.failed.title";
 
@@ -625,8 +626,7 @@ fn fit_within(
     }
 }
 
-/// 超过 `limit` 个字时留前 `limit - 1` 个加「…」，和手机端截字的规矩一样
-/// （那边按字形簇数，这里按 Unicode 标量数）。
+/// 超过 `limit` 个字（按 Unicode 标量数）时留前 `limit - 1` 个加「…」。
 fn clipped(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_owned();

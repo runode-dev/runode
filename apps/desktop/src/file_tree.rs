@@ -123,7 +123,7 @@ const TOOLBAR_BUTTON_SIZE: f32 = 24.;
 /// 剪切下来等着粘贴的行画得淡一些。
 const CUT_OPACITY: f32 = 0.5;
 
-/// app 每次画文件树、对它做什么之前交进来的东西，见 `FileTree::set_input`。
+/// app 每次画文件树、对它做什么之前交进来的东西。
 #[derive(Clone, Debug, Default)]
 pub struct Input {
     /// 当前 workspace 的名字：树根就是 workspace 的目录时标题写它。
@@ -142,7 +142,7 @@ pub struct TreeScan {
     pub root: PathBuf,
     /// 这个仓库以及它里面的子模块和嵌套仓库的 git 状态；不在仓库里时为空。变了才换一份新的，没变时交回上次那份。
     pub git: Option<Arc<git::Repos>>,
-    /// 根目录和展开的目录的内容，见 `list_dirs`。
+    /// 根目录和展开的目录的内容。
     pub listings: Listings,
     /// 终端换了目录时是新的目录，文件树展开到它、选中它。
     pub reveal: Option<PathBuf>,
@@ -159,7 +159,7 @@ pub fn read_ticket() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
-/// 整个窗口一份的开关，app 随窗口存档，见 `FileTree::options`。
+/// 整个窗口一份的开关，app 随窗口存档。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     /// 显示被 git 忽略的文件。
@@ -345,11 +345,11 @@ impl Render for DraggedFile {
     }
 }
 
-/// 文件树，见模块说明。
+/// 文件树。
 pub struct FileTree {
     /// 各 workspace 的树，没显示过文件树的 workspace 不在表里。
     workspaces: HashMap<WorkspaceId, TreeState>,
-    /// 显示的是哪个 workspace 的树，见 `switch_workspace`；还没说过时为空。
+    /// 显示的是哪个 workspace 的树；还没说过时为空。
     ws: Option<WorkspaceId>,
     /// 当前 workspace 还没有树时读到的空树。
     empty: TreeState,
@@ -410,7 +410,7 @@ impl FileTree {
         }
     }
 
-    /// 换上当前 workspace 的名字、目录和单击打不打开文件，见 `Input`。只记下来，不重画：app 在画的时候调。
+    /// 换上当前 workspace 的名字、目录和单击打不打开文件。只记下来，不重画：app 在画的时候调。
     pub fn set_input(&mut self, input: Input) {
         self.input = input;
     }
@@ -1057,8 +1057,9 @@ impl FileTree {
         result
     }
 
-    /// 和 `with_tree` 一样，但对的是 workspace `ws` 的树：后台改文件的操作做完时可能已经切到了别的 workspace。
-    /// 那个 workspace 关掉了或者还没读到根目录时不做。
+    /// 拿 workspace `ws` 的文件树的根目录和显示哪些文件，对它的树做 `f`；`f` 要读的目录随后在后台读。
+    /// 不取当前的：后台改文件的操作做完时可能已经切到了别的 workspace。那个 workspace 关掉了或者还没读到
+    /// 根目录时不做。
     fn with_tree_of(
         &mut self,
         ws: Option<WorkspaceId>,

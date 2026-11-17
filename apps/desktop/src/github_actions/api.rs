@@ -91,7 +91,7 @@ pub(super) struct Workflow {
     pub path: String,
     /// `active`，或者 `disabled_manually` 这类停用的状态。
     pub state: String,
-    /// 能手动触发（有 `workflow_dispatch`），见 `dispatchable`。
+    /// 能手动触发（有 `workflow_dispatch`）。
     #[serde(skip)]
     pub dispatch: bool,
 }

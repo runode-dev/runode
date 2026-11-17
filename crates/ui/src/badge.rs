@@ -1,7 +1,7 @@
 //! 徽标（照 shadcn 的 `Badge`）：一小块圆角的底子，里面一段小字，比如段标题上的个数。`BadgeVariant` 选样子，
-//! 颜色在 render 里从主题读；调用方接着写的样式盖在组件自己的上面，写法同 `Button`。文字太长时截断。
+//! 颜色在 render 里从主题读；调用方接着写的样式盖在组件自己的上面。文字太长时截断。
 //!
-//! 和 `Card` 一样不一定要报给辅助工具，要报时先用 `Badge::id` 给一个 id。
+//! 不一定要报给辅助工具，要报时先用 `Badge::id` 给一个 id。
 
 use gpui::{
     App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce,
@@ -53,7 +53,7 @@ impl Badge {
         self
     }
 
-    /// 给徽标一个元素 id，之后才能报给辅助工具。见 `Card::id`。
+    /// 给徽标一个元素 id，之后才能报给辅助工具。
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.div.interactivity().element_id = Some(id.into());
         self

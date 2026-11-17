@@ -163,8 +163,7 @@ pub struct Config {
     pub clipboard_write: ClipboardWrite,
     /// 终端里的程序用 OSC 52 读剪贴板时照读、先问还是回空的。
     pub clipboard_read: ClipboardRead,
-    /// 终端里的程序可以用 CSI 8 t 改窗口尺寸；改不改还要看窗口状态，见 `WindowView` 处理
-    /// `TerminalEvent::ResizeWindow` 的地方。
+    /// 终端里的程序可以用 CSI 8 t 改窗口尺寸；改不改还要看窗口状态。
     pub vt_window_resize_allowed: bool,
     /// 退出 app 后会话留在单独一个进程的宿主（`runode --host`）里，下次打开接着用；关着时退出 app
     /// 让宿主连会话一起退出。改了马上算数。
@@ -289,7 +288,7 @@ impl Default for Config {
             developer_mode: false,
             vt_window_resize_allowed: false,
             remote_access: false,
-            // 和 `runode_protocol::remote::DEFAULT_PORT` 一样；config 不依赖 protocol，桌面的测试对着两边。
+            // 要等于 `runode_protocol::remote::DEFAULT_PORT`；config 不依赖 protocol，由桌面的测试核对两边。
             remote_access_port: 7866,
             remote_access_name: None,
             remote_access_address: None,
@@ -327,7 +326,7 @@ pub enum Keybind {
 }
 
 impl Config {
-    /// 交给宿主的读写剪贴板的规矩，见 `ClientMsg::SetOptions`。
+    /// 交给宿主的读写剪贴板的规矩。
     pub fn clipboard_access(&self) -> ClipboardAccess {
         ClipboardAccess { write: self.clipboard_write, read: self.clipboard_read }
     }

@@ -120,7 +120,7 @@ fn custom_sources(text: &str, file: &Path, dir: &Path) -> Vec<TaskSource> {
 }
 
 /// 给看板新开的工作树先跑的命令：`tasks.json` 的 `setup` 里给 `dir`（任务的目录）自己或上级的、最深的
-/// 那一项，在工作树里跑。没有文件、读不懂、没配时为 `None`。和 `list` 一样会读文件。
+/// 那一项，在工作树里跑。没有文件、读不懂、没配时为 `None`。会读文件。
 pub fn worktree_setup(dir: &Path) -> Option<String> {
     let text = read_text(&runode_paths::Dirs::from_env().tasks_file()?)?;
     setup_in(&text, dir)

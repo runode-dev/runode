@@ -2,7 +2,7 @@
 //! 点在滑块外面的轨道上，滑块中间跳到那里再接着拖。
 //!
 //! 放在滚动区域的父元素里、排在滚动区域后面，父元素和滚动区域一样大。位置和长度在画的时候
-//! 现读 `ScrollHandle`（`gpui::list` 的是 `ListState`，见 `list_scrollbar`），滚动区域这一帧刚算好的
+//! 现读 `ScrollHandle`（`gpui::list` 的是 `ListState`），滚动区域这一帧刚算好的
 //! 偏移量不会晚一帧。`gpui::list` 没画过的项按估的高度算，滑块的长短会随着滚动慢慢变准；拖着滑块时
 //! 列表的总高度先定住，滑块不会跑开。
 //!
@@ -39,7 +39,7 @@ pub fn scrollbar(id: impl Into<ElementId>, handle: ScrollHandle, axis: Axis) -> 
     Scrollbar { id: id.into(), handle: Handle::Scroll(handle), axis, markers: Vec::new() }
 }
 
-/// `gpui::list` 的竖滚动条，样子和用法同 `scrollbar`。
+/// `gpui::list` 的竖滚动条。
 pub fn list_scrollbar(id: impl Into<ElementId>, list: ListState) -> Scrollbar {
     Scrollbar { id: id.into(), handle: Handle::List(list), axis: Axis::Vertical, markers: Vec::new() }
 }

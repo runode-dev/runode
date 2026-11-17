@@ -1,6 +1,6 @@
 //! `runode remote …`：给手机或别的电脑配对远程访问（`pair`）、列出（`devices`）和撤销（`revoke`）配对过的设备。
 //! 不经宿主，读写 `runode_remote` 管的文件：监听方（宿主所在的进程）开着时才能配对，列和
-//! 撤销不用它开着。配对前见 `turn_on`，配对后见 `offer_background`。
+//! 撤销不用它开着。
 
 use std::{
     io::{BufRead as _, IsTerminal as _, Write},
@@ -32,7 +32,7 @@ const QUIET_ZONE: usize = 2;
 /// `turn_on` 写完配置后等监听方起来的最长时间。
 pub(crate) const LISTENER_WAIT: Duration = Duration::from_secs(10);
 
-/// `answer` 读用户对「要不要在后台跑」的回答，见 `offer_background`；`listener_wait` 是 `turn_on` 等监听方的时间。
+/// `answer` 读用户对「要不要在后台跑」的回答；`listener_wait` 是 `turn_on` 等监听方的时间。
 pub(crate) fn pair(
     env: &Env,
     extra: &[IpAddr],

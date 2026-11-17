@@ -1,8 +1,7 @@
 //! 新建任务时能挑的 skill 和自定义 agent。skill 照 Agent Skills 的标准格式（agentskills.io）：一个目录一个 skill，
 //! 里面的 `SKILL.md` 开头是 YAML 的 front matter，必须写 `name` 和 `description`，`name` 只用小写字母、数字和
-//! 连字符、和目录同名；不合格式的不列。到任务目录和它往上各层的 `.agents/skills`、`.claude/skills`，家目录下的
-//! `.agents/skills`、`.claude/skills`、`.codex/skills` 里找。自定义 agent 照 Claude Code 的格式：`.claude/agents/`
-//! 下的 `*.md`，front matter 同样要有 `name` 和 `description`，名字只能有字母、数字和 `-_.:`。
+//! 连字符、和目录同名；不合格式的不列。自定义 agent 照 Claude Code 的格式：目录里的 `*.md`，front matter 同样
+//! 要有 `name` 和 `description`，名字只能有字母、数字和 `-_.:`。
 // shortcut: 插件带的 skill、agent（`插件:名字`）不列，要用时写进提示词；有人要时再读 `~/.claude/plugins`。
 
 use std::{
@@ -19,7 +18,8 @@ pub(crate) struct Found {
     pub(crate) subagents: Vec<String>,
 }
 
-/// 在 `dir` 往上各层和家目录 `home` 下找，见模块说明。会读文件，放到后台调。
+/// skill 在 `dir` 和它往上各层的 `.agents/skills`、`.claude/skills`，以及家目录 `home` 下的这两处和
+/// `.codex/skills` 里找；自定义 agent 在同样各层的 `.claude/agents` 里找。会读文件，放到后台调。
 pub(crate) fn find(home: Option<&Path>, dir: &Path) -> Found {
     let roots: Vec<&Path> = dir.ancestors().chain(home).collect();
     let skill_dirs = roots

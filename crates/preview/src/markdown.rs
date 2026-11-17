@@ -3,7 +3,7 @@
 //! （`> [!NOTE]` 这类）和脚注；标题按 GitHub 的规则算出锚点。代码块按标的语言高亮，颜色和
 //! `highlight` 一样是调色板语义的。
 //!
-//! HTML 只认 README 里常用的那些（见 `html`）：`<img>`（带 `width`、`height`）、`<h1>` 到 `<h6>`、
+//! HTML 只认 README 里常用的那些：`<img>`（带 `width`、`height`）、`<h1>` 到 `<h6>`、
 //! `<p>`、`<div>` 这类块、`<a href>`、`<br>`、`<hr>`、`<b>`、`<i>`、`<s>`、`<code>`、`<kbd>`，
 //! `align="center"` 和 `<center>` 包着的块收进 `Block::Centered`；别的标签丢掉、里面的文字照留，
 //! 注释不显示。和 GitHub 一样，`<div align="center">` 和 `</div>` 可以分在两个 HTML 块里，中间夹着
@@ -482,7 +482,7 @@ struct Builder<'a> {
     /// 里的 b 不是斜体）：和浏览器一样，`<script>` 里的都只是文字。
     raw_tags: Vec<bool>,
     /// 正在收的 Markdown 段落、标题、表格单元格开头的样子；在 HTML 块里是正在收的段落第一段文字处或
-    /// 标题打开处的样子，见 `InlineState` 和 `close_html_inlines`。
+    /// 标题打开处的样子。
     inline_saved: Option<InlineState>,
     /// 各层没摊平的列表项开头的样子：紧凑列表项里的文字没有段落标记，项结束时退回。
     item_saved: Vec<InlineState>,

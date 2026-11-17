@@ -6,7 +6,7 @@
 //! 识别上。电脑回 `Ready`（版本不同时回 `Incompatible` 后断开）。手机录完发 `Finish`，电脑识别完回
 //! `Text` 或 `Failed` 后断开。一条连接识别一段话；不要了就直接断开。
 //!
-//! 以后怎么改：和 `message` 一样，已有字段不改，新加的带 `#[serde(default)]`；改了含义时加
+//! 以后怎么改：已有字段不改，新加的带 `#[serde(default)]`；改了含义时加
 //! `SPEECH_VERSION`。
 
 use serde::{Deserialize, Serialize};

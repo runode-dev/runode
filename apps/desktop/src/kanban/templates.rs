@@ -103,7 +103,7 @@ pub(crate) struct Template {
 }
 
 impl Template {
-    /// 照 `text` 的写法读出模板，见模块说明；`run` 还是原文。
+    /// 照 `text` 的写法读出模板；`run` 还是原文。
     fn parse(id: String, name: &str, text: &str) -> Self {
         let (fields, body) = front_matter(text);
         let field = |key: &str| fields.iter().find(|(k, _)| *k == key).map(|(_, value)| *value);

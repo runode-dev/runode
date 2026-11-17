@@ -49,7 +49,7 @@ const MODES: [Mode; 16] = [
     Mode::new(1048, mode::Kind::Dec),
 ];
 
-/// 逐行比文字的回滚历史最多几行；更早的只比行数（见 `state` 的 `scrollback`），免得测试太慢。
+/// 逐行比文字的回滚历史最多几行；更早的只比行数，免得测试太慢。
 const COMPARED_ROWS: usize = 200;
 
 /// 一份 VT 的可比状态，按名字列出，不一样时报出是哪一项。

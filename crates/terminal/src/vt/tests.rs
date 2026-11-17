@@ -1,4 +1,4 @@
-//! `vt` 的测试，以及差分测试（见 `Session::from_snapshot` 的测试）共用的测试数据。
+//! `vt` 的测试，以及 `Session::from_snapshot` 的差分测试共用的测试数据。
 
 use std::time::{Duration, Instant};
 
@@ -581,7 +581,7 @@ fn scrollback_capacity_80_cols() {
     scrollback_capacity(80);
 }
 
-/// 同 `scrollback_capacity_80_cols`。
+/// 200 列时回滚历史填满留下多少行、占多少内存、快照多大。
 #[cfg(unix)]
 #[test]
 #[ignore = "测量内存，手动跑"]

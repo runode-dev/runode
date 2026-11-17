@@ -350,7 +350,7 @@ impl MobilePage {
         self.start_pairing(cx);
     }
 
-    /// 远程访问的开关：打开时照 `turn_on_remote_access`；关掉时丢掉在等的口令，配对卡换回没开的样子。
+    /// 远程访问的开关：打开时交给 `turn_on_remote_access`；关掉时丢掉在等的口令，配对卡换回没开的样子。
     fn set_remote_access(&mut self, on: bool, cx: &mut Context<Self>) {
         if on {
             self.turn_on_remote_access(cx);

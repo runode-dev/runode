@@ -73,7 +73,7 @@ impl ProgressCapture {
                 },
                 State::DiscardEscape => match b {
                     b'\\' => State::Ground,
-                    // 同 `BodyEscape`：ESC 打断了这条 OSC。
+                    // ESC 打断了这条 OSC，它本身可能是下一个序列的开头。
                     _ => self.after_escape(b),
                 },
             };

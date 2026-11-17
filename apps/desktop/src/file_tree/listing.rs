@@ -11,7 +11,7 @@ use runode_git::{self as git, FileStatus};
 pub use runode_files::Listings;
 pub(crate) use runode_files::{DirEntry, MAX_COMPACT, single_dir};
 
-/// 读 `dirs` 这些目录，被忽略的子目录（按 git 状态 `git` 算）不往下看，见 `runode_files::list_dirs`。
+/// 读 `dirs` 这些目录，被忽略的子目录（按 git 状态 `git` 算）不往下看。
 pub fn list_dirs(dirs: Vec<PathBuf>, git: Option<&git::Repos>) -> Listings {
     let changes = GitChanges::new(git);
     let decorator = Decorator::new(git, &changes);
@@ -52,7 +52,7 @@ fn dir_status(current: Option<FileStatus>, status: FileStatus) -> FileStatus {
 /// 快照留着一份，git 状态换了才重算。
 #[derive(Default)]
 pub(crate) struct GitChanges {
-    /// 主仓库和子仓库里有改动的文件，相对主仓库根，见 `Repos::statuses`。
+    /// 主仓库和子仓库里有改动的文件，相对主仓库根。
     statuses: HashMap<PathBuf, FileStatus>,
     /// 含有改动文件的目录，相对主仓库根，值是归总后的状态。
     changed_dirs: HashMap<PathBuf, FileStatus>,

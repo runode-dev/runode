@@ -1,8 +1,8 @@
 //! PTY 的读线程：把输出交给 `PtySink`，读到 EOF 或出错时报告 `PtyEvent::Exited`。
 //!
 //! 读之前先 `poll`，同时等着 `Notifier`：交接时用它叫醒读线程、让它停下而不再从 PTY 里多读一个
-//! 字节，接手来的会话里还用它知道 shell 退出了。叫停后读线程把 `PtySink` 交回来，可以接着读，
-//! 见 `Reader::resume`。PTY 的描述符是非阻塞的，见 `Pty::open`。`Pty::adopt_paused` 接手来的，
+//! 字节，接手来的会话里还用它知道 shell 退出了。叫停后读线程把 `PtySink` 交回来，可以接着读
+//! （`Reader::resume`）。PTY 的描述符是非阻塞的。`Pty::adopt_paused` 接手来的，
 //! 读线程开始读之前先等闸门（`Gate`）打开。
 
 use std::{
@@ -24,7 +24,7 @@ use crate::pty::{PtyEvent, PtySink, set_current_thread_interactive};
 /// 退出前写的输出读完，然后报告退出。
 const DRAIN_READS: usize = 64;
 
-/// 读线程的状态，和「看一眼状态、读一次」一起在锁里，见 `Reader::stop`。
+/// 读线程的状态，和「看一眼状态、读一次」一起在锁里。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     Running,
@@ -93,7 +93,7 @@ impl Reader {
     }
 
     /// 让读线程停下。返回之后它不会再从 PTY 读；已经读出来、正在交给 `PtySink` 的那块照样交出去，
-    /// 交完线程就结束，不报告 `PtyEvent::Exited`。不等线程结束，见 `finished`、`join`。
+    /// 交完线程就结束，不报告 `PtyEvent::Exited`。不等线程结束。
     pub(super) fn stop(&mut self) {
         let mut state = self.lock();
         if *state == State::Running {
@@ -132,7 +132,7 @@ impl Reader {
         self.thread.as_ref().is_none_or(JoinHandle::is_finished)
     }
 
-    /// 等读线程结束，返回它交回的 `PtySink`。它正卡在 `PtySink` 里时会一直等下去，见 `Pty::release`。
+    /// 等读线程结束，返回它交回的 `PtySink`。它正卡在 `PtySink` 里时会一直等下去。
     pub(super) fn join(&mut self) -> Option<PtySink> {
         let thread = self.thread.take()?;
         thread.join().unwrap_or_else(|_| {

@@ -1,7 +1,7 @@
-//! 升级时把旧宿主的会话交给新宿主：app 拉起这个构建的 `runode --host --take-over`（见
-//! `runode_host::launch_successor`），它以 `ClientKind::Successor` 连上旧宿主谈交接、接过会话和
-//! 监听的 socket，再往状态管道写一行 `HandoffStatus`；这边读到结果再决定怎么办（见
-//! `host_client::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
+//! 升级时把旧宿主的会话交给新宿主：app 拉起这个构建的 `runode --host --take-over`
+//! （`runode_host::launch_successor`），它以 `ClientKind::Successor` 连上旧宿主谈交接、接过会话和
+//! 监听的 socket，再往状态管道写一行 `HandoffStatus`；这边读到结果再决定怎么办
+//! （`host_client::establish`）。新宿主那一侧的入口是 `host_process::take_over`。
 //!
 //! 等结果分两段，拉起后等新宿主说「要回 `HandoffReady` 了」（状态管道上 `ready` 为真的一行）最多
 //! `READY_TIMEOUT`，之后再等结果最多 `RESULT_TIMEOUT`。
@@ -31,7 +31,7 @@ const RETRY_PAUSE: Duration = Duration::from_millis(200);
 pub struct HandoffStatus {
     /// 接手成功，旧宿主已经交出会话和 socket。
     pub ok: bool,
-    /// 还没有结果：新宿主收下了会话、要回 `HandoffReady` 了，结果随后另写一行，见模块文档。
+    /// 还没有结果：新宿主收下了会话、要回 `HandoffReady` 了，结果随后另写一行。
     #[serde(default)]
     pub ready: bool,
     /// 接过来的会话个数。
@@ -45,7 +45,7 @@ pub struct HandoffStatus {
     pub error: Option<HandoffFailure>,
 }
 
-/// 新宿主没接手的原因，见 `HandoffStatus::error`。
+/// 新宿主没接手的原因。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HandoffFailure {
@@ -79,7 +79,7 @@ impl HandoffStatus {
     }
 }
 
-/// 交接的结果，见 `hand_over`。
+/// 交接的结果。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// 新宿主接手了 `sessions` 个会话，其中 `replayed` 个的回滚历史没带过来；它已经在 socket 上
@@ -154,7 +154,7 @@ pub fn upgrade() -> i32 {
     1
 }
 
-/// 拉起一个新宿主，等它报告结果，两段期限见 `Timing`。超时时不杀它：它要是在旧宿主提交之后才
+/// 拉起一个新宿主，等它报告结果，两段期限按 `timing`。超时时不杀它：它要是在旧宿主提交之后才
 /// 卡住，会话已经在它手里，杀掉会连会话一起结束；提交之前卡住的，旧宿主到期限会自己杀掉它、回滚。
 fn attempt(exe: &Path, timing: Timing) -> Outcome {
     let successor = match runode_host::launch_successor(exe) {

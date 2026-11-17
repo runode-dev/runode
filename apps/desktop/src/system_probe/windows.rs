@@ -121,7 +121,7 @@ fn snapshot() -> HashMap<u32, (u32, String)> {
         let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
         let name = OsString::from_wide(&entry.szExeFile[..len]).to_string_lossy().into_owned();
         all.insert(entry.th32ProcessID, (entry.th32ParentProcessID, name));
-        // SAFETY: 同上。
+        // SAFETY: `handle` 是开着的快照，`entry` 按要求设好了 `dwSize`。
         more = unsafe { Process32NextW(handle, &mut entry) } != 0;
     }
     // SAFETY: 快照的句柄归这里，关一次。

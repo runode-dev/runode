@@ -43,15 +43,15 @@ pub(super) struct Effects {
     pub(super) program_status: RefCell<Vec<(String, String, Option<AgentState>)>>,
     /// shell 集成报告的命令步骤，按到达的先后，由 `take_commands` 取走。
     pub(super) prompts: RefCell<Vec<PromptEvent>>,
-    /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH，对外见 `SessionMeta::shell_path`。
+    /// shell 集成用 `SHELL_REPORT` 报告的 shell 自己的 PATH。
     pub(super) shell_path: RefCell<Option<std::ffi::OsString>>,
     /// shell 集成在这次显示提示符前报告的目录，由紧接着的输入开始（OSC 133;B）当场取走，放进
     /// `PromptEvent::InputStart`。
     pub(super) shell_cwd: RefCell<Option<std::path::PathBuf>>,
-    /// shell 集成用 `SHELL_REPORT` 报告的函数名，对外见 `SessionMeta::shell_names`。
+    /// shell 集成用 `SHELL_REPORT` 报告的函数名。
     /// 和交出去的状态共享同一份，报告变了才复制一份来改。
     pub(super) shell_names: RefCell<Arc<ShellNames>>,
-    /// 启动 shell 时交给集成脚本的报告口令（见 `shell_integration::prepare`），`SHELL_REPORT`
+    /// 启动 shell 时交给集成脚本的报告口令，`SHELL_REPORT`
     /// 带的口令和它一致才采用；没有口令时一条报告都不采用。
     pub(super) report_token: RefCell<Option<String>>,
     /// 带口令的 `command` 报告：shell 说紧接着的 OSC 133;C 是它真的开始运行命令。外层为 `None`
@@ -69,7 +69,7 @@ pub(super) struct Effects {
     pub(super) signed_ends: StdCell<bool>,
     /// 程序读写剪贴板的请求，按到达的先后，由 `HostSession::take_clipboard` 取走。
     pub(super) clipboard: RefCell<Vec<ClipboardRequest>>,
-    /// 程序可以写剪贴板（配置项 `clipboard-write` 是 allow），见 `HostSession::set_clipboard_writes`。
+    /// 程序可以写剪贴板（配置项 `clipboard-write` 是 allow）。
     /// 关着时写请求当场拒绝、不记下来，DA1 的回答里也不说支持 OSC 52。
     pub(super) clipboard_writes: StdCell<bool>,
 }
@@ -143,7 +143,7 @@ impl HostSession {
     }
 
     /// 把 PTY 输出喂给 VT，返回标题或 agent 状态是否变化，以及要转给前端的字节。agent 状态要读
-    /// 屏幕判断的部分按时间节流，不一定在这次判断，见 `HostSession::agent_deadline`。程序读写
+    /// 屏幕判断的部分按时间节流，不一定在这次判断。程序读写
     /// 剪贴板的请求记下来，由 `take_clipboard` 取走。
     ///
     /// 按文件、临时文件传的 Kitty 图片在这里读出来改写成直接传（`kitty_media`），VT 吃进的是

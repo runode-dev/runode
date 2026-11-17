@@ -1,4 +1,4 @@
-//! 抹掉 PTY 输出里 shell 集成报告的内容，见 `ReportRedactor`。
+//! 抹掉 PTY 输出里 shell 集成报告的内容。
 
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
@@ -28,7 +28,7 @@ pub struct ReportRedactor {
     inside: bool,
 }
 
-/// `ReportRedactor` 停在输出流的哪里，宿主升级时随会话交给新宿主，见 `ReportRedactor::state`。
+/// `ReportRedactor` 停在输出流的哪里，宿主升级时随会话交给新宿主。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RedactorState {
     /// 已经对上了报告开头 `ESC ] 6973;` 的几个字节，0 到 6；`inside` 时为 0。
@@ -64,8 +64,7 @@ impl ReportRedactor {
     }
 
     /// 输出流正停在一条报告里：开头的 `ESC ] 6973;` 已经过去了，结束序列还没到。这时宿主那份
-    /// VT 也停在这条报告中间，没写完的报告连着口令都在它的续接里，给别的进程的屏幕要另外处理，
-    /// 见 `HostSession::redacted_snapshot`。
+    /// VT 也停在这条报告中间，没写完的报告连着口令都在它的续接里，给别的进程的屏幕要另外处理。
     pub fn in_report(&self) -> bool {
         self.inside
     }

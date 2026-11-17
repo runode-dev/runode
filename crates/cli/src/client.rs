@@ -32,7 +32,7 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 const CLOSED: &str = "the Runode app closed the connection";
 
 /// 宿主正把会话交给新版本的宿主（`Goodbye { reason: GoodbyeReason::Handoff }`），这条连接断了。
-/// 过一会儿重新连上就是新宿主，见 `is_upgrading`。
+/// 过一会儿重新连上就是新宿主。
 #[derive(Debug)]
 pub(crate) struct Upgrading;
 
@@ -138,9 +138,9 @@ pub(crate) struct Connection {
     /// 等回话时跳过去的会话事件（状态、命令结束这些），按到达的先后，`next` 先交出它们：先连上
     /// 会话再发请求的命令，等回话期间会话变了的话不会漏掉。
     pending: RefCell<VecDeque<HostMsg>>,
-    /// 等回话时见过 `Exited` 的会话，见 `exited`。
+    /// 等回话时见过 `Exited` 的会话。
     exited: RefCell<HashSet<SessionId>>,
-    /// 等回话时见过 `Resync` 的会话，见 `lost`。
+    /// 等回话时见过 `Resync` 的会话。
     lost: RefCell<HashSet<SessionId>>,
     /// 下一个请求的编号。
     next_req: Cell<u32>,
@@ -156,7 +156,7 @@ impl Connection {
         Self::connect(env, Instant::now() + REPLY_TIMEOUT, true)
     }
 
-    /// 同 `open`，但握手最多等到 `deadline`，也不拉起宿主：补全这类不能久等的用它。
+    /// 连上宿主并握手，握手最多等到 `deadline`；连不上时不拉起宿主：补全这类不能久等的用它。
     pub(crate) fn open_by(env: &Env, deadline: Instant) -> Result<Self> {
         Self::connect(env, deadline, false)
     }
@@ -193,7 +193,7 @@ impl Connection {
             client: ClientKind::Cli,
             // 用不着 shell 集成报告的 PATH 和函数名，没变时不必再收。
             caps: Caps { shell_report: true, ..Caps::default() },
-            // 宿主据此记下是哪个终端里的程序在操作别的终端，见 `SessionMeta::driver`。
+            // 宿主据此记下是哪个终端里的程序在操作别的终端。
             session: env.session.as_deref().and_then(|own| own.parse().ok()),
             // 命令行不决定会话的尺寸，用不着设备名。
             device: None,
@@ -219,7 +219,7 @@ impl Connection {
     }
 
     /// 下一条消息，到 `deadline` 还没有时为 `None`；为 `None` 的 `deadline` 一直等。宿主说
-    /// `Goodbye` 时是错误，见 `goodbye`。
+    /// `Goodbye` 时是错误。
     pub(crate) fn next(&self, deadline: Option<Instant>) -> Result<Option<HostMsg>> {
         if let Some(message) = self.pending.borrow_mut().pop_front() {
             return Ok(Some(message));
@@ -244,20 +244,20 @@ impl Connection {
         self.reply_by(Instant::now() + REPLY_TIMEOUT)
     }
 
-    /// 同 `reply`，但给了 `deadline` 时不等过它：按用户给的超时等的命令用它。
+    /// 回话，给了 `deadline` 时不等过它：按用户给的超时等的命令用它。
     pub(crate) fn reply_before(&self, deadline: Option<Instant>) -> Result<HostMsg> {
         let by = Instant::now() + REPLY_TIMEOUT;
         self.reply_by(deadline.map_or(by, |at| at.min(by)))
     }
 
-    /// 同 `reply`，但等到 `deadline`：宿主要办好一阵子的请求（`StartTodo` 可能先跑 `git worktree add`）用它。
+    /// 回话，最多等到 `deadline`：宿主要办好一阵子的请求（`StartTodo` 可能先跑 `git worktree add`）用它。
     pub(crate) fn reply_by(&self, deadline: Instant) -> Result<HostMsg> {
         self.answer(deadline)?.map_err(|message| anyhow!(message))
     }
 
     /// 回话，宿主报的错放在里层，由调用方决定怎么办。跳过的事件里有会话结束（`Exited`）、宿主摘掉了
     /// 订阅（`Resync`）时记下来。
-    /// 宿主说 `Goodbye` 时是外层的错误，见 `goodbye`。
+    /// 宿主说 `Goodbye` 时是外层的错误。
     fn answer(&self, deadline: Instant) -> Result<Result<HostMsg, String>> {
         loop {
             // 不从 `pending` 取：那里的都是已经跳过的事件。

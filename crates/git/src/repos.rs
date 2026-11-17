@@ -74,7 +74,7 @@ impl Repos {
         std::iter::once(&self.main).chain(&self.subs)
     }
 
-    /// 第 `ix` 个仓库，0 是主仓库，和 `iter` 的顺序一样。
+    /// 按 `iter` 的顺序数的第 `ix` 个仓库，0 是主仓库。
     pub fn get(&self, ix: usize) -> Option<&Snapshot> {
         self.iter().nth(ix)
     }
@@ -195,7 +195,7 @@ impl Repo {
         })
     }
 
-    /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`，见 `add_worktree`。相对的 `path`
+    /// 把 `path` 在仓库里最上层的那一级目录写进 `info/exclude`。相对的 `path`
     /// 和 `git worktree add` 一样按仓库根算。
     fn exclude_top_dir(&self, path: &Path) -> Result {
         // 工作树已经建好了，按真实路径找最上层：`scratch/../new` 照字面取到的是 `scratch`，

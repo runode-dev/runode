@@ -2,7 +2,7 @@
 //! 各个终端摆在哪，以及手机新建工作区、给工作区改名）：在某个终端旁边开新终端，切到某个终端，挪动、
 //! 对调分屏，回答布局（`layout_report`），在最前面那个窗口里开一个某个目录的 workspace（已经有了就用
 //! 它），按布局里的序号给 workspace 改名。宿主把请求包成 `HostMsg::UiRequest` 经连接转过来
-//! （`host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来，见 `clipboard`。
+//! （`host_client::serve_ui`），这里在主线程上按会话找到它所在的窗口和分屏再办，用 `Link::ui_reply` 回话。终端里的程序读写剪贴板也这样转过来。
 
 use std::path::{Path, PathBuf};
 
@@ -345,7 +345,7 @@ pub(crate) fn windows(cx: &App) -> Vec<WindowHandle<WindowView>> {
 }
 
 impl WindowView {
-    /// 在 `beside` 这个分屏旁边开一个新终端，返回它（远端主机上的会话还在后台开，见 `TerminalView::opened`）。`cwd` 为空时沿用旁边那个终端的
+    /// 在 `beside` 这个分屏旁边开一个新终端，返回它（远端主机上的会话还在后台开）。`cwd` 为空时沿用旁边那个终端的
     /// 目录。不切过去（`focus` 为假）时当前的 workspace、标签和焦点都不动，看不见的新终端也马上
     /// 启动 shell。`beside` 为空时当前 workspace 里没有标签：新终端不管 `placement`，作为它的第一个
     /// 标签当场显示。`fold` 为真时新分屏直接折叠，经典样式或标签里没有别的展开着的分屏而折不了时照常展开。
@@ -408,7 +408,7 @@ impl WindowView {
         Some(view)
     }
 
-    /// 切到或者新建主机 `host` 上目录是 `dir`（已经规范化过，见 `inspect_dir`）的 workspace，返回它当前标签里
+    /// 切到或者新建主机 `host` 上目录是 `dir`（已经规范化过）的 workspace，返回它当前标签里
     /// 有焦点的终端。已经有这个目录的 workspace 时不新建、不改名；那个分屏还没开会话、或者
     /// workspace 里没有标签时在它末尾另开一个标签。没有时在 `dir` 开一个终端，新 workspace 插在当前
     /// workspace 后面，`name` 为空时按目录取名。不切过去（`focus` 为假）时当前的 workspace 不动，新终端
@@ -431,7 +431,7 @@ impl WindowView {
             {
                 return Ok(tab.focused_view().clone());
             }
-            // 恢复布局时看不见的终端要等显示出来才开会话，见 `TerminalView::deferred`。
+            // 恢复布局时看不见的终端要等显示出来才开会话。
             let view = self.spawn_terminal_on(host, Some(dir), None, window, cx).ok_or("could not start a terminal")?;
             let size = self.reference_size(cx);
             if wi == self.active && self.tab().is_none() {

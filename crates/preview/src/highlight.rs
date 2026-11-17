@@ -205,7 +205,8 @@ pub fn highlight(path: &Path, lines: &[String], cancel: &AtomicBool) -> Option<V
     highlight_with(&assets, syntax, lines, cancel)
 }
 
-/// 和 `highlight` 一样逐行高亮，语言按 Markdown 代码块标的名字（`rust`、`js` 这类语言名或扩展名）找。
+/// 逐行高亮 `lines`，返回和 `lines` 一样多的行，语言按 Markdown 代码块标的名字（`rust`、`js` 这类语言名或
+/// 扩展名）找。认不出语言或者 `cancel` 被置上时为空。
 pub(crate) fn highlight_code(lang: &str, lines: &[String], cancel: &AtomicBool) -> Option<Vec<Vec<Span>>> {
     let assets = assets();
     let syntax = assets.0.find_syntax_by_token(lang).filter(|syntax| syntax.name != "Plain Text")?;

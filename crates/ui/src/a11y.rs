@@ -110,7 +110,7 @@ impl<E: StatefulInteractiveElement> Disable for E {}
 /// 连同里面的东西一起不报给辅助工具：模态对话框开着时盖住的那部分界面，不然辅助工具照样读得到、按得到
 /// 对话框后面的按钮。
 ///
-/// 只在藏起来时才成为一个节点，平时不多出一层。和 `Disable` 一样借合成子节点的回调改节点。
+/// 只在藏起来时才成为一个节点，平时不多出一层。借合成子节点的回调改节点。
 pub trait Hide: StatefulInteractiveElement + Sized {
     fn aria_hidden(self, hidden: bool) -> Self {
         if hidden {

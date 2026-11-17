@@ -394,7 +394,7 @@ fn snippet(text: &str, matcher: Option<&Regex>) -> (String, Option<Range<usize>>
 }
 
 /// 交给搜索的词：按名称找时去掉两头的空白；按内容找时原样搜，搜 `fn ` 不变成搜 `fn`，只有整串都是空白时
-/// 当作没输入，见 `FileTree::searching`。
+/// 当作没输入。
 fn search_query(mode: SearchMode, text: &str) -> String {
     match mode {
         SearchMode::Name => text.trim().to_owned(),
@@ -480,7 +480,7 @@ impl FileTree {
         self.search_files(false, cx);
     }
 
-    /// 同 `sync_file_search`；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
+    /// 条件和上次搜的不一样时在后台重搜，停下还在跑的上一次；`force` 时条件没变也重搜（文件树重读过），新结果到之前旧结果照旧显示。
     fn search_files(&mut self, force: bool, cx: &mut Context<Self>) {
         let project = self.input.project.clone();
         let search = &self.search;

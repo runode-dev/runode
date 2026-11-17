@@ -343,7 +343,7 @@ pub(crate) struct PanelState {
     pub dirs: Vec<DirRow>,
     /// 改动的文件以树形式查看，否则是列表；跟着窗口的设置。
     pub tree: bool,
-    /// 显示子模块和嵌套仓库、显示其他工作树；跟着窗口的设置，见 `shows`。
+    /// 显示子模块和嵌套仓库、显示其他工作树；跟着窗口的设置。
     pub show_subs: bool,
     pub show_worktrees: bool,
     /// 以树形式查看时收起的目录：仓库根、段和相对仓库根的路径；默认都展开。
@@ -361,7 +361,7 @@ pub(crate) struct PanelState {
     list_rows: Vec<GitRow>,
     /// 各个仓库的提交说明框和忙碌状态，按仓库根记。
     pub repos: HashMap<PathBuf, RepoPanel>,
-    /// 最近点过的那块的仓库根：菜单和快捷键派发的动作作用到它，见 `GitPanel::git_target`；
+    /// 最近点过的那块的仓库根：菜单和快捷键派发的动作作用到它；
     /// 图表也显示它的历史。
     pub active: Option<PathBuf>,
     /// 面板上次画多宽，图表的行据此决定放不放得下日期和引用标签。

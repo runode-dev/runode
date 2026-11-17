@@ -33,7 +33,7 @@ impl<A: LocalRequests, B: LocalRequests> LocalRequests for (A, B) {
     }
 }
 
-/// 手机发来的明文按帧过一遍，见模块文档。
+/// 手机发来的明文按帧过一遍。
 #[derive(Default)]
 pub(crate) struct FromPhone {
     header: [u8; HEADER_LEN],
@@ -164,7 +164,7 @@ impl FromPhone {
     }
 }
 
-/// 宿主发给手机的字节流现在走到哪一帧的哪里，见模块文档。
+/// 宿主发给手机的字节流现在走到哪一帧的哪里。
 #[derive(Default)]
 pub(crate) struct ToPhone {
     /// 帧头里载荷长度的那 4 个字节，到了几个记几个。

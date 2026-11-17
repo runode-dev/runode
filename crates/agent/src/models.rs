@@ -29,7 +29,7 @@ pub struct Launcher {
     pub effort_arg: Option<&'static str>,
     /// 强度接在模型名后面，不挑模型就挑不了强度。
     pub effort_needs_model: bool,
-    /// 不问权限、一路跑完的参数，连着前面的空格；没有、或者本来就不问的为空。见 `with_options`。
+    /// 不问权限、一路跑完的参数，连着前面的空格；没有、或者本来就不问的为空。
     pub auto_arg: Option<&'static str>,
     /// 用 `auto_arg` 时还要交给 agent 的设置：设置文件路径前面的参数（连着前后的空格）和文件的内容；不用的为空。
     /// 设置写进文件、只把路径放进命令：Windows PowerShell 给原生程序拼命令行时不转义参数里的双引号。
@@ -38,10 +38,10 @@ pub struct Launcher {
     pub subagent_arg: Option<&'static str>,
     /// 提示词前面的参数（`-i`、`--prompt`），连着前面的空格；提示词直接跟在后面的为空。
     prompt_arg: &'static str,
-    /// 接着当前目录里最近一次对话的参数，插在 `command` 后面，连着前面的空格；没有的为空，见 `resume_command`。
+    /// 接着当前目录里最近一次对话的参数，插在 `command` 后面，连着前面的空格；没有的为空。
     resume_arg: Option<&'static str>,
     /// 开始时指定对话号、续接时按号接回那场对话的两个参数，各连着前后的空格；不能指定对话号的为空，只能用
-    /// `resume_arg` 接目录里最近一次的，那可能是用户在同一目录里另开的对话。见 `start_command`。
+    /// `resume_arg` 接目录里最近一次的，那可能是用户在同一目录里另开的对话。
     session_args: Option<(&'static str, &'static str)>,
     probe: Probe,
 }
@@ -61,7 +61,7 @@ struct Probe {
 }
 
 enum Answer {
-    /// 一行行认，见 `Reply`。
+    /// 一行行认。
     Lines(fn(&str) -> Reply),
     /// 程序自己退出以后，读整段标准输出。
     Output(fn(&str) -> Option<Catalog>),
@@ -76,7 +76,7 @@ enum Reply {
     Done(Catalog),
 }
 
-/// 按常用的先后排；第一个和 `DEFAULT_AGENT` 一样，没挑过时用它。同一家不兼容的几个版本用同一个 `label`、挨着排，
+/// 按常用的先后排；第一个是没挑过时用的，要是 `runode_types::todo::DEFAULT_AGENT` 那一家。同一家不兼容的几个版本用同一个 `label`、挨着排，
 /// 新的在前，菜单里只列第一个，找不到它的命令时换下一个（`same_kind`）。
 pub const LAUNCHERS: &[Launcher] = &[
     Launcher {

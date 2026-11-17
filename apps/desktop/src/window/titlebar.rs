@@ -100,7 +100,7 @@ struct DraggedTab {
 
 impl Render for DraggedTab {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 底色和当前标签一样，见 `render_tab`。
+        // 底色和当前标签一样。
         let bg = if super::cards(cx) { cx.theme().tab_active } else { cx.theme().mix(0.08) };
         drag_chip(self.width, px(TITLEBAR_HEIGHT), self.title.clone(), bg, cx).justify_center()
     }
@@ -426,7 +426,8 @@ impl WindowView {
                                 .tooltip(close_tooltip)
                                 .on_press_down(cx, move |this, window, cx| this.close_tab_by_id(id, window, cx));
                             if compact {
-                                // 平时宽度为零，悬停时才撑开；不能用 display 切换，见下面经典样式的说明。
+                                // 平时宽度为零，悬停时才撑开；不能用 display 切换：悬停状态在 prepaint 和
+                                // paint 之间可能变化。
                                 el.children(tab.bell.then(|| div().flex_none().child(bell_dot()))).child(
                                     close
                                         .w_0()

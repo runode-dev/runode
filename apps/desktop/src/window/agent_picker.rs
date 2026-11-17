@@ -1,5 +1,5 @@
 //! agent 列表：盖在窗口上面的浮层，列出所有窗口里的 agent 分屏，输入文字过滤，上下键选、回车
-//! 跳过去、Esc 关掉。排序和过滤的规则见 `agents`。
+//! 跳过去、Esc 关掉。
 
 use crate::ui::picker::{matches_query, nav_delta, picker_panel};
 use crate::ui::popover::Popover;

@@ -62,7 +62,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # 推送中转只编进发布的版本，见 `runode_protocol::push::RELAY_URL`。
+  # 推送中转的地址只编进发布的版本（`runode_protocol::push::RELAY_URL`）。
   RUNODE_PUSH_RELAY: https://push.runode.dev
 
 jobs:
@@ -170,7 +170,7 @@ jobs:
     strategy:
       matrix:
         include:
-          # uuid 是打包脚本给这个架构写进程序的固定 UUID，每个版本都一样，见下面的核对。
+          # uuid 是打包脚本给这个架构写进程序的固定 UUID，每个版本都一样。
           - arch: arm64
             target: aarch64-apple-darwin
             uuid: 1D1AFDE6-3D39-5E7B-A9D8-E30F3FB0C040
@@ -332,7 +332,7 @@ jobs:
   build-linux-desktop:
     needs: prepare
     # 带界面的 Linux 版：开 runode 的 linux-desktop 特性，打成 AppImage、deb 和 rpm（scripts/linux-package.sh）。
-    # 和 build-linux 一样在 manylinux_2_28 的容器里编，glibc 和 libstdc++ 的要求相同；容器里另装 GPUI 的窗口后端
+    # 在 manylinux_2_28 的容器里编，两个 Linux 版对 glibc 和 libstdc++ 的要求才相同；容器里另装 GPUI 的窗口后端
     # 和录音要的开发库，可执行文件启动时要链接这些库，deb、rpm 把它们列成依赖。
     strategy:
       matrix:
@@ -514,7 +514,7 @@ jobs:
           path: target/release/bundle
           merge-multiple: true
       - name: 生成版本清单
-        # 格式见 `runode_update::Release`：archives 给出自动更新用的包的下载地址，macOS 的 dmg 按架构名，
+        # 格式是 `runode_update::Release`：archives 给出自动更新用的包的下载地址，macOS 的 dmg 按架构名，
         # Windows 的安装包是 windows-x86_64，Linux 的 AppImage 是 linux-加架构名。
         run: |
           bundle=target/release/bundle
@@ -550,7 +550,7 @@ jobs:
       - name: 发成草稿，传齐了再公开
         # 先建草稿再公开：传到一半时 releases/latest 还指着上一个版本，app 和安装脚本不会拿到缺文件的版本。
         # 更新说明用 scripts/release.sh 写的 docs/releases/$TAG.md，没有时让 GitHub 按 PR 生成；
-        # 说明第一行是 `<!-- prerelease -->` 时发成 beta（见开头）。
+        # 说明第一行是 `<!-- prerelease -->` 时发成 beta。
         run: |
           bundle=target/release/bundle
           file="docs/releases/$TAG.md"

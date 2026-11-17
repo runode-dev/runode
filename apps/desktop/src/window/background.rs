@@ -81,7 +81,7 @@ fn schedule(delay: Duration, cx: &mut App) {
     cx.default_global::<BackgroundSessions>().next = Some(task);
 }
 
-/// 问宿主得到的：宿主里的会话，和任务用到的会话（见 `todo_sessions`）。
+/// 问宿主得到的：宿主里的会话，和任务用到的会话。
 struct Live {
     sessions: Vec<SessionInfo>,
     todos: Option<HashSet<SessionId>>,
@@ -154,7 +154,7 @@ fn apply(live: Option<Result<Live>>, cx: &mut App) {
     }
 }
 
-/// 换上新列表，变了时重画各窗口的侧栏；有没有后台会话翻转时整个窗口重画（见 `notify_shown`）。
+/// 换上新列表，变了时重画各窗口的侧栏；有没有后台会话翻转时整个窗口重画。
 fn set(sessions: Vec<SessionInfo>, cx: &mut App) {
     let any = !sessions.is_empty();
     let flipped = ANY.swap(any, Ordering::Relaxed) != any;

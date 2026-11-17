@@ -4,9 +4,9 @@
 //! `media`，别的电脑要读写项目的接到本进程里起的项目服务上（`connect_project`）。开关（配置项
 //! `remote-access`）、端口（`remote-access-port`）、给手机看的名字（`remote-access-name`）和在哪听、
 //! 经不经互联网（`remote-access-address`）随配置变，几秒内生效。agent 等回答时给手机的推送也在这个进程里发，设置（`remote-access-push`
-//! 这几项、`apns-*` 和 `fcm-service-account-file`）同样随配置变，见 `push_settings`。
+//! 这几项、`apns-*` 和 `fcm-service-account-file`）同样随配置变。
 //!
-//! 宿主跑在 app 里时，app 每次应用配置都告诉它（见 `host_client::configure`）；单独跑的宿主
+//! 宿主跑在 app 里时，app 每次应用配置都告诉它；单独跑的宿主
 //! （`runode --host`）不管界面，自己读配置文件，文件变了就重读（`follow_config`）。app 连着单独跑的
 //! 宿主时不开监听，免得两个进程抢同一个端口。
 //!
@@ -145,7 +145,7 @@ fn connect_project(build: &str) -> Result<UnixStream, ChannelRefusal> {
 /// 单独跑的宿主的远程访问：读一遍配置定下开不开，之后在后台线程里盯着配置文件，变了就重读。返回的
 /// `Following` 丢掉时监听停下，看配置的线程随之结束。
 ///
-/// 同一个线程也盯着设备表和配对口令，重新判断宿主空闲时要不要留着（`Host::set_stay_up`，见 `StayUp`）：
+/// 同一个线程也盯着设备表和配对口令，重新判断宿主空闲时要不要留着（`Host::set_stay_up`）：
 /// 开着远程访问、又有手机可能连上来时不因空闲退出，不然手机连不上来开新会话。
 pub fn follow_config(host: &Host) -> Option<Following> {
     let service = Arc::new(service(host)?);
@@ -186,7 +186,7 @@ impl Drop for Following {
     }
 }
 
-/// `loaded` 是 `follow_config` 读出的配置和读之前各配置文件的修改时间（见 `config::seen_after`）。
+/// `loaded` 是 `follow_config` 读出的配置和读之前各配置文件的修改时间。
 fn watch(
     service: &Weak<Service>,
     host: &Host,
@@ -244,7 +244,7 @@ fn watch(
     }
 }
 
-/// 看配置的线程上一轮盯全时盯着的目录（`FileWatch::watching`），见 `Coverage::newly_covered`。
+/// 看配置的线程上一轮盯全时盯着的目录（`FileWatch::watching`）。
 #[derive(Default)]
 struct Coverage(Option<Vec<PathBuf>>);
 
@@ -267,7 +267,7 @@ fn file_stamp(path: Option<PathBuf>) -> Option<FileStamp> {
     Some((meta.modified().ok()?, meta.len()))
 }
 
-/// 单独跑的宿主空闲时要不要留着，见 `StayUp::check`。记着上次读设备表、配对口令文件时它们的样子和读出的
+/// 单独跑的宿主空闲时要不要留着。记着上次读设备表、配对口令文件时它们的样子和读出的
 /// 结论，文件没变就不再读。
 #[derive(Default)]
 struct StayUp {

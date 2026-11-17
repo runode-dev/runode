@@ -58,7 +58,7 @@ mod tests {
          2. No, and tell Claude what to do differently (esc)\n\n\t \n"
     }
 
-    /// 和手机端 `Presentation.previewLines` 一样：去掉行尾空白，跳过空行、只有空白和制表符的行，取最后几行。
+    /// 去掉行尾空白，跳过空行、只有空白和制表符的行，取最后几行。
     #[test]
     fn preview_lines_keep_the_question_without_options_and_hints() {
         assert_eq!(preview_lines(screen(), 3), ["│ Bash     │", "Do you want to proceed?"]);

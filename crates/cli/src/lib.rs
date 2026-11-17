@@ -3,7 +3,7 @@
 //! 经宿主的 Unix socket 按 `runode_protocol` 说话，不碰终端仿真和界面；`remote`（给手机配对远程
 //! 访问、列出和撤销配对过的设备）不经宿主，读写 `runode_remote` 管的文件；`skill` 也不经宿主。
 //!
-//! 和桌面 app 是同一个可执行文件：带子命令时走这里（见 `wants_cli`），不带时开窗口。在 runode
+//! 和桌面 app 是同一个可执行文件：带子命令时走这里，不带时开窗口。在 runode
 //! 的终端里跑时，宿主设的环境变量告诉它连哪个 socket（`runode_protocol::ENV_SOCKET`）、自己在
 //! 哪个会话里（`runode_protocol::ENV_SESSION`），所以 agent 能在自己的终端里调度别的终端。
 //!
@@ -29,8 +29,7 @@ use std::{ffi::OsString, io::Write, path::PathBuf};
 /// 桌面 app 给 shell 设的环境变量：runode 可执行文件的路径，没把它放进 PATH 时也能调用命令行。
 pub const ENV_BIN: &str = "RUNODE_BIN";
 
-/// shell 的补全脚本设了这个环境变量来问候选，值是正在打的词在整条命令行上的序号（程序名是 0），
-/// 见 `completion_index` 和 `complete`。
+/// shell 的补全脚本设了这个环境变量来问候选，值是正在打的词在整条命令行上的序号（程序名是 0）。
 pub const ENV_GET_COMPLETIONS: &str = "RUNODE_GET_COMPLETIONS";
 
 /// 命令行的退出码。
@@ -86,7 +85,7 @@ pub fn completion_index() -> Option<usize> {
     index.checked_sub(1)
 }
 
-/// 打印第 `index` 个参数（见 `completion_index`）的候选，给 `runode completions` 的脚本用：第一行
+/// 打印第 `index` 个参数的候选，给 `runode completions` 的脚本用：第一行
 /// 是 shell 另外还能补什么（`normal`、`files`、`dirs`），后面每行一个候选，制表符后面是说明。
 /// 宿主没开时没有会话和任务的候选，不报错。
 pub fn complete(args: &[String], index: usize, env: &Env, out: &mut dyn Write) -> i32 {
@@ -128,7 +127,7 @@ pub fn prepare_console() {
     }
 }
 
-/// 跑一条命令，返回退出码（见 `exit`）。`args` 不含程序名。
+/// 跑一条命令，返回退出码。`args` 不含程序名。
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let command = match args::parse(args) {
         Ok(command) => command,

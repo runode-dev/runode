@@ -42,11 +42,11 @@ pub(super) struct Tab {
     pub(super) focused: EntityId,
     /// 当前终端放大占满整个标签，其他分屏暂时不画。
     pub(super) zoomed: bool,
-    /// 卡片样式下折叠成只剩标题条的分屏；当前分屏照样展开着画，见 `Tab::folded`。
+    /// 卡片样式下折叠成只剩标题条的分屏；当前分屏照样展开着画。
     pub(super) collapsed: HashSet<EntityId>,
     /// 不在前台时响过铃，切过去后清掉。agent 停下来不算，那由 agent 的标记表示。
     pub(super) bell: bool,
-    /// agent 干完了、用户还没看过的分屏，见 `Mark::new`；用户看到那个分屏时清掉。
+    /// agent 干完了、用户还没看过的分屏；用户看到那个分屏时清掉。
     pub(super) done: HashSet<EntityId>,
     /// 浮在别的分屏上面的终端和它在终端区里的位置（按终端区归一化），从下到上；它们仍在 `root` 里原来的位置上。
     pub(super) floating: Vec<(EntityId, Rect)>,
@@ -166,7 +166,7 @@ pub(super) fn workspace_name(host: &HostId, dir: &Path) -> String {
     root.file_name().map_or_else(|| dir.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
-/// 上次看 PATH 里有没有某个命令行工具时的 PATH 和结果，见 `WindowView::tool_on_path`。
+/// 上次看 PATH 里有没有某个命令行工具时的 PATH 和结果。
 pub(super) type ToolCache = std::cell::RefCell<Option<(Option<std::ffi::OsString>, bool)>>;
 
 /// 一个项目目录，以及在其中打开的一组标签。
@@ -178,7 +178,7 @@ pub(super) struct Workspace {
     pub(super) name: SharedString,
     /// 项目目录：新终端取不到当前终端的目录时从这里开始。
     pub(super) dir: PathBuf,
-    /// `dir` 的 `canonical_dir`，建 workspace 时由 `canonical_dir_later` 算，见 `real_dir`。
+    /// `dir` 的 `canonical_dir`，建 workspace 时由 `canonical_dir_later` 算。
     pub(super) canonical: Arc<OnceLock<PathBuf>>,
     /// 侧栏这一行上的当前分支和 GitHub 头像。
     pub(super) repo: RepoBadge,
@@ -600,7 +600,7 @@ impl WindowView {
                 self.forget_stale_done(id, wi, ti, cx);
                 cx.notify();
             }
-            // 侧栏、标签和状态栏是缓存的视图（见 `Slot`），只在窗口通知时重画，不跟着终端的输出。agent 等回答时
+            // 侧栏、标签和状态栏是缓存的视图，只在窗口通知时重画，不跟着终端的输出。agent 等回答时
             // 读它屏幕上的提问，不等了忘掉。
             TerminalEvent::MetaChanged => {
                 crate::agent_prompts::watch_terminal(view, cx);
@@ -669,7 +669,7 @@ impl WindowView {
         self.show_tab(ix, true, window, cx);
     }
 
-    /// 同 `activate`，只是 `reveal_now` 为假时标签条等下一帧按新排好的位置把标签滚进来：刚切过来的 workspace
+    /// 切到当前 workspace 的第 `ix` 个标签；`reveal_now` 为假时标签条等下一帧按新排好的位置把标签滚进来：刚切过来的 workspace
     /// 上次画出时的布局可能已经过时（开了侧栏、缩了窗口），按它算的偏移不准。
     fn show_tab(&mut self, ix: usize, reveal_now: bool, window: &mut Window, cx: &mut Context<Self>) {
         // 看板的对话框开着时只在后面换标签，不收看板、不抢焦点：标签里的程序退出、`runode open --focus`
@@ -719,8 +719,8 @@ impl WindowView {
 
     /// 告诉窗口里的每个终端它显示着没有：当前 workspace 当前标签里的分屏都算显示着（被放大的
     /// 分屏挡住的也算，取消放大时要马上画得出来），其余的离开显示一段时间后丢掉界面这份 VT、只看
-    /// 状态，见 `TerminalView::request_visible`。显示的标签变了、往不显示的标签里加了终端、窗口
-    /// 看不看得见变了时调。窗口看不见时平台不出帧，所有终端都按不显示处理，见 `draws_screen`。
+    /// 状态。显示的标签变了、往不显示的标签里加了终端、窗口
+    /// 看不看得见变了时调。窗口看不见时平台不出帧，所有终端都按不显示处理。
     ///
     /// 要重新要屏幕的先一起发出去，再按同一个截止时间依次等，一次显示好几个分屏时总共最多等
     /// `SHOW_WAIT`，不是每个各等一份。
@@ -805,7 +805,7 @@ impl WindowView {
         }
     }
 
-    /// 关掉标签 `id`；里面还有程序在跑时先问一句（见 `confirm_closing`）。
+    /// 关掉标签 `id`；里面还有程序在跑时先问一句。
     pub(super) fn close_tab_by_id(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         let Some((wi, ti)) = self.locate_tab(id) else {
             return;
@@ -861,7 +861,7 @@ impl WindowView {
             .find_map(|(wi, workspace)| Some((wi, workspace.tabs.iter().position(|tab| tab.id == id)?)))
     }
 
-    /// 用户要关掉终端 `pane`；它前台还有程序在跑时先问一句（见 `confirm_closing`）。shell 自己退出时
+    /// 用户要关掉终端 `pane`；它前台还有程序在跑时先问一句。shell 自己退出时
     /// 不经这里，直接 `close_pane_by_id`。
     pub(super) fn confirm_close_pane(&mut self, pane: EntityId, window: &mut Window, cx: &mut Context<Self>) {
         let Some((wi, ti)) = self.locate(pane) else {
@@ -909,7 +909,7 @@ impl WindowView {
         .detach();
     }
 
-    /// 结束关掉 `closing` 时要结束的会话（见 `sessions_to_end`）。要在把终端从窗口里拿掉之前调。
+    /// 结束关掉 `closing` 时要结束的会话。要在把终端从窗口里拿掉之前调。
     pub(super) fn end_sessions(&self, closing: Closing<EntityId>, cx: &mut App) {
         let layout: Vec<Vec<Vec<EntityId>>> = self
             .workspaces
@@ -982,7 +982,7 @@ impl WindowView {
             workspace.tabs.retain(|tab| tab.panes.values().any(|(view, _)| view.read(cx).session_id().is_some()));
             workspace.active = workspace.active.min(workspace.tabs.len().saturating_sub(1));
             cx.notify();
-            // 是最后一个窗口时 app 跟着退出，见 `quit::close_window`；这个 workspace 的终端已经结束，退出时不再算。
+            // 是最后一个窗口时 app 跟着退出；这个 workspace 的终端已经结束，退出时不再算。
             super::quit::close_window(window.window_handle(), cx);
             return;
         }
@@ -1078,7 +1078,7 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> Option<Entity<TerminalView>> {
         // 目录已经被删掉时宿主退回 workspace 的目录，再退回家目录；workspace 里没有终端时从它的目录开始。
-        // 不在界面线程上看目录还在不在，见 `format::start_dir`。
+        // 不在界面线程上看目录还在不在。
         let (host, fallback) = (self.workspace().host.clone(), self.workspace().dir.clone());
         let cwd = self.focused_view().and_then(|view| view.read(cx).cwd());
         let cwd = format::start_dir(cwd.as_deref(), &fallback);
@@ -1086,7 +1086,7 @@ impl WindowView {
     }
 }
 
-/// `views` 里前台还在跑的程序（见 `TerminalView::running`），同名的只列一次。
+/// `views` 里前台还在跑的程序，同名的只列一次。
 fn running_programs<'a>(views: impl IntoIterator<Item = &'a Entity<TerminalView>>, cx: &App) -> Vec<String> {
     let mut names = Vec::new();
     for view in views {
@@ -1099,7 +1099,7 @@ fn running_programs<'a>(views: impl IntoIterator<Item = &'a Entity<TerminalView>
     names
 }
 
-/// 用户要关掉的东西，见 `sessions_to_end`。
+/// 用户要关掉的东西。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Closing<T> {
     /// 一个分屏。
@@ -1115,7 +1115,7 @@ pub(super) enum Closing<T> {
 /// 关掉 `closing` 时要结束哪些会话（按分屏给出），`layout` 是窗口里各个 workspace 各个标签的分屏。
 /// 关分屏、标签、workspace 是用户明确不要这些终端了，结束它们（连带关掉的标签、workspace 和窗口
 /// 里也只有这些）；关窗口时还有别的窗口才结束这个窗口里的全部，关最后一个窗口时 app 跟着退出，
-/// 会话怎么办归退出管，见 `quit::quit_plan`。
+/// 会话怎么办归退出管。
 pub(super) fn sessions_to_end<T: Copy + PartialEq>(layout: &[Vec<Vec<T>>], closing: Closing<T>) -> Vec<T> {
     match closing {
         Closing::Pane(pane) => {

@@ -233,12 +233,12 @@ impl PreviewPanel {
         preview.cancel = Arc::new(AtomicBool::new(false));
         let cancel = preview.cancel.clone();
         let path = preview.path.clone();
-        // 工作区的 diff 记下文件的大小和修改时间，见 `Preview::stale`。先记再读：读的期间又改了的，下次比出来
+        // 工作区的 diff 记下文件的大小和修改时间。先记再读：读的期间又改了的，下次比出来
         // 不一样，再读一次。
         let stamp_path = (target.side == git::DiffSide::Worktree && !remote).then(|| path.clone());
         let file = path.clone();
         let job = cx.background_spawn(async move {
-            // 解析符号链接也在这里，见 `Preview::real_path`。
+            // 解析符号链接也在这里。
             let real_path = if remote { None } else { fs::canonicalize(&file).ok() };
             let stamp = stamp_path.and_then(|path| file_stamp(&path));
             // 读出错时是 git 的说明，不当成没有改动。
@@ -284,7 +284,7 @@ impl PreviewPanel {
                     let cell_width = this.cell_width;
                     let (preview, git, real_root) = this.preview_for(id, &cancel)?;
                     preview.stamp = stamp;
-                    // 同 `load_preview`：解析不了时留着上次的。
+                    // 解析不了时留着上次的。
                     if let Some(real_path) = real_path {
                         preview.real_path = real_path;
                     }

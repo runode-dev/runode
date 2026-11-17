@@ -80,10 +80,10 @@ pub struct Session {
     mouse_event: mouse::Event<'static>,
     selecting: Selecting,
     sender: Sender,
-    /// VT 现在的尺寸，见 `apply_resized`。
+    /// VT 现在的尺寸。
     size: StdCell<GridSize>,
-    /// 最近一次要宿主改成的尺寸，见 `resize`。还没请求过时为空：头一次一定发出去，哪怕和 VT 现在的
-    /// 一样，宿主要据此知道这个前端要什么尺寸，见 `HostMsg::SizeOwner`。
+    /// 最近一次要宿主改成的尺寸。还没请求过时为空：头一次一定发出去，哪怕和 VT 现在的
+    /// 一样，宿主要据此知道这个前端要什么尺寸。
     requested_size: Option<GridSize>,
     /// 程序响过铃，由 `take_bell` 取走。
     bell: Rc<StdCell<bool>>,
@@ -93,12 +93,12 @@ pub struct Session {
     meta: SessionMeta,
     /// 打开搜索栏期间的搜索；关掉就丢弃。
     search: Option<Search<'static, 'static>>,
-    /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行，见 `scroll_smoothly`。
+    /// 平滑滚动不足一行的部分，0 到 1 之间：画面整体往下错开这么多行。
     scroll_offset: f32,
     option_as_alt: settings::OptionAsAlt,
-    /// 最近一次向程序发输入的时刻，见 `last_input`。
+    /// 最近一次向程序发输入的时刻。
     input_at: Option<Instant>,
-    /// 发出输入后还没等到输出的那次输入的时刻，量按键到回显的延迟用，见 `feed`。
+    /// 发出输入后还没等到输出的那次输入的时刻，量按键到回显的延迟用。
     echo_pending: Option<Instant>,
 }
 
@@ -184,10 +184,10 @@ impl Session {
         self.option_as_alt = settings.option_as_alt;
     }
 
-    /// 在宿主套用主题的位置（`HostMsg::ThemeApplied`）套用同样的主题，见 `vt::apply_theme`。
+    /// 在宿主套用主题的位置（`HostMsg::ThemeApplied`）套用同样的主题。
     pub fn apply_theme(&mut self, settings: &TermSettings) {
         vt::apply_theme(&mut self.terminal, settings);
-        // 默认颜色变了，下一次刷新整屏重画；不清空帧，理由同 `apply_config`。
+        // 默认颜色变了，下一次刷新整屏重画；不清空帧，同步输出冻结时还得画冻住的那一帧。
         self.renderer.borrow_mut().force_full = true;
     }
 
@@ -211,7 +211,7 @@ impl Session {
         changed
     }
 
-    /// 光标停在 shell 提示符上时正在编辑的那条输入，见 `prompt_input::read`。
+    /// 光标停在 shell 提示符上时正在编辑的那条输入。
     pub fn prompt_input(&self) -> Option<PromptInput> {
         log_err("read prompt input", prompt_input::read(&self.terminal)).flatten()
     }

@@ -128,7 +128,7 @@ pub enum DropAction {
 }
 
 /// `todo` 拖到 `to` 列放下时做什么；做完以后它推出来的列不是 `to` 的（比如把需要你的拖进进行中、
-/// 把开始过的拖回待办）不接，为空，卡片弹回原处。参数同 `column`。
+/// 把开始过的拖回待办）不接，为空，卡片弹回原处。`session` 是 `todo` 那个会话现在的状态，`now` 是 Unix 时间的秒数。
 pub fn drop_action(todo: &Todo, session: Option<&SessionInfo>, to: Column, now: u64) -> Option<DropAction> {
     let from = column(todo, session, now);
     match (from, to) {

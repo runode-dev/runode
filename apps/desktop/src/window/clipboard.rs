@@ -1,6 +1,6 @@
 //! 终端里的程序读写系统剪贴板（OSC 52）：宿主认出请求、按配置定了办不办，包成
-//! `ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard` 经 `HostMsg::UiRequest` 转过来（见
-//! `remote`），这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
+//! `ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard` 经 `HostMsg::UiRequest` 转过来，
+//! 这里在主线程上写系统剪贴板；读之前按宿主的意思先问用户，问在显示那个终端的窗口上，
 //! 说清是哪个终端、哪个程序要读。日志里不记剪贴板的内容。
 
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ use super::{
 };
 use crate::host_client::{Link, UiTicket, hosts::HostId};
 
-/// 程序要写剪贴板：照写，回 `Done`（`req` 为 0，见 `ClientMsg::WriteClipboard`）。
+/// 程序要写剪贴板：照写，回 `Done`（`req` 为 0）。
 pub(super) fn write(text: String, cx: &mut App) -> HostMsg {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
     HostMsg::Done { req: 0 }

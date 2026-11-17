@@ -61,7 +61,7 @@ pub(super) struct Highlight {
 }
 
 impl Session {
-    /// 终端当前的 16 个 ANSI 颜色，见 `palette`。
+    /// 终端当前的 16 个 ANSI 颜色。
     pub fn ansi_colors(&self) -> [Rgb; 16] {
         let palette = self.palette();
         std::array::from_fn(|i| palette[i])

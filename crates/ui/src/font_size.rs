@@ -11,7 +11,7 @@ pub struct UiFontSize(pub f32);
 
 impl Global for UiFontSize {}
 
-/// 界面文字的几档字号，由小到大，基准字号下的点数见 `points`。
+/// 界面文字的几档字号，由小到大，基准字号下的点数由 `points` 给。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FontSize {
     /// 计数徽标、引用标签。

@@ -14,7 +14,7 @@
 //! 工作流（`render_pinned_workflows`）；当前工作区在 SSH 主机上时后面跟着那台主机的连接状态，连着时写出心跳测的
 //! 延迟（`RemoteHost::latency`）。分支和两个计数常显，不进 `status-bar-hidden`。
 //!
-//! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」，见 `update::status_label`。
+//! 用户点了「检查更新…」以后，查和下载期间最左边还有一块转着圈的「正在检查更新…」。
 //!
 //! 数据全 app 一份（`Status`），每 `POLL_INTERVAL` 更新一次：有窗口在前台时现问进程表，在监听的端口隔
 //! `PORTS_INTERVAL` 才问一次，状态栏没显示、或者上面藏起来的几块用不着的不问；都在后台时只看 agent
@@ -157,7 +157,7 @@ struct Status {
     latencies: HashMap<HostId, u128>,
     /// 所有窗口里各个终端的 shell 的进程号。
     shells: HashSet<u32>,
-    /// 宿主在 `Welcome` 里报的进程号，见 `host`。
+    /// 宿主在 `Welcome` 里报的进程号。
     host: Option<u32>,
     terminals: usize,
     /// 有 agent 在干活。

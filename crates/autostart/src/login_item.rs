@@ -28,11 +28,11 @@ pub(crate) fn is_registered() -> bool {
 }
 
 pub(crate) fn register() -> io::Result<()> {
-    // SAFETY: 同 `status`。
+    // SAFETY: `available` 为真时才调，类和方法都在。
     let result = unsafe { SMAppService::mainAppService().registerAndReturnError() };
     // 用户在系统设置里关过它时，登记不报错或报错都有可能，状态停在要批准；只有用户自己能在那里打开。
     if status() == SMAppServiceStatus::RequiresApproval {
-        // SAFETY: 同 `status`。
+        // SAFETY: `available` 为真时才调，类和方法都在。
         unsafe { SMAppService::openSystemSettingsLoginItems() };
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -43,7 +43,7 @@ pub(crate) fn register() -> io::Result<()> {
 }
 
 pub(crate) fn unregister() -> io::Result<()> {
-    // SAFETY: 同 `status`。
+    // SAFETY: `available` 为真时才调，类和方法都在。
     unsafe { SMAppService::mainAppService().unregisterAndReturnError() }
         .map_err(|err| io::Error::other(err.localizedDescription().to_string()))
 }

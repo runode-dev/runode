@@ -62,7 +62,7 @@ pub fn code_tooltip(
 struct Tooltip {
     text: SharedString,
     shortcut: Option<SharedString>,
-    /// 代码样的说明用的等宽字体，见 `code_tooltip`。
+    /// 代码样的说明用的等宽字体。
     font: Option<SharedString>,
     /// 弹出时正拖着东西，什么也不画。GPUI 拖动时照样给经过的元素弹提示，弹出后按那一帧元素的位置判断还要不要
     /// 显示：放下后元素挪了位置、鼠标还在原处，提示就一直留在别的行上。只在弹出时看一次：拖完了照样不画，等鼠标

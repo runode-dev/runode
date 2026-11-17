@@ -127,7 +127,7 @@ fn free_lane(lanes: &mut Vec<Option<Lane>>) -> usize {
 ///   已经有 lane 等着时（别的分支先走到了它）不另占，下半段斜着连过去。
 /// - 和这个提交无关的 lane 上下两段都是竖线。lane 空出来以后留在原处，不往左挪，下一个新分支
 ///   先用它；最右边空着的去掉。
-/// - 颜色见 `LaneColor`；换成 `Remote` 的那个提交，上半段进来的线还是原来的颜色。
+/// - 颜色取 `LaneColor`；换成 `Remote` 的那个提交，上半段进来的线还是原来的颜色。
 pub fn graph_layout(commits: &[Commit]) -> Vec<GraphRow> {
     let mut lanes: Vec<Option<Lane>> = Vec::new();
     let mut next_color = 0;
@@ -333,7 +333,7 @@ impl Repo {
     }
 
     /// `commit` 改了哪些文件、每个文件改了哪几行；合并提交和第一个父提交比，第一个提交和空的
-    /// 树比。和工作区的改动一样按 `MAX_DIFF_BYTES` 把大文件当二进制，但不看工作区里的文件。
+    /// 树比。按 `MAX_DIFF_BYTES` 把大文件当二进制，但不看工作区里的文件。
     pub fn commit_changes(&self, commit: &Commit) -> Result<Vec<FileDiff>> {
         let base = match commit.parents.first() {
             Some(parent) => parent.clone(),

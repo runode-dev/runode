@@ -30,7 +30,7 @@ const SUCCESS_LIGHT: Rgb = Rgb(0x1F, 0x8A, 0x3E);
 const RING_FALLBACK: Rgb = Rgb(0x3b, 0x82, 0xf6);
 const DESTRUCTIVE_FALLBACK: Rgb = Rgb(0xe0, 0x50, 0x50);
 
-/// 一个窗口当前的主题，由终端的前景色 `fg`、背景色 `bg` 和调色板算出来，见 `Theme::new`。
+/// 一个窗口当前的主题，由终端的前景色 `fg`、背景色 `bg` 和调色板算出来。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
     /// 终端的背景色和前景色。
@@ -82,9 +82,9 @@ pub struct Theme {
     pub control_border: Hsla,
     /// 焦点、打开着的开关这类强调：调色板里的蓝色。
     pub ring: Hsla,
-    /// 卡片样式下窗口的底色，衬在卡片后面，见 `frame_color`。
+    /// 卡片样式下窗口的底色，衬在卡片后面。
     pub frame: Hsla,
-    /// 卡片样式下标签条的底色和当前标签那颗胶囊的颜色，见 `tab_track_colors`。
+    /// 卡片样式下标签条的底色和当前标签那颗胶囊的颜色。
     pub tab_track: Hsla,
     pub tab_active: Hsla,
     /// 卡片样式下直接画在外框上的行和按钮（侧栏的行、标签条里的标签）悬停时的底色，要和 `frame`、
@@ -159,7 +159,7 @@ impl Theme {
         self.fg
     }
 
-    /// 终端背景色的原值，同 `fg_rgb`。
+    /// 终端背景色的原值：要拿 `Rgb` 算的地方用，不必从 `background` 换回来。
     pub fn bg_rgb(&self) -> Rgb {
         self.bg
     }
@@ -184,7 +184,7 @@ pub fn ansi_colors(palette: &[(u8, Rgb)]) -> [Rgb; 16] {
     ansi
 }
 
-/// 读当前窗口的主题，只在 render 和 paint 里读，见模块说明。
+/// 读当前窗口的主题，只在 render 和 paint 里读。
 pub trait ActiveTheme {
     fn theme(&self) -> &Theme;
 }

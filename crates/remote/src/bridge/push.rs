@@ -1,4 +1,4 @@
-//! 手机经远程访问登记推送（`ClientMsg::PushRegister`，见 `runode_protocol::push`）：不转给宿主，在这里
+//! 手机经远程访问登记推送（`ClientMsg::PushRegister`）：不转给宿主，在这里
 //! 按过了门禁的这台设备办。推送的凭据记进设备表（`devices::set_push`），手机断开后照样推得到，
 //! 推送由 `crate::push` 发。办好回 `Done`，办不了回带 `req` 的 `Error`。
 
@@ -18,7 +18,7 @@ use crate::{
 /// bundle id、电脑的 UUID 和名字最多这么多字节，免得设备表被撑大。
 const MAX_FIELD_LEN: usize = 256;
 
-/// 一条过了门禁的连接上登记推送的请求，见模块文档。
+/// 一条过了门禁的连接上登记推送的请求。
 pub(crate) struct PushRequests<'a> {
     pub(crate) dirs: &'a Dirs,
     pub(crate) device: DeviceId,

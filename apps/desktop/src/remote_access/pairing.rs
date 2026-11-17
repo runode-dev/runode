@@ -1,4 +1,4 @@
-//! 在界面上给手机配对：和 `runode remote pair` 一样生成一个短命的口令（`PairingTicket`），拼成配对 URI
+//! 在界面上给手机配对：生成一个短命的口令（`PairingTicket`），拼成配对 URI
 //! 画成二维码，隔一会儿看一眼口令文件，配好了、过期了或者作废了就停下说结果。窗口里的配对设备页
 //! 用它（设置里的「配对…」也切到那里）。口令跟着 `Pairing::Waiting` 活：取消、重新生成、
 //! 关掉所在的页面时丢掉，口令文件随之删掉，手机再拿它来配对就对不上了。
@@ -42,7 +42,7 @@ pub type Slot<V> = fn(&mut V) -> Option<&mut Pairing>;
 pub enum Pairing {
     #[default]
     Idle,
-    /// 等监听方照配置开好，见模块说明。
+    /// 等监听方照配置开好，好了再生成口令。
     Starting {
         dirs: Box<Dirs>,
         expect: Expect,

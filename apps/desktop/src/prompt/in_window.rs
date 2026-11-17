@@ -1,7 +1,7 @@
 //! 画在窗口里的确认框，经 `App::set_prompt_builder` 交给 GPUI，`Window::prompt` 弹的就是它。用在没有原生
 //! 确认框的平台上：GPUI 自带的那个白底、不跟主题，详细说明不换行、超出就截掉，也不认回车和 Esc。
 //!
-//! 样子照 `ui::dialog`。按钮从右往左按 `answers` 的顺序排，第一个是主按钮，回车按它；Esc 按
+//! 用 `ui::dialog` 的 `Dialog` 画。按钮从右往左按 `answers` 的顺序排，第一个是主按钮，回车按它；Esc 按
 //! `PromptButton::Cancel` 的那个，没有时不起作用。
 
 use gpui::{

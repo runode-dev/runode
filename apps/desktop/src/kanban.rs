@@ -86,7 +86,7 @@ pub(crate) struct PickKanbanPlace {
     dir: Option<PathBuf>,
 }
 
-/// app 每次画看板之前交进来的东西，见 `Kanban::set_input`。
+/// app 每次画看板之前交进来的东西。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Input {
     /// 各 workspace 的目录和名字：卡片、定时的目录正好是哪个 workspace 的目录时写它的名字，否则写目录名。
@@ -102,7 +102,7 @@ pub struct Input {
     pub agent_changed: HashMap<SessionId, Instant>,
 }
 
-/// 卡片上 agent 的状态标记，和标签、侧栏上的一样由 app 画，见 `Kanban::new`。
+/// 卡片上 agent 的状态标记，和标签、侧栏上的一样由 app 画。
 #[derive(Clone, Copy)]
 pub struct AgentMarks {
     /// 画 `agent` 的状态标记；`id` 给它转圈用。只在画的时候调。
@@ -126,7 +126,7 @@ pub enum KanbanEvent {
     StashDraft(Entity<TodoDialog>),
 }
 
-/// 开着的看板，见模块说明。
+/// 开着的看板。
 pub struct Kanban {
     focus: FocusHandle,
     page: Page,
@@ -154,9 +154,9 @@ pub struct Kanban {
     dialog: Option<(Entity<TodoDialog>, Subscription)>,
     /// 看板只为新建任务的对话框开着：没存就关掉时整个收起。
     alone: bool,
-    /// 各任务分支上的 PR，见 `pulls`。
+    /// 各任务分支上的 PR。
     pulls: pulls::Pulls,
-    /// PR 合并后标成完成过的任务，见 `pulls`。
+    /// PR 合并后标成完成过的任务。
     merged: std::collections::HashSet<String>,
     /// 正在推送分支、开 PR 的任务。
     creating_pulls: std::collections::HashSet<String>,
@@ -266,7 +266,7 @@ impl Kanban {
         }
     }
 
-    /// 换上 workspace 的目录和名字、新建时的目录、定时能不能在后台跑，见 `Input`。只记下来，不重画：app 在画的
+    /// 换上 workspace 的目录和名字、新建时的目录、定时能不能在后台跑。只记下来，不重画：app 在画的
     /// 时候调，返回变了没有，变了由 app 等这一帧画完再通知看板重画（看板是缓存的视图）。筛选的项目不在新的
     /// workspace 里了时退回全部项目。
     pub fn set_input(&mut self, input: Input) -> bool {
@@ -401,7 +401,7 @@ impl Kanban {
         Self::send_todos_then(steps, |_| {}, cx);
     }
 
-    /// 和 `send_todos` 一样，没办成时先做 `failed`。
+    /// 依次发几条看板的请求，前一条没办成就不发后面的。办成了重翻记录；没办成时先做 `failed`，再弹提示说没办成。
     fn send_todos_then(steps: Vec<Step>, failed: impl FnOnce(&mut Self) + 'static, cx: &mut Context<Self>) {
         let sent = store::send(cx, steps);
         cx.spawn(async move |this, cx| {
@@ -522,7 +522,7 @@ impl Kanban {
         .detach();
     }
 
-    /// 请 app 切到任务会话，见 `KanbanEvent::OpenSession`。
+    /// 请 app 切到任务会话。
     fn open_session(session: SessionId, todo: &Todo, cx: &mut Context<Self>) {
         cx.emit(KanbanEvent::OpenSession { session, todo: Box::new(todo.clone()) });
     }

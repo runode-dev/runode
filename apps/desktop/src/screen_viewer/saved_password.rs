@@ -105,7 +105,7 @@ mod platform {
             0 => Ok(()),
             // 别的线程刚加了同一项，再改一次。
             status if status == errSecDuplicateItem => {
-                // SAFETY: 同上。
+                // SAFETY: 条件和要改的键值都是 Security 要的类型。
                 match unsafe { SecItemUpdate(query(host, &[]).as_opaque(), update.as_opaque()) } {
                     0 => Ok(()),
                     status => Err(failed("update", status)),
@@ -129,7 +129,7 @@ mod platform {
         let (return_attributes, limit, one) = unsafe { (kSecReturnAttributes, kSecMatchLimit, kSecMatchLimitOne) };
         let query = query(host, &[(return_attributes, CFBoolean::new(true).as_ref()), (limit, one.as_ref())]);
         let mut result: *const CFType = ptr::null();
-        // SAFETY: 同 `load`；拿到的属性字典马上放掉。
+        // SAFETY: 条件里的键值都是 Security 要的类型；输出参数指向本地变量，拿到的属性字典马上放掉。
         let status = unsafe { SecItemCopyMatching(query.as_opaque(), &mut result) };
         if let Some(result) = ptr::NonNull::new(result.cast_mut()) {
             // SAFETY: Create 规则，归这里，放掉。

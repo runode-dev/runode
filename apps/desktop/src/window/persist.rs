@@ -5,8 +5,7 @@
 //! 退出一样；还有别的窗口开着时单独关掉的窗口（里面的会话随之结束）和里面的终端都关完了的
 //! 窗口不留。终端的目录随 `cd` 变化，不单独盯着：下次布局变化或退出时一并记下。
 //!
-//! 每个终端记着宿主里的会话。恢复时先问宿主还有哪些会话，接得上的接上，其余在原目录新开，
-//! 见 `format::plan_restore`。
+//! 每个终端记着宿主里的会话。恢复时先问宿主还有哪些会话，接得上的接上，其余在原目录新开。
 
 pub(super) mod format;
 
@@ -48,14 +47,14 @@ pub(super) const SHELL_STARTUP: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct Saver {
-    /// 开着的窗口和它们最近一次的布局，按打开的先后；关掉它们 app 随即退出的窗口（见 `closed`）
+    /// 开着的窗口和它们最近一次的布局，按打开的先后；关掉它们 app 随即退出的窗口
     /// 也留着，记关掉时的布局。
     windows: Vec<(WeakEntity<WindowView>, SavedWindow)>,
     /// 最近一次交去写的内容，没变就不再写；写失败时清掉（`write_failed`），下次照样写。
     written: Option<State>,
     /// 等着写文件的任务。
     pending: Option<Task<()>>,
-    /// 最近一次开始写的编号，见 `write_in_order`。
+    /// 最近一次开始写的编号。
     seq: u64,
     /// 已经开始退出，最后的布局已经写好（`freeze`）：之后窗口一个个被关掉、分屏随会话结束一个个
     /// 关掉，都不是用户改了布局，不再改存档。
@@ -127,7 +126,7 @@ pub(super) fn freeze(cx: &mut App) {
     if cx.global::<Saver>().frozen {
         return;
     }
-    // 还在等着报的布局变化先报给宿主，冻结以后就不报了，见 `layout_report`。
+    // 还在等着报的布局变化先报给宿主，冻结以后就不报了。
     super::layout_report::report_change(cx);
     let windows: Vec<_> = cx.global::<Saver>().windows.iter().map(|(window, _)| window.clone()).collect();
     let fresh: Vec<_> = windows.iter().map(|window| window.upgrade().map(|view| view.read(cx).snapshot(cx))).collect();
@@ -186,7 +185,7 @@ fn live_sessions() -> Vec<SessionInfo> {
     })
 }
 
-/// 宿主手里的布局，见 `format::adopt`。宿主跑在 app 里时它刚建好，手里没有，不问；问不到时当作
+/// 宿主手里的布局。宿主跑在 app 里时它刚建好，手里没有，不问；问不到时当作
 /// 没有，没开 app 时新开的终端成为后台会话。
 fn held_layout() -> Vec<WindowLayout> {
     if host_client::mode() == Mode::InProcess {
@@ -255,7 +254,7 @@ enum OnClose {
     Forget,
 }
 
-/// 关掉一个窗口时存档怎么办（见 `closed`）。`frozen`：已经冻结了（`freeze`）；`leaving`：关掉它
+/// 关掉一个窗口时存档怎么办。`frozen`：已经冻结了（`freeze`）；`leaving`：关掉它
 /// 以后一个窗口都不剩；`emptied`：它的 workspace 都关掉了。
 fn on_close(frozen: bool, leaving: bool, emptied: bool) -> OnClose {
     // 关掉最后一个窗口的最后一个 workspace 时，退出要冻结存档，那时窗口里还留着这个 workspace。
@@ -532,7 +531,7 @@ impl WindowView {
 
     /// `shown`：这个标签显示在窗口里，接上的会话要看屏幕，否则只看状态；要新开的，显示着的马上在
     /// 宿主里开会话，看不见的等切过去时再开（`TerminalView::deferred`）。建出来的终端放进 `panes`；
-    /// 存档里的每个叶子按先后在 `leaves` 里记一项，开不起来的记 `None`，见 `saved_leaves`。
+    /// 存档里的每个叶子按先后在 `leaves` 里记一项，开不起来的记 `None`。
     #[allow(clippy::too_many_arguments)]
     fn restore_node(
         &mut self,
@@ -635,7 +634,7 @@ impl WindowView {
     }
 }
 
-/// 一个标签里的终端和对它们事件的订阅，见 `Tab::panes`。
+/// 一个标签里的终端和对它们事件的订阅。
 type Panes = HashMap<EntityId, (gpui::Entity<TerminalView>, gpui::Subscription)>;
 
 /// 存档里标签的第 `focused` 个叶子和 `collapsed` 里那几个叶子恢复成了哪个终端。存档按叶子的先后记，

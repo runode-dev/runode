@@ -179,7 +179,7 @@ impl Repo {
         let mut file = files.into_iter().find(|file| file.path == path);
         if file.is_none() && *side == DiffSide::Worktree && self.untracked(path) {
             let full = self.root.join(path);
-            // 和已跟踪的文件一样，超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。
+            // 超过 `MAX_DIFF_BYTES` 的不读进内存，标成截断。
             let small = fs::symlink_metadata(&full).is_ok_and(|meta| meta.len() <= MAX_DIFF_BYTES);
             file = Some(read_untracked(&full, path.to_path_buf(), small));
         }

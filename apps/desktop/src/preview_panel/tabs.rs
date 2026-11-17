@@ -41,7 +41,7 @@ pub(super) struct PreviewTabs {
     pub active: usize,
     /// 预览在最前，盖住终端区；切到终端标签时退到后面，标签都关掉时也是。
     pub front: bool,
-    /// 这个 workspace 最近读到的 git 状态，见 `PreviewPanel::set_git`。
+    /// 这个 workspace 最近读到的 git 状态。
     pub git: Option<Arc<git::Repos>>,
     /// `git` 主仓库的根目录和它解析过符号链接的路径，`Preview::refresh_marks` 比字面上不在根下的文件用；
     /// 由 `PreviewPanel::set_git` 在单独的线程上解析，解析好之前（或解析不了时）两个都是字面的根目录。

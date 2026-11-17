@@ -756,7 +756,7 @@ impl WindowView {
         self.panel_header(cx).pl(px(6.)).pr(px(toggles)).child(tabs.flex_1().min_w_0()).into_any_element()
     }
 
-    /// 右侧面板顶上的一条，见 `runode_ui::panel::panel_header`。
+    /// 右侧面板顶上的一条。
     pub(super) fn panel_header(&self, cx: &App) -> Div {
         crate::ui::panel::panel_header(cards(cx), cx)
     }

@@ -6,8 +6,8 @@
 //!
 //! 读：一个 `host-link-reader` 线程读帧，按会话分发成 `LinkEvent`：输出帧按通道找到会话；快照帧
 //! 拼好到 `SnapshotEnd` 作为一份 `Screen` 交出去；带 `req` 的回话交给等着的调用方；
-//! `UiRequest` 交给界面（见 `Link::ui_requests`）；看板变了（`TodosChanged`）告诉看看板的一方
-//! （见 `Link::todos_changed`）；连接断开时给每个会话发 `LinkEvent::Lost`。读线程那一组函数在 `reader`。
+//! `UiRequest` 交给界面；看板变了（`TodosChanged`）告诉看看板的一方；连接断开时给每个会话发
+//! `LinkEvent::Lost`。读线程那一组函数在 `reader`。
 //!
 //! 连上一个会话（`attach`）时先登记再发 `Attach`。发出 `Attach` 到收到对应的 `Attached` 之间，
 //! 这个会话的输出和标记一律丢掉：宿主按先后处理同一条连接上的消息，旧订阅的帧都排在新的
@@ -68,9 +68,9 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_BUFFER: usize = 256 << 10;
 /// 写的缓冲：帧头和小的载荷攒成一次写；更大的载荷直接写。
 const WRITE_BUFFER: usize = 64 << 10;
-/// 输入（比如一大段粘贴）按这么大拆成几帧写，见 `Inner::write_input`。
+/// 输入（比如一大段粘贴）按这么大拆成几帧写。
 const INPUT_CHUNK: usize = 1 << 20;
-/// 一个会话交给视图、视图还没处理完的输出最多这么多字节，见 `Route::deliver_output`。按会话算，几个
+/// 一个会话交给视图、视图还没处理完的输出最多这么多字节。按会话算，几个
 /// 分屏一起刷屏时加起来是它的几倍，所以比宿主给整条连接的积压上限（`OUTBOX_LIMIT`）小。
 const UNREAD_LIMIT: usize = 8 << 20;
 
@@ -169,7 +169,7 @@ pub struct SpawnOptions {
     pub size: GridSize,
     /// shell 从哪个目录开始，`None` 时从家目录。
     pub cwd: Option<PathBuf>,
-    /// `cwd` 不是目录时改从这里开，见 `ClientMsg::Spawn::fallback_cwd`。
+    /// `cwd` 不是目录时改从这里开。
     pub fallback_cwd: Option<PathBuf>,
     pub integration: IntegrationMode,
     /// 现在就启动 shell；为 false 时等 `ClientMsg::Start`。
@@ -187,8 +187,7 @@ pub struct SpawnOptions {
 pub enum ConnectError {
     /// 宿主说协议版本对不上，多半是别的构建的宿主还活着。
     Incompatible(String),
-    /// 要连单独一个进程的宿主，socket 上的却跑在另一个 app 里（`Welcome::standalone` 为假），见
-    /// `Link::connect_standalone`。
+    /// 要连单独一个进程的宿主，socket 上的却跑在另一个 app 里（`Welcome::standalone` 为假）。
     NotStandalone,
     /// 还没回 `Welcome` 就断开了，多半撞上它正因空闲退出，过一会儿再试。
     Closed,
@@ -242,7 +241,7 @@ struct Inner {
     writer: Mutex<Option<Writer>>,
     ui: UnboundedSender<(UiTicket, ClientMsg)>,
     ui_requests: Mutex<Option<UnboundedReceiver<(UiTicket, ClientMsg)>>>,
-    /// 看板变了，或者换了一条连接（新连接上还没问过看板，宿主不会再说变了），见 `Link::todos_changed`。
+    /// 看板变了，或者换了一条连接（新连接上还没问过看板，宿主不会再说变了）。
     todos: UnboundedSender<()>,
     todos_changed: Mutex<Option<UnboundedReceiver<()>>>,
     next_req: AtomicU32,
@@ -266,7 +265,7 @@ impl UiTicket {
 }
 
 struct Writer {
-    /// 是第几条连接，见 `State::generation`。
+    /// 是第几条连接。
     generation: u64,
     stream: BufWriter<UnixStream>,
 }
@@ -291,15 +290,15 @@ struct State {
     options: Option<(bool, ClipboardAccess)>,
     /// 最近一次报的布局，重连后补发：断开时报的那次宿主没收到，换了宿主时新宿主手里也要有。
     layout: Option<Vec<WindowLayout>>,
-    /// 现在这条连接上的宿主编的快照这边解得了，见 `snapshots_usable`；为假时要快照改要 VT 重放。
+    /// 现在这条连接上的宿主编的快照这边解得了；为假时要快照改要 VT 重放。
     snapshots: bool,
-    /// 现在这条连接上的宿主的构建，见 `Link::host_build`。
+    /// 现在这条连接上的宿主的构建。
     host_build: Option<BuildId>,
-    /// 现在这条连接上的宿主的进程号，见 `Link::host_pid`。
+    /// 现在这条连接上的宿主的进程号。
     host_pid: Option<u32>,
-    /// 连上时宿主上另外连着几个桌面，见 `Link::other_desktops_at_connect`。
+    /// 连上时宿主上另外连着几个桌面。
     other_desktops: u32,
-    /// 现在这条连接上的宿主认得看板的消息，见 `Link::host_knows_todos`。
+    /// 现在这条连接上的宿主认得看板的消息。
     todos: bool,
     /// 这条连接上的宿主认得的看板级别，`HostMsg::Welcome::board`。
     board: u32,
@@ -326,12 +325,12 @@ struct Route {
     queued: Vec<Vec<u8>>,
     /// `attach_now` 的调用方等着的第一份屏幕；没连成时给它错误。
     first_screen: Option<mpsc::Sender<Result<Screen, String>>>,
-    /// 正连着时收到的 `Exited`，等这次连上（或者没连成）后交出去，见 `Route::settle`。
+    /// 正连着时收到的 `Exited`，等这次连上（或者没连成）后交出去。
     exited: Option<HostMsg>,
-    /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份（见 `Caps::shell_report`）；
+    /// 宿主拆出来单独发的 shell 集成报告，最近收到的那份；
     /// 为 `None` 时 `Meta` 照原样交出去。
     shell: Option<ShellReport>,
-    /// 这次订阅交给视图、视图还没处理完的输出，见 `Output`。重新连上（`start_attach`）时换一份新的。
+    /// 这次订阅交给视图、视图还没处理完的输出。重新连上（`start_attach`）时换一份新的。
     unread: Arc<Unread>,
 }
 
@@ -416,18 +415,18 @@ impl Inner {
         self.write_on(None, kind, channel, payload)
     }
 
-    /// 同 `write`；`generation` 给了时只写在第这么多条连接上，连接换过了时返回错误。
+    /// 写一帧并刷出去；`generation` 给了时只写在第这么多条连接上，连接换过了时返回错误。
     fn write_on(&self, generation: Option<u64>, kind: FrameKind, channel: u32, payload: &[u8]) -> io::Result<()> {
         self.write_frames(generation, kind, channel, [payload])
     }
 
-    /// 把给会话程序的输入写在通道 `channel` 上，同 `write`。一大段（比如粘贴）按 `INPUT_CHUNK` 拆成
+    /// 把给会话程序的输入写在通道 `channel` 上。一大段（比如粘贴）按 `INPUT_CHUNK` 拆成
     /// 几帧：宿主把各帧按字节流接着写进 PTY，和一帧一样，一帧却可能超过 `MAX_PAYLOAD`、写不出去。
     fn write_input(&self, channel: u32, data: &[u8]) -> io::Result<()> {
         self.write_frames(None, FrameKind::Input, channel, data.chunks(INPUT_CHUNK))
     }
 
-    /// 同 `write_on`，写几帧再刷出去。整段拿着写锁，别的线程的帧插不进这几帧中间。
+    /// `payloads` 各写成一帧，写完再一起刷出去；`generation` 给了时只写在第这么多条连接上。整段拿着写锁，别的线程的帧插不进这几帧中间。
     fn write_frames<'a>(
         &self,
         generation: Option<u64>,
@@ -464,7 +463,7 @@ impl Inner {
         self.write(FrameKind::Control, 0, &frame.payload)
     }
 
-    /// 同 `control`，只发在第 `generation` 条连接上：等回话的登记在哪条连接上，请求就只能发在那条上。
+    /// 发一条控制消息，只发在第 `generation` 条连接上：等回话的登记在哪条连接上，请求就只能发在那条上。
     /// 登记之后连接断了、又连上了新的宿主时，登记已经随旧连接撤掉，请求再发给新宿主，它照样办了，
     /// 回话却没人收。
     fn control_on(&self, generation: u64, message: &ClientMsg) -> io::Result<()> {
@@ -486,7 +485,7 @@ impl Inner {
         state.channels.clear();
     }
 
-    /// 第 `generation` 条连接上的请求等回话超时了：宿主卡住了，按断开处理，见模块说明。
+    /// 第 `generation` 条连接上的请求等回话超时了：宿主卡住了，按断开处理。
     fn timed_out(&self, generation: u64) {
         tracing::warn!("the host did not answer in time, dropping the connection to it");
         self.lost(generation);
@@ -559,7 +558,7 @@ impl Link {
         self.connect_to(stream, false)
     }
 
-    /// 同 `connect`，但只连单独一个进程的宿主：握手时宿主说自己跑在某个 app 里（那个 app 才是它的
+    /// 在 `stream` 上和宿主握手，成了就换上这条连接，但只连单独一个进程的宿主：握手时宿主说自己跑在某个 app 里（那个 app 才是它的
     /// 界面）时不换上这条连接，返回 `ConnectError::NotStandalone`。
     pub fn connect_standalone(&self, stream: UnixStream) -> Result<(), ConnectError> {
         self.connect_to(stream, true)
@@ -649,7 +648,7 @@ impl Link {
         self.inner.state().host_build.clone()
     }
 
-    /// 现在连着的宿主认得看板的消息（`ClientMsg::ListTodos` 等，见 `HostMsg::Welcome`）。不认得的宿主
+    /// 现在连着的宿主认得看板的消息（`ClientMsg::ListTodos` 等）。不认得的宿主
     /// 回的 `Error` 不带请求编号，会让请求超时、连接被断开，所以不认得时一条都不发。
     pub fn host_knows_todos(&self) -> bool {
         let state = self.inner.state();
@@ -698,7 +697,7 @@ impl Link {
     }
 
     /// 发一条控制消息，不等回话；没连着或写不出去时记一笔日志。`SetTheme`、`SetOptions`、`LayoutChanged` 记下来，
-    /// 重连后补发；`Kill`、`Detach` 顺带忘掉这个会话，同 `kill`、`detach`。连会话用 `attach`。
+    /// 重连后补发；`Kill`、`Detach` 顺带忘掉这个会话。连会话用 `attach`。
     pub fn send(&self, message: ClientMsg) {
         match &message {
             ClientMsg::SetTheme { settings } => self.inner.state().theme = Some(settings.clone()),
@@ -742,7 +741,7 @@ impl Link {
         self.spawn_within(options, self.inner.timeouts.spawn)
     }
 
-    /// 同 `spawn`，最多等 `timeout`。
+    /// 在宿主里开一个会话，最多等 `timeout`。
     fn spawn_within(&self, options: SpawnOptions, timeout: Duration) -> Result<SessionId> {
         let SpawnOptions { size, cwd, fallback_cwd, integration, start, shell, settings, resume } = options;
         let req = self.inner.next_req.fetch_add(1, Ordering::Relaxed);
@@ -753,7 +752,7 @@ impl Link {
             return Err(anyhow!("failed to ask the host for a terminal: {err}"));
         }
         let answer = match reply.recv_timeout(timeout) {
-            // 不断开，见模块说明：撤掉登记，之后才到的 `Spawned` 没人等，读线程见了就结束那个会话。
+            // 不断开，宿主多半只是开会话慢：撤掉登记，之后才到的 `Spawned` 没人等，读线程见了就结束那个会话。
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 self.inner.state().replies.remove(&req);
                 // 超时和撤掉之间正好到了的照常用。
@@ -941,7 +940,7 @@ impl Link {
         }
     }
 
-    /// 宿主手里的布局（app 上次报给它的，加上之后没开 app 时它自己办的改动，见 `ClientMsg::Layout`），
+    /// 宿主手里的布局（app 上次报给它的，加上之后没开 app 时它自己办的改动），
     /// 最多等 `timeout`。
     pub fn held_layout(&self, timeout: Duration) -> Result<Vec<WindowLayout>> {
         match self.request_on(|req| ClientMsg::Layout { req }, timeout, OnTimeout::Disconnect)? {
@@ -999,7 +998,7 @@ impl Link {
         self.request_on(make, timeout, OnTimeout::Wait)
     }
 
-    /// 同 `request`，超时时照 `on_timeout` 办。
+    /// 发 `make` 造出的请求、等它的回话，最多等 `timeout`；超时时照 `on_timeout` 办。
     fn request_on(
         &self,
         make: impl FnOnce(u32) -> ClientMsg,
@@ -1019,7 +1018,7 @@ impl Link {
                 // 不等了：撤掉登记，回话晚到时没人收、丢掉。
                 OnTimeout::Wait => drop(self.inner.state().replies.remove(&req)),
             }
-            // 超时和撤掉之间正好到了的照常用，同 `spawn_within`。
+            // 超时和撤掉之间正好到了的照常用。
             answer = reply.try_recv().map_err(|_| mpsc::RecvTimeoutError::Timeout);
         }
         match answer {
@@ -1032,7 +1031,7 @@ impl Link {
 
     /// 等宿主读完之前发的所有消息，最多等 `timeout`：发一个 `ListSessions` 等它回话，宿主按先后
     /// 处理同一条连接上的消息。宿主读完后断开（比如收到 `Shutdown` 后发了 `Goodbye`）也算。
-    /// 超时返回 false，这条连接随之按断开处理，见 `ask_sessions`。
+    /// 超时返回 false，这条连接随之按断开处理。
     pub fn flush(&self, timeout: Duration) -> bool {
         match self.ask_sessions(timeout) {
             Ok(_) => true,
@@ -1042,8 +1041,7 @@ impl Link {
         }
     }
 
-    /// 回宿主转来的 `HostMsg::UiRequest`，`ticket` 是收到它时的回执。之后连接换过了的不回，见
-    /// `UiTicket`。
+    /// 回宿主转来的 `HostMsg::UiRequest`，`ticket` 是收到它时的回执。之后连接换过了的不回。
     pub fn ui_reply(&self, ticket: UiTicket, reply: HostMsg) {
         let message = ClientMsg::UiReply { ui: ticket.ui, reply: Box::new(reply) };
         let written = Frame::control(&message)
@@ -1155,8 +1153,8 @@ fn handshake(stream: &UnixStream, build: &BuildId, timeout: Duration) -> Result<
     answer
 }
 
-/// 报给宿主的设备名：这台机器的主机名的第一段，见 `short_host_name`。几个前端看同一个会话时，
-/// 别的前端据此显示「尺寸由谁控制」，见 `HostMsg::SizeOwner`。取不到时为 `None`。
+/// 报给宿主的设备名：这台机器的主机名的第一段。几个前端看同一个会话时，
+/// 别的前端据此显示「尺寸由谁控制」。取不到时为 `None`。
 #[cfg(unix)]
 fn device_name() -> Option<String> {
     let mut buf = [0u8; 256];

@@ -4,7 +4,7 @@
 //! 这里应答；标题、前台 agent、shell 集成的报告和运行完的命令也在这里认，变了就整理成
 //! `SessionMeta` 交给界面。界面那份 VT（`Session`）只消费同样的字节流，自己不应答任何查询。
 //!
-//! 和 `Session` 一样不是 `Send`：libghostty 的 `Terminal` 只能单线程用，回调之间用 `Rc` 共享
+//! 不是 `Send`：libghostty 的 `Terminal` 只能单线程用，回调之间用 `Rc` 共享
 //! 状态。宿主在会话自己的线程里建它，从不挪到别的线程。
 //!
 //! 这里是会话本身：创建、接上 PTY、注册 VT 回调、套用主题、改尺寸、写入和清屏，以及宿主升级时
@@ -69,7 +69,7 @@ use shell_report::SHELL_REPORT;
 
 /// 宿主升级时随会话交给新宿主的状态（`HostSession::export`），新宿主用它和交过来的 PTY、
 /// 屏幕重建会话（`HostSession::import`）。VT 本身经快照或重放走，PTY 经 `Pty::adopt_paused`
-/// 接手，转给前端的输出流停在哪里另见 `ReportRedactor::state`；启动 shell 用的程序、集成方式
+/// 接手，转给前端的输出流停在哪里由 `ReportRedactor::state` 带着；启动 shell 用的程序、集成方式
 /// 这些宿主自己记着的不在这里。
 #[derive(Clone, PartialEq)]
 pub struct SessionExport {
@@ -80,14 +80,14 @@ pub struct SessionExport {
     /// 已经启动了 shell。没启动的会话没有要接手的 PTY，新宿主另开一个、用 `HostSession::new`
     /// 重建，用不着导入。
     pub started: bool,
-    /// shell 集成报告带的口令（见 `Pty::report_token`），接手方建 `PtyHandoff` 时填进去；导入时
+    /// shell 集成报告带的口令，接手方建 `PtyHandoff` 时填进去；导入时
     /// 以交过来的 PTY 的为准。
     pub report_token: Option<String>,
     /// 现在套用着的主题。
     pub settings: TermSettings,
     /// 还没启动 shell 时它要从哪个目录开始。
     pub start_dir: Option<PathBuf>,
-    /// 这一轮提示符的目录是 shell 报告的，见 `HostSession::take_commands`。
+    /// 这一轮提示符的目录是 shell 报告的。
     pub prompt_reported: bool,
     /// 正在运行、还没报告结束的那条命令，结束时带着原来的开始时刻和目录报告。
     pub running: Option<FinishedCommand>,
@@ -116,7 +116,7 @@ impl fmt::Debug for SessionExport {
     }
 }
 
-/// 导入会话时 VT 的来源，见 `HostSession::import`。
+/// 导入会话时 VT 的来源。
 #[derive(Clone, Copy, Debug)]
 pub enum ImportScreen<'a> {
     /// 交出方 `HostSession::snapshot` 编的原始快照：没抹口令，输出流停在一条报告中间时，续接里
@@ -162,11 +162,11 @@ pub struct HostSession {
     agent: Option<Agent>,
     /// `agent` 换成现在这个值的时刻，对外是 `SessionMeta::agent_since_ms`。
     agent_since_ms: Option<u64>,
-    /// 前台 agent 在进行的对话，见 `SessionMeta::conversation`。
+    /// 前台 agent 在进行的对话。
     conversation: Option<Conversation>,
-    /// 识别前台 agent 用的各路信号和去抖状态，见 `runode_agent::Tracker`。
+    /// 识别前台 agent 用的各路信号和去抖状态。
     agent_tracker: Tracker,
-    /// 上次认前台进程组的结果，见 `detect::ForegroundProbe`。
+    /// 上次认前台进程组的结果。
     foreground_probe: detect::ForegroundProbe,
     /// 程序没设置标题时用的名字：前台是 shell 自己时为它所在目录的名字，否则为前台程序的进程名；
     /// 由 `refresh_foreground` 更新。
@@ -175,28 +175,28 @@ pub struct HostSession {
     cwd: Option<PathBuf>,
     /// 上次读到的前台是不是 shell 自己，由 `refresh_foreground` 更新。
     foreground_is_shell: bool,
-    /// 上次读到的前台程序的名字，由 `refresh_foreground` 更新，对外见 `SessionMeta::foreground`。
+    /// 上次读到的前台程序的名字，由 `refresh_foreground` 更新。
     foreground: Option<String>,
-    /// 最近一次别的终端里的程序操作这个会话的记录，见 `drive`。
+    /// 最近一次别的终端里的程序操作这个会话的记录。
     driver: Option<Driver>,
-    /// 还没启动 shell 时它要从哪个目录开始，见 `new`。
+    /// 还没启动 shell 时它要从哪个目录开始。
     start_dir: Option<PathBuf>,
     /// shell 最近一次等着输入时所在的目录，记命令时当作命令运行的目录。
     prompt_cwd: Option<PathBuf>,
     /// 这一轮提示符的目录是 shell 报告的：同一轮里后面再来的输入开始（右提示符、续行提示符、
-    /// 重画）不再现读去盖掉它，见 `take_commands`。命令开始运行时清掉。
+    /// 重画）不再现读去盖掉它。命令开始运行时清掉。
     prompt_reported: bool,
     /// 正在运行、还没报告结束的那条命令。
     running: Option<FinishedCommand>,
     /// 最近一次收到界面发来的输入的时刻，agent 识别据此区分程序是自己在动还是在回显。
     input_at: Option<Instant>,
-    /// 现在套用着的主题，见 `apply_theme`。
+    /// 现在套用着的主题。
     settings: TermSettings,
-    /// 在喂给 VT 的字节流旁边认剪贴板的读请求，见 `clipboard`。
+    /// 在喂给 VT 的字节流旁边认剪贴板的读请求。
     clipboard_queries: clipboard::QueryScanner,
     /// 把按文件传的 Kitty 图片改写成直接传，正扣着一条没收完的 APC 时里面是它的内容。
     kitty_media: kitty_media::MediumRewriter,
-    /// `SessionMeta` 里的东西可能变了，见 `take_meta`。
+    /// `SessionMeta` 里的东西可能变了。
     meta_dirty: bool,
     /// 上次交出去的 `SessionMeta`，没变的不再交。
     last_meta: Option<SessionMeta>,
@@ -219,7 +219,7 @@ impl HostSession {
     }
 
     /// 用 `snapshot` 编出的快照建会话，接到 `pty` 上；尺寸取快照里的，`pty` 要已经是这个尺寸。
-    /// 快照里带着默认颜色和光标样式，这里不再套主题：套用会改 VT 的状态，见 `vt::apply_theme`。
+    /// 快照里带着默认颜色和光标样式，这里不再套主题：套用会改 VT 的状态。
     /// `settings` 只记下来，之后 `apply_theme` 拿它比较。
     pub fn from_snapshot(snapshot: &[u8], pty: Pty, settings: &TermSettings) -> Result<Self> {
         let mut terminal = vt::decode_snapshot(snapshot)?;
@@ -244,7 +244,7 @@ impl HostSession {
         Self::attach(size, pty, terminal, settings).map_err(|err| err.error)
     }
 
-    /// 同 `with_terminal`，失败时把 `pty` 还回来。
+    /// `with_terminal` 的本体：失败时连 `pty` 一起还回来。
     fn attach(
         size: GridSize,
         pty: Pty,
@@ -315,7 +315,7 @@ impl HostSession {
         Ok(())
     }
 
-    /// 交接的第一步：让 PTY 的读线程停下，见 `Pty::stop_reading`。之后还要把 `PtySink` 那头
+    /// 交接的第一步：让 PTY 的读线程停下。之后还要把 `PtySink` 那头
     /// 已经收到的输出喂完，等 `pty_reader_finished` 为 true，再编快照、`release_pty`。快照编不
     /// 出来（`SnapshotError::Unfinished`）或者不交了时 `resume_reading`。
     #[cfg(unix)]
@@ -323,8 +323,8 @@ impl HostSession {
         self.pty.stop_reading();
     }
 
-    /// `stop_reading` 之后接着读，见 `Pty::resume_reading`；`import` 导入、PTY 还停着的会话在这里
-    /// 打开闸门。交接前按输出活动判成工作中的 agent 从这一刻接着算，见 `Tracker::output_resumed`。
+    /// `stop_reading` 之后接着读；`import` 导入、PTY 还停着的会话在这里
+    /// 打开闸门。交接前按输出活动判成工作中的 agent 从这一刻接着算。
     #[cfg(unix)]
     pub fn resume_reading(&mut self) -> Result<()> {
         self.pty.resume_reading()?;
@@ -332,13 +332,13 @@ impl HostSession {
         Ok(())
     }
 
-    /// PTY 的读线程已经结束，`PtySink` 不会再收到东西，见 `Pty::reader_finished`。
+    /// PTY 的读线程已经结束，`PtySink` 不会再收到东西。
     #[cfg(unix)]
     pub fn pty_reader_finished(&self) -> bool {
         self.pty.reader_finished()
     }
 
-    /// 把 PTY 交出去，不结束 shell，见 `Pty::release`。交出后这个会话不再管 shell：写进去的丢掉，
+    /// 把 PTY 交出去，不结束 shell。交出后这个会话不再管 shell：写进去的丢掉，
     /// 改尺寸只改这边的 VT、不碰已经交出去的 PTY，读不到前台进程，丢掉它也不结束 shell；VT 还在，
     /// 照样能编快照。出错时什么都没动。
     #[cfg(unix)]
@@ -346,7 +346,7 @@ impl HostSession {
         self.pty.release()
     }
 
-    /// 复制一份 PTY master 的描述符，交接时先传给新宿主，自己这份照常用，见 `Pty::dup_master`。
+    /// 复制一份 PTY master 的描述符，交接时先传给新宿主，自己这份照常用。
     #[cfg(unix)]
     pub fn dup_master(&self) -> std::io::Result<std::os::fd::OwnedFd> {
         self.pty.dup_master()
@@ -357,7 +357,7 @@ impl HostSession {
         self.pty.shell_pid().and_then(crate::pty::pid_u32)
     }
 
-    /// 交接时要交给新宿主的会话状态，见 `SessionExport`。在 `take_commands` 之后取：还没取走的
+    /// 交接时要交给新宿主的会话状态。在 `take_commands` 之后取：还没取走的
     /// 命令步骤不在里面。
     pub fn export(&self) -> SessionExport {
         SessionExport {
@@ -481,7 +481,7 @@ impl HostSession {
         true
     }
 
-    /// 套用主题，见 `vt::apply_theme`；和现在套着的一样时什么都不做，返回 false。
+    /// 套用主题；和现在套着的一样时什么都不做，返回 false。
     pub fn apply_theme(&mut self, settings: &TermSettings) -> bool {
         if self.settings == *settings {
             return false;
@@ -512,13 +512,13 @@ impl HostSession {
         }
     }
 
-    /// 把界面发来的输入写给程序。不等写完，见 `PtyWriter`。
+    /// 把界面发来的输入写给程序。不等写完。
     pub fn write(&mut self, data: Vec<u8>) {
         self.input_at = Some(Instant::now());
         self.writer.send(data);
     }
 
-    /// VT 不停在一条序列中间，可以往里插自己的字节，见 `clear_screen`。
+    /// VT 不停在一条序列中间，可以往里插自己的字节。
     pub fn at_ground(&self) -> bool {
         self.terminal.is_vt_ground().unwrap_or(false)
     }
@@ -606,7 +606,7 @@ impl HostSession {
     }
 
     /// 记下别的终端里的程序（`by` 是它所在会话的标识）在 `at_ms`（Unix 毫秒）这一刻对这个会话做了
-    /// `action`，对外见 `SessionMeta::driver`。同一方接着做同样的事时最多每秒更新一次时刻，免得
+    /// `action`。同一方接着做同样的事时最多每秒更新一次时刻，免得
     /// 对外公布的状态跟着每个按键变。
     pub fn drive(&mut self, by: Option<String>, action: DriveAction, at_ms: u64) {
         if let Some(driver) = &self.driver
@@ -686,12 +686,12 @@ impl HostSession {
         self.writer.write_reply(&query.answer(text));
     }
 
-    /// VT 应答查询、宿主主动报告（见 `report_color_scheme`）写回程序的次数。
+    /// VT 应答查询、宿主主动报告写回程序的次数。
     pub fn replies(&self) -> u64 {
         self.replies.get()
     }
 
-    /// 把 VT 的全部状态编成快照，见 `vt::encode_snapshot`。VT 正停在一条很长的序列中间、或者
+    /// 把 VT 的全部状态编成快照。VT 正停在一条很长的序列中间、或者
     /// 正扣着一条 Kitty 图形命令的内容（扣着的字节不在 VT 里，编进快照就丢了）时返回
     /// `SnapshotError::Unfinished`，等下一批输出后再试。
     pub fn snapshot(&self) -> Result<Vec<u8>, SnapshotError> {
@@ -701,7 +701,7 @@ impl HostSession {
         vt::encode_snapshot(&self.terminal)
     }
 
-    /// 用 VT 序列重画当前状态，快照格式对不上时兜底，见 `vt::format_replay`。正扣着一条 Kitty
+    /// 用 VT 序列重画当前状态，快照格式对不上时兜底。正扣着一条 Kitty
     /// 图形命令时末尾补上 APC 的引导 `ESC _`：之后的输出接着这条命令，接收的 VT 也要停在 APC 里，
     /// 那些字节才不会被当成文字画出来。
     pub fn vt_replay(&self) -> Result<Vec<u8>> {
@@ -715,7 +715,7 @@ impl HostSession {
     /// 给别的进程的快照，之后给它的输出是经 `redactor` 抹过的。和 `snapshot` 不同的只在输出流
     /// 正停在一条 shell 集成报告里（`ReportRedactor::in_report`）时：VT 这时停在报告中间，
     /// `snapshot` 会把没写完的报告连着口令原样编进续接。这里在快照解出来的一份 VT 上先结束这条
-    /// 报告（ST，报告本来就不改 VT 的状态，见 `ReportRedactor`），再开一条只有开头 `ESC ] 6973;`
+    /// 报告（ST，报告本来就不改 VT 的状态），再开一条只有开头 `ESC ] 6973;`
     /// 的，编出的快照停在同样的状态，只是没有报告的内容；之后抹过的输出接着喂，报告照样在
     /// 原来的结束序列处结束。
     ///
@@ -735,7 +735,7 @@ impl HostSession {
     /// 给别的进程的 VT 重放，之后给它的输出是经 `redactor` 抹过的。重放不带没写完的序列；输出流
     /// 正停在一条 shell 集成报告里时，末尾补上报告的开头 `ESC ] 6973;`，前端的 VT 也停进一条
     /// 报告里，之后抹过的输出里报告的结束序列结束它，不会落到别的状态里（比如 BEL 成了响铃）。
-    /// 刚对上报告开头的几个字节时补这几个（见 `RedactorState::resume_bytes`），不然接着来的
+    /// 刚对上报告开头的几个字节时补这几个，不然接着来的
     /// `973;` 会被前端当成文字画上屏幕。
     pub fn redacted_vt_replay(&self, redactor: &ReportRedactor) -> Result<Vec<u8>> {
         let mut replay = self.vt_replay()?;
@@ -749,8 +749,7 @@ impl HostSession {
         Ok(vt::screen_tail(&self.terminal, lines)?)
     }
 
-    /// 倒数第 `n` 条命令（1 是最近一条）的输出和它的开头是否已经被挤出回滚历史，见
-    /// `vt::command_output`。没有 shell 集成标出的提示符、全屏程序占着屏幕、或者没有这么多条命令
+    /// 倒数第 `n` 条命令（1 是最近一条）的输出和它的开头是否已经被挤出回滚历史。没有 shell 集成标出的提示符、全屏程序占着屏幕、或者没有这么多条命令
     /// 时返回错误，说明里告诉读的一方怎么办。
     pub fn command_output(&self, n: u32) -> Result<(String, bool)> {
         if self.terminal.active_screen()? == Screen::Alternate {
@@ -800,7 +799,7 @@ fn recapture_report(terminal: &mut Terminal<'static, 'static>) {
 }
 
 /// 主题是深色还是浅色，按默认背景色（主题的，不算程序用 OSC 11 改的）的亮度定，回答程序的
-/// `CSI ? 996 n`，变了时见 `HostSession::report_color_scheme`。
+/// `CSI ? 996 n`。
 fn color_scheme(terminal: &Terminal<'_, '_>) -> Option<ColorScheme> {
     let bg = terminal.default_bg_color().ok()??;
     let luma = 299 * u32::from(bg.r) + 587 * u32::from(bg.g) + 114 * u32::from(bg.b);
@@ -927,8 +926,8 @@ fn register_callbacks(
             }
         })?
         // 命令开始运行的那一刻它还原样留在屏幕上，在这里就读出来，之后的输出可能把它冲掉。
-        // 只有 shell 集成用带口令的 `command` 报告认过的命令开始才记，133;C 自带的原文不用，
-        // 见 `Effects::command_report`；命令结束同样只认 `end` 报告认过的，见 `Effects::signed_ends`。
+        // 只有 shell 集成用带口令的 `command` 报告认过的命令开始才记，133;C 自带的原文不用；
+        // 命令结束同样只认 `end` 报告认过的。
         // 回调运行在 extern "C" 函数里，不能 panic，所以借用失败时丢掉这一步。
         .on_semantic_prompt({
             let effects = effects.clone();
@@ -970,7 +969,7 @@ fn register_callbacks(
                 }
             }
         })?
-        // 程序写剪贴板（OSC 52），见 `clipboard`。读剪贴板不装回调，原因也在那里。
+        // 程序写剪贴板（OSC 52）。读剪贴板不装回调，原因也在那里。
         .on_clipboard_write({
             let effects = effects.clone();
             move |_, write| clipboard::take_write(write, &effects)
@@ -1003,7 +1002,7 @@ fn notification_text(bytes: &[u8]) -> String {
         .to_owned()
 }
 
-/// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照，见 `vt::snapshot_format`。
+/// 这个构建编的快照的格式版本，前端据此判断解不解得了宿主的快照。
 /// 宿主升级时也按它决定交接用快照还是退回 VT 重放：格式号相同就当解得了，不再比较构建。
 ///
 /// 所以改了快照的编码（升级 libghostty 时尤其要看）必须同时改格式号，即 libghostty 快照信封里

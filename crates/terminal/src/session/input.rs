@@ -191,7 +191,7 @@ impl Session {
         self.scroll_offset = 0.;
     }
 
-    /// 清屏（⌘K）：请宿主清掉屏幕和回滚历史，见 `Request::ClearScreen`。备用屏幕归全屏程序
+    /// 清屏（⌘K）：请宿主清掉屏幕和回滚历史。备用屏幕归全屏程序
     /// （vim、less 等）自己管，不动。
     pub fn clear_screen(&mut self) {
         if self.terminal.active_screen().is_ok_and(|s| s == Screen::Alternate) {

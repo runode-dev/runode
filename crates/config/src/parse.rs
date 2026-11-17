@@ -257,7 +257,7 @@ impl Config {
             }
             "status-bar" => self.status_bar = or_default(empty, defaults.status_bar, || parse_bool(value))?,
             "status-bar-hidden" => {
-                // 写法见 `agent-notifications-exclude`。
+                // 值为空时清空；可以写多行，也可以一行用逗号隔开几个。
                 if empty {
                     self.status_bar_hidden.clear();
                 } else {
@@ -556,7 +556,7 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 }
 
 /// 照 Ghostty 的写法：逗号隔开的功能名，前面加 `no-` 是关掉，没写到的取默认值；单写 `true` 或
-/// `false` 是全开或全关。Ghostty 有、runode 不做的几项（见 `ShellFeatures`）也认，免得从 Ghostty
+/// `false` 是全开或全关。Ghostty 有、runode 不做的几项也认，免得从 Ghostty
 /// 读来的配置报错。
 fn parse_shell_features(value: &str) -> Result<ShellFeatures, String> {
     let mut features = ShellFeatures::default();
@@ -780,8 +780,7 @@ unknown-key = whatever
         assert_eq!(config.scrollback_limit, 10_000_000);
     }
 
-    /// 没写或写空时交给终端的是 `None`（不闪烁），只有显式写 true 才闪；终端那边怎么解释见
-    /// `runode_terminal` 的测试 `cursor_is_steady_unless_configured_or_requested`。
+    /// 没写或写空时交给终端的是 `None`（不闪烁），只有显式写 true 才闪。
     #[test]
     fn cursor_blinks_only_when_configured() {
         assert_eq!(Config::default().term_settings().cursor_blink, None);

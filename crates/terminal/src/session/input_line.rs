@@ -143,7 +143,7 @@ impl Session {
             return Ok(None);
         }
         // 输入正好写满一行时光标停在最后一格上、等着折行（pending wrap），这时它其实在那一格后面，
-        // 和 `prompt_input::read` 一样多算一格。
+        // 所以多算一格。
         let past_last = usize::from(self.terminal.is_cursor_pending_wrap()?);
         // 输入从光标前最后一个提示符单元格之后开始；光标后面的提示符单元格是画在行尾的右侧
         // 提示符（zsh、fish 的集成标出来的），不算输入，也不算输入的末尾。

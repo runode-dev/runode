@@ -24,7 +24,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// 拉起后这么久还连不上（比如它没抢到锁就退出了），再拉一次；多拉起的那个抢不到锁，自己退出。
 const RELAUNCH_AFTER: Duration = Duration::from_millis(500);
 
-/// socket 上在跑的宿主的样子，见 `probe`。
+/// socket 上在跑的宿主的样子。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Probe {
     /// 没有宿主在跑。
@@ -39,7 +39,7 @@ pub enum Probe {
     Running { sessions: usize, desktops: usize, build: BuildId },
 }
 
-/// 这次启动宿主怎么跑，见 `choose_mode`。
+/// 这次启动宿主怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
     /// 跑在 app 里，不开 socket（锁在别的宿主手里）。
@@ -53,9 +53,8 @@ pub enum Choice {
 }
 
 /// 按 socket 上探到的宿主和这个构建（`build`）决定这次怎么跑：没有在跑的宿主时拉起一个；是这个
-/// 构建时连上它；是别的构建、协议对不上或者没有会话时也让新宿主接手（`HandOver`，交接不成见
-/// `host_client::establish`）。socket 上是另一个 app 进程里的宿主时，不连进去也不让它退出，跑在
-/// app 里、不开 socket。
+/// 构建时连上它；是别的构建、协议对不上或者没有会话时也让新宿主接手（`HandOver`）。
+/// socket 上是另一个 app 进程里的宿主时，不连进去也不让它退出，跑在 app 里、不开 socket。
 pub fn choose_mode(probe: &Probe, build: &BuildId) -> Choice {
     match probe {
         Probe::OtherApp => Choice::InProcess,
@@ -148,8 +147,8 @@ pub enum Ended {
     AlreadyUpgraded,
 }
 
-/// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的同 `retire`；协议对不上的（`Probe`
-/// 是 `Incompatible`）没法让它自己退出，同 `terminate`。跑在另一个 app 里的不碰，返回 `Ended::NotAHost`；
+/// 用户要结束交接没成的旧宿主（连同它的会话）：说得通协议的请它关掉（`shut_down`）；协议对不上的
+/// （`Probe` 是 `Incompatible`）没法让它自己退出，从外面结束它（`terminate`）。跑在另一个 app 里的不碰，返回 `Ended::NotAHost`；
 /// 已经是 `build` 的宿主不碰，返回 `Ended::AlreadyUpgraded`，在让它退出的同一条连接上看，调用方先探过也
 /// 可能在那之后才交接完。
 pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
@@ -169,9 +168,8 @@ pub fn end_old_host(socket: &Path, build: &BuildId) -> io::Result<Ended> {
     Ok(Ended::Exited)
 }
 
-/// 结束 `socket` 上的宿主进程（连同它的会话），不管它说什么协议：pid 见
-/// `host_pid`，只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程（见
-/// `launched_as_host`）；别的（另一个 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
+/// 结束 `socket` 上的宿主进程（连同它的会话），不管它说什么协议：pid 从
+/// `host_pid` 取，只认同一个用户的进程，而且只认以 `--host` 启动的单独宿主进程；别的（另一个 app 进程里的宿主）不发，返回 `Ended::NotAHost`。发了之后等到
 /// socket 连不上为止，最多 `CONNECT_TIMEOUT`。
 fn terminate(socket: &Path) -> io::Result<Ended> {
     let pid = host_pid(socket)?;
@@ -254,7 +252,7 @@ pub(super) fn host_pid(socket: &Path) -> io::Result<u32> {
     }
 }
 
-/// 连接对端进程的 pid，只认同一个用户的。要在对方回过话之后读，见 `host_pid`。
+/// 连接对端进程的 pid，只认同一个用户的。要在对方回过话之后读。
 fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
     if !runode_host::same_user(stream) {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the host belongs to another user"));
@@ -266,7 +264,7 @@ fn peer_pid(stream: &UnixStream) -> io::Result<u32> {
     pid.ok_or_else(|| io::Error::other("cannot read the host's process id"))
 }
 
-/// `link` 连上 `socket` 上单独一个进程的宿主（见 `Link::connect_standalone`）。连上却在 `Welcome` 前
+/// `link` 连上 `socket` 上单独一个进程的宿主。连上却在 `Welcome` 前
 /// 断开时过一会儿再试，最多 `CONNECT_TIMEOUT`。
 pub fn connect(link: &Link, socket: &Path) -> Result<(), ConnectError> {
     let deadline = Instant::now() + CONNECT_TIMEOUT;

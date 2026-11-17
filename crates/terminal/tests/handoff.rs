@@ -678,7 +678,7 @@ fn dropping_a_paused_pty_on_panic_leaves_the_shell_to_the_old_side() {
     old_output.wait_exit();
 }
 
-/// 停着接手、开过闸以后丢掉，和 `Pty::adopt` 接手来的一样结束 shell。
+/// 停着接手、开过闸以后丢掉时结束 shell。
 #[test]
 fn dropping_a_resumed_paused_pty_ends_the_shell() {
     let (mut old, mut old_output) = shell();

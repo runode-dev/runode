@@ -39,7 +39,7 @@ pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 pub(crate) const UNKNOWN_SEQUENCE_MAX_BYTES: usize = 256 * 1024;
 
 /// 编码快照时最多带多少字节没写完的序列（续接）。VT 停在一条更长的序列中间时编不出快照，
-/// 要等它结束，见 `SnapshotError::Unfinished`。解码时也按它限制续接的长度。
+/// 要等它结束。解码时也按它限制续接的长度。
 pub(crate) const CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
 
 /// 每块屏幕（主屏和备用屏各一块）最多存多少字节 Kitty 图片的像素，超了先丢最老的。宿主和界面
@@ -105,8 +105,8 @@ pub(crate) fn configure_common(terminal: &mut Terminal<'_, '_>, scrollback_bytes
 /// 闪烁照旧优先，所以配置可以随时重载。
 ///
 /// 它不只改默认值：光标还跟着默认样式时，当前的闪烁和形状随新的默认值变；调低回滚上限会
-/// 丢掉历史。所以宿主和界面两份 VT 要在输出流的同一个位置套用同样的主题，见
-/// `HostMsg::ThemeApplied`。结果只取决于 VT 自己的状态（快照里都带着），所以从快照解出来的
+/// 丢掉历史。所以宿主和界面两份 VT 要在输出流的同一个位置（`HostMsg::ThemeApplied`）套用
+/// 同样的主题。结果只取决于 VT 自己的状态（快照里都带着），所以从快照解出来的
 /// VT 和原来那份套同样的主题，结果一样。
 pub(crate) fn apply_theme(terminal: &mut Terminal<'_, '_>, settings: &TermSettings) {
     // 默认调色板读出来的是上次设置的值，先重置回内置调色板再叠加配置，
@@ -196,7 +196,7 @@ impl From<Error> for SnapshotError {
 }
 
 /// 把 VT 的全部状态编成一份快照：屏幕、回滚历史、光标、各种模式、调色板、标题、Kitty 图片、
-/// 没写完的序列等，见 `libghostty_vt::snapshot`。快照格式还没有兼容保证，只能交给同一个构建解码。
+/// 没写完的序列等。快照格式还没有兼容保证，只能交给同一个构建解码。
 ///
 /// 不带的东西：选区、视口滚到了哪里、搜索，以及 `configure_common` 设的选项和各种回调。
 pub(crate) fn encode_snapshot(terminal: &Terminal<'_, '_>) -> std::result::Result<Vec<u8>, SnapshotError> {

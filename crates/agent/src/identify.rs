@@ -5,7 +5,7 @@
 //! 一组前台进程里先看组长，组长认不出再从整组里挑最可信的一个。
 //!
 //! `AMBIGUOUS_NAMES` 里的名字容易和别的程序撞名（`kilo` 编辑器、自己编的 `./amp`、`node cn.js`），
-//! 光名字对上不算，还要进程装在 agent 常见的安装位置，见 `installed`。
+//! 光名字对上不算，还要进程装在 agent 常见的安装位置。
 
 use runode_types::agent::AgentKind;
 
@@ -68,7 +68,7 @@ pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
     best.map(|(_, kind)| kind)
 }
 
-/// 容易和别的程序撞名的 agent 名字（查表用的名字，见 `lookup_name`）。前台进程按这些名字认出来时
+/// 容易和别的程序撞名的 agent 名字（查表用的名字）。前台进程按这些名字认出来时
 /// 还要 `installed` 成立才算 agent；别名里带 agent 字样的（`kilo-code`、`trae-cli`）不在这里。
 const AMBIGUOUS_NAMES: &[&str] = &["kilo", "cn", "amp", "pi", "vibe", "muse", "jules", "goose", "crush", "trae"];
 
@@ -213,7 +213,7 @@ fn wrapped_agent(runtime: &str, argv: &[String]) -> Option<String> {
     script_path(runtime, argv).and_then(agent_from_path)
 }
 
-/// 运行时或 shell 的参数里要跑的脚本，见 `script_index`。
+/// 运行时或 shell 的参数里要跑的脚本。
 fn script_path<'a>(runtime: &str, argv: &'a [String]) -> Option<&'a str> {
     let i = match lookup_name(basename(runtime)).as_str() {
         "node" | "bun" => script_index(argv, JS_EVAL_FLAGS, &[], None),
@@ -237,7 +237,7 @@ struct Bundling {
     value: &'static [char],
 }
 
-/// 连写的一串短选项里有什么，见 `Bundling::scan`。
+/// 连写的一串短选项里有什么。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Bundled {
     /// 有 `inline` 的字母。

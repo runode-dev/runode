@@ -3,7 +3,7 @@
 //! 升级时新宿主要和任何一个已经发布过的旧宿主谈交接，所以这里的 JSON 是照着第一个会交接的
 //! 版本发出的样子手写的，不由现在的类型生成：这些测试失败说明改了冻结的结构（改了字段名、
 //! 类型，或者加了不带 `#[serde(default)]` 的字段，包括嵌在里面的 `TermSettings`、`GridSize`、
-//! `SessionMeta`），要改回来，不要改样例。见 `message` 和 `handoff` 的模块文档。
+//! `SessionMeta`），要改回来，不要改样例。
 
 use runode_protocol::{
     AtPrompt, BuildId, ClientKind, ClientMsg, FrameKind, GoodbyeReason, HandoffPart, HandoffRefusal, HostMsg,

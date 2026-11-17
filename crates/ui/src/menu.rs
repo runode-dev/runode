@@ -548,7 +548,7 @@ pub trait MenuHost: Sized + 'static {
         }
     }
 
-    /// 按上一帧画出的行 `id` 右边的第 `button` 个按钮，见 `activate_menu_row`。
+    /// 按上一帧画出的行 `id` 右边的第 `button` 个按钮。
     fn press_menu_row_button(&mut self, id: &ElementId, button: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.menu().and_then(|menu| row_of(&menu.items, id)) {
             self.press_menu_button(ix, button, window, cx);

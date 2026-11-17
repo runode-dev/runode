@@ -1,5 +1,5 @@
 //! 在 Unix socket 上连同几个文件描述符一起收发一段字节（`sendmsg`/`recvmsg` 加 `SCM_RIGHTS`）。
-//! 宿主升级时，旧宿主用它把各个会话的 PTY master（见 `pty::PtyHandoff`）和监听的 socket 交给新宿主。
+//! 宿主升级时，旧宿主用它把各个会话的 PTY master和监听的 socket 交给新宿主。
 //!
 //! 一条消息在流上是：8 字节的头（字节数和描述符个数，各是小端的 u32），接着是那段字节。描述符
 //! 跟着头的第一个字节走，收的一方只按头里的长度读，不会读进下一条消息，所以描述符不会串到
@@ -54,8 +54,8 @@ pub fn send_with_fds(stream: &UnixStream, data: &[u8], fds: &[BorrowedFd<'_>]) -
 }
 
 /// 收一条消息：那段字节和随它来的描述符，描述符都设了 `FD_CLOEXEC`。对面关了连接时返回
-/// `UnexpectedEof`；头不像样（超过 `MAX_FDS` 个描述符也算）、描述符被截断（`MSG_CTRUNC`，见
-/// `RECV_FDS`）或者个数对不上时返回 `InvalidData`，已经收到的描述符都关掉。收到的描述符一多过
+/// `UnexpectedEof`；头不像样（超过 `MAX_FDS` 个描述符也算）、描述符被截断（`MSG_CTRUNC`）或者个数对不上时
+/// 返回 `InvalidData`，已经收到的描述符都关掉。收到的描述符一多过
 /// 头里说的（还没收到头时是 `MAX_FDS`）就不往下收：对面可以给每一段字节都带上一批描述符，等收完
 /// 再数，本进程的描述符可能先用光了。被信号打断时重试。
 pub fn recv_with_fds(stream: &UnixStream) -> io::Result<(Vec<u8>, Vec<OwnedFd>)> {
@@ -149,7 +149,7 @@ fn send_some(stream: &UnixStream, parts: [&[u8]; 2], skip: usize, fds: &[RawFd])
     }
 }
 
-/// 收描述符时就设上 `FD_CLOEXEC`；macOS 没有这个标志，收到后再设，见 `recv_some`。其间别的线程
+/// 收描述符时就设上 `FD_CLOEXEC`；macOS 没有这个标志，收到后再设。其间别的线程
 /// 起的子进程会继承这些描述符。
 #[cfg(target_os = "linux")]
 const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
@@ -259,7 +259,7 @@ mod tests {
 
     use super::*;
 
-    /// 一次 `sendmsg` 能带的描述符上限，见 `RECV_FDS`。
+    /// 一次 `sendmsg` 能带的描述符上限。
     const SEND_FDS: usize = if cfg!(target_os = "linux") { 253 } else { RECV_FDS };
 
     /// 对面不按 `MAX_FDS` 来、一次塞满能发的上限时，收的一方报错，收下的描述符一个不漏地关掉：

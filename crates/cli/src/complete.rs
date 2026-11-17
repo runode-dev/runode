@@ -214,7 +214,7 @@ const DAY_CHOICES: &[(&str, &str)] = &[
     ("sat", "Saturday"),
 ];
 
-/// `--key` 提示的键名，同 `runode_types::input::parse_keys` 认的写法。
+/// `--key` 提示的键名，都得是 `runode_types::input::parse_keys` 认的写法。
 const KEYS: &[(&str, &str)] = &[
     ("enter", ""),
     ("esc", ""),
@@ -312,7 +312,7 @@ fn read(previous: &[String]) -> Line<'_> {
         line.seen.push(word);
         let opt = match line.command {
             Some(command) => find_option(command, line.positionals.first().copied(), word),
-            // 选项也能写在命令前面（见 `args::parse`），这时还不知道是哪条命令的，只看它带不带值。
+            // 选项也能写在命令前面，这时还不知道是哪条命令的，只看它带不带值。
             None => any_option(word),
         };
         let Some(opt) = opt else { continue };

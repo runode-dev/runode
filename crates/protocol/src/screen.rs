@@ -1,8 +1,8 @@
 //! 远程桌面：看和操控整块屏幕的一条连接上说的话。连接上是 `frame` 的帧：控制消息是通道 0 的
 //! `FrameKind::Control`，客户端发 `ScreenClientMsg`，电脑发 `ScreenHostMsg`；画面是
-//! `FrameKind::Video`，一帧画面一个帧，载荷见 `encode_video`。
+//! `FrameKind::Video`，一帧画面一个帧，载荷由 `encode_video` 编。
 //!
-//! 手机经远程访问连上来时，过了门禁（见 `remote`）发的第一帧是 `ScreenHello` 而不是
+//! 手机经远程访问连上来时，过了门禁发的第一帧是 `ScreenHello` 而不是
 //! `ClientMsg::Hello`，这条连接就接到远程桌面上。电脑回 `Ready`（版本不同时回 `Incompatible` 后
 //! 断开），客户端按里面的屏幕和授权发 `Start`，要采哪块屏幕在 `Start` 里指定，切屏就是再发一次。之后每要一次关键帧发一次 `Keyframe`（刚开始解、
 //! 丢了帧），输入随时发 `Input`。要换屏幕的显示模式时发 `SetMode`，电脑换好后回 `Displays`，客户端按新的尺寸再发
@@ -12,7 +12,7 @@
 //! 给出它的，两边互相打通以后电脑把画面改发到 UDP 上，控制消息和输入仍走这条连接；UDP 不通了电脑先发
 //! `DatagramLost`，之后的画面回到这条连接上。`datagram` 为假的电脑不认得 `Datagram`，收到会断开连接。
 //!
-//! 以后怎么改：和 `message` 一样，已有字段不改，新加的带 `#[serde(default)]`；改了含义时加
+//! 以后怎么改：已有字段不改，新加的带 `#[serde(default)]`；改了含义时加
 //! `SCREEN_VERSION`。
 
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use std::net::IpAddr;
 
 pub use runode_types::screen::{Codec, ScreenInput, ScreenMods, StopCause, VideoFrame};
 
-/// 远程桌面这套消息和画面格式的版本，见 `ScreenClientMsg::ScreenHello`。
+/// 远程桌面这套消息和画面格式的版本。
 pub const SCREEN_VERSION: u32 = 2;
 
 /// 客户端发给电脑的。

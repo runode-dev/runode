@@ -94,7 +94,7 @@ pub(super) enum Screen<S> {
     Lost { session: Option<S> },
 }
 
-/// 别的前端的视图在决定这个会话的尺寸，见 `HostMsg::SizeOwner`。
+/// 别的前端的视图在决定这个会话的尺寸。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SizeOwner {
     /// 那个前端在 `Hello` 里报的设备名；没报时为空。
@@ -154,15 +154,15 @@ pub(super) struct ScreenState<S> {
     exited: bool,
     /// 发出去、还没等到屏幕的 `Attach`。
     attaching: Option<Attach>,
-    /// `attaching` 被宿主以积压拒了、还没再发，见 `retry_attach`。
+    /// `attaching` 被宿主以积压拒了、还没再发。
     backed_up: bool,
     /// 视图在窗口里显示着。
     visible: bool,
-    /// 从什么时候起不显示，见 `tick`。
+    /// 从什么时候起不显示。
     hidden_since: Option<Instant>,
     /// 这次不显示以来要喂给界面这份 VT 的字节数，到了 `HIDDEN_FEED_LIMIT` 就不再喂。
     hidden_fed: usize,
-    /// `meta` 是宿主给过的（不是建视图时的空白），`Attached` 带的状态可以和它比，见 `screen_arrived`。
+    /// `meta` 是宿主给过的（不是建视图时的空白），`Attached` 带的状态可以和它比。
     meta_known: bool,
     /// 正在断开后重新连上：这时连不成多半是宿主还没准备好，按断开处理，用户可以再点重开；平常连不成
     /// 是会话已经没了，按 shell 退出处理。
@@ -231,7 +231,7 @@ impl<S: Vt> ScreenState<S> {
         }
     }
 
-    /// 宿主里还没有会话（恢复布局时看不见、又从没启动过的终端，见 `TerminalView::deferred`）：不显示，
+    /// 宿主里还没有会话（恢复布局时看不见、又从没启动过的终端）：不显示，
     /// 没有界面这份 VT，状态是视图自己按起始目录给的 `meta`。开了会话以后照常连：回到显示时
     /// `set_visible` 给出要屏幕的 `Attach`；没显示就要启动时只看状态。宿主给了状态再换掉 `meta`。
     pub(super) fn new_unopened(meta: SessionMeta, size: GridSize, now: Instant) -> Self {
@@ -299,7 +299,7 @@ impl<S: Vt> ScreenState<S> {
         self.attaching
     }
 
-    /// 别的前端的视图在决定这个会话的尺寸时是它，见 `SizeOwner`。
+    /// 别的前端的视图在决定这个会话的尺寸时是它。
     pub(super) fn size_owner(&self) -> Option<&SizeOwner> {
         self.size_owner.as_ref()
     }

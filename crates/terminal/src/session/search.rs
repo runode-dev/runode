@@ -57,7 +57,7 @@ impl Session {
         let result = search.run(&mut self.terminal).and_then(|()| {
             if backward { search.select_prev(&mut self.terminal) } else { search.select_next(&mut self.terminal) }
         });
-        // 同 `try_search`，不留平滑滚动错开的半行。
+        // 不留平滑滚动错开的半行。
         self.scroll_offset = 0.;
         log_err("search step", result.and_then(|_| self.reveal_selected()));
     }

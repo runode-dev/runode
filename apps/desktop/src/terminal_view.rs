@@ -60,7 +60,7 @@ actions!(
     [
         PasteSelection,
         ClearScreen,
-        /// 停在提示符上的 shell 换成一个新的，重新读用户配置，见 `Session::reload_shell`。
+        /// 停在提示符上的 shell 换成一个新的，重新读用户配置。
         ReloadShell,
         ScrollToTop,
         ScrollToBottom,
@@ -95,7 +95,7 @@ pub(crate) use lifecycle::{PROVISIONAL_SIZE, remote_reconnected};
 /// 写好的文件怎么处理：复制路径（`CopyPath`）、把路径粘贴进终端（`PastePath`）或者用系统默认
 /// 程序打开（`Open`）。和快捷键配置里解析出来的是同一个类型，不用再转换。
 pub use runode_config::keybind::ScreenFile;
-/// 回到显示时主线程最多等这么久拿到宿主给的屏幕，见 `TerminalView::wait_for_screen`。
+/// 回到显示时主线程最多等这么久拿到宿主给的屏幕。
 pub(crate) use screen::SHOW_WAIT;
 pub use search::{SearchSelection, StartSearch};
 
@@ -155,8 +155,7 @@ pub enum TerminalEvent {
     Exited,
 }
 
-/// 收宿主发来的事件的一端。读事件的任务和回到显示时主线程上的等待（见 `request_visible`、
-/// `wait_for_screen`）轮流用它。
+/// 收宿主发来的事件的一端。读事件的任务和回到显示时主线程上的等待轮流用它。
 type Events = Rc<RefCell<UnboundedReceiver<LinkEvent>>>;
 
 /// 从命令菜单开来跑的那条命令：菜单里的名字、命令行和跑它的目录。
@@ -168,7 +167,7 @@ struct TaskRun {
 
 pub struct TerminalView {
     /// 界面这份 VT 现在的样子，以及宿主公布的会话状态（标题、agent、目录）、视图的尺寸、shell
-    /// 退出了没有，见 `ScreenState`。
+    /// 退出了没有。
     screen: ScreenState<Session>,
     /// 收这个会话的事件的一端；重新登记（断开后重连、换会话）时换掉。
     events: Events,
@@ -179,7 +178,7 @@ pub struct TerminalView {
     pending_end: Option<LinkEvent>,
     /// 最近画出的默认前景色和背景色；没有界面这份 VT（只看状态、断开）时标签栏和背景用它。
     colors: (Rgb, Rgb),
-    /// 调用方记着的这个终端的目录，宿主还没报告目录时用，见 `reattach`。
+    /// 调用方记着的这个终端的目录，宿主还没报告目录时用。
     start_dir: Option<PathBuf>,
     /// `deferred` 建的视图开会话时 `start_dir` 不是目录的话改从哪里开。
     start_fallback: Option<PathBuf>,
@@ -191,16 +190,16 @@ pub struct TerminalView {
     /// 会话在哪台主机上，和到那台主机的连接。
     host: HostId,
     host_link: host_client::Link,
-    /// 远端主机上正在后台开会话，见 `open_session`。
+    /// 远端主机上正在后台开会话。
     opening: Option<Opening>,
     /// 要启动、还没开始开会话的 `deferred` 视图上等着会话开好的，开始开时交给 `Opening::waiting`。
     open_waiting: Vec<futures::channel::oneshot::Sender<Option<SessionId>>>,
-    /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它，见 `Drop`。`deferred` 建的视图开会话
+    /// 宿主里的会话。用 `end` 结束它；视图没了只是不再看它。`deferred` 建的视图开会话
     /// 之前为 `None`。
     id: Option<SessionId>,
     /// 已经用 `end` 结束了会话，丢掉视图时不再发。
     ended: bool,
-    /// 宿主发来了 `HostMsg::Bell`，还没通知外层，见 `ring_bell`。
+    /// 宿主发来了 `HostMsg::Bell`，还没通知外层。
     bell_pending: bool,
     /// 已经请宿主启动了 shell。
     started: bool,
@@ -233,7 +232,7 @@ pub struct TerminalView {
     reporting_press: bool,
     /// 按着 ⌘ 悬停时指针下的链接，画下划线、指针显示成手形；⌘ 点击打开它。别的平台上 ⌘ 换成 Ctrl。
     hovered_link: Option<Link>,
-    /// 按着 ⌘ 时指针下的候选链接，以及后台查路径存在与否的进度；见 `LinkLookup`。
+    /// 按着 ⌘ 时指针下的候选链接，以及后台查路径存在与否的进度。
     link_lookup: Option<input::LinkLookup>,
     /// 这次左键按下是一次不带修饰键的单击，按在哪一格；松开时还在这一格就把光标挪过去。
     click_cell: Option<(i32, i32)>,
@@ -244,7 +243,7 @@ pub struct TerminalView {
     /// 第一个提示符仍按旧尺寸画：zsh 的 PROMPT_SP 按旧列数补空格，终端比那窄时折行，
     /// 反白的 `%` 就留在了提示符上面一行。
     start_pending: bool,
-    /// 等 shell 出了提示符再打进去的命令，见 `run_command`。
+    /// 等 shell 出了提示符再打进去的命令。
     pending_command: Option<String>,
     /// `pending_command` 已经等过了 `PROMPT_TIMEOUT`，会话一开好就打，不再等提示符。
     command_overdue: bool,
@@ -254,7 +253,7 @@ pub struct TerminalView {
     search_field: Option<(Entity<InputState>, Subscription)>,
     /// 开着的右键菜单。
     menu: Option<Menu>,
-    /// 收宿主发来的输出和状态的任务，见 `read_events`。
+    /// 收宿主发来的输出和状态的任务。
     _reader: Task<()>,
     /// 这边看到前台 agent 上次换了种类或状态的时刻；宿主没报 `SessionMeta::agent_since_ms` 时由
     /// `agent_changed_at` 交出去，agent 列表按它排同一状态里的先后。
@@ -407,7 +406,7 @@ fn render_scroll_position(top: f32, len: f32, foreground: Rgb) -> gpui::Div {
 }
 
 impl TerminalView {
-    /// 尺寸归别的前端管、VT 和视图的行列对不上时这一帧画 VT 的哪一块（见 `Crop::follow`），记下来给
+    /// 尺寸归别的前端管、VT 和视图的行列对不上时这一帧画 VT 的哪一块，记下来给
     /// 下一帧接着用；对得上或者尺寸归这边管时为空，照常从视图左上角画。
     fn crop_for(&mut self, frame: &Frame) -> Option<Crop> {
         let view = self.screen.last_size();

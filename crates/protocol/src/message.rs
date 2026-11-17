@@ -12,9 +12,9 @@
 //! 所以加字段时带上 `#[serde(default)]`；改了已有消息的含义、新加必填字段或者新加枚举取值
 //! （上面能读成 `Unknown` 的除外）时，加 `PROTOCOL_VERSION`。
 //!
-//! 升级时新版本的宿主要从旧宿主手里接过会话（见 `ClientKind::Successor`、`ClientMsg::Handoff`），
+//! 升级时新版本的宿主要从旧宿主手里接过会话（`ClientKind::Successor`、`ClientMsg::Handoff`），
 //! 而旧宿主可能是任何一个已经发布过的版本，所以下面这些永远冻结，加 `PROTOCOL_VERSION` 也不能改：
-//! - 帧头的格式（见 `frame`），以及交接时传描述符的消息头（`runode_terminal` 的 `fd_passing`：
+//! - 帧头的格式，以及交接时传描述符的消息头（`runode_terminal` 的 `fd_passing`：
 //!   小端 u32 字节数加小端 u32 描述符个数）。
 //! - `ClientMsg::Hello`、`HostMsg::Welcome`、`HostMsg::Incompatible`，以及交接用的
 //!   `ClientMsg::Handoff`、`HandoffReady`、`HandoffAbort`、`HandoffDone`、
@@ -24,7 +24,7 @@
 //!   给不同版本的前端发 `Goodbye { Handoff }`，前端也要和不同版本的宿主谈握手。
 //! - `Hello` 里 `client` 是 `ClientKind::Successor` 的连接，宿主不比对协议版本，照样回
 //!   `Welcome`；之后只认交接用的消息。新宿主据此能和协议版本不同的旧宿主谈交接。
-//! - 交接时一条描述符消息里数据的编法和 `HandoffPart` 的格式，见 `handoff`；格式有自己的版本号
+//! - 交接时一条描述符消息里数据的编法和 `HandoffPart` 的格式；格式有自己的版本号
 //!   `HANDOFF_FORMAT`。
 //!
 //! `handoff_compat` 测试里存着格式 1 的样例，永远要读得了。
@@ -107,9 +107,9 @@ pub enum AttachMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// 连上后的第一条消息。宿主回 `HostMsg::Welcome`，协议版本对不上时回 `Incompatible`（`client`
-    /// 是 `ClientKind::Successor` 时不比对，见模块文档）。
+    /// 是 `ClientKind::Successor` 时不比对）。
     /// `session` 是发消息的程序自己所在的会话（在 runode 的终端里跑的命令行带上它），宿主据此
-    /// 记下是谁在操作别的会话，见 `SessionMeta::driver`。
+    /// 记下是谁在操作别的会话。
     Hello {
         protocol: u32,
         build: BuildId,
@@ -118,8 +118,8 @@ pub enum ClientMsg {
         caps: Caps,
         #[serde(default)]
         session: Option<SessionId>,
-        /// 前端所在设备的名字（桌面填机器名），给别的前端看「尺寸由谁控制」，见
-        /// `HostMsg::SizeOwner`。没有时宿主不替它编名字。
+        /// 前端所在设备的名字（桌面填机器名），给别的前端看「尺寸由谁控制」
+        /// （`HostMsg::SizeOwner`）。没有时宿主不替它编名字。
         #[serde(default)]
         device: Option<String>,
     },
@@ -169,7 +169,7 @@ pub enum ClientMsg {
     Kill { id: SessionId },
     /// 换主题：默认颜色、调色板、光标样式和回滚上限，之后新开的会话也用它。宿主应用到自己的
     /// VT 后，在每个会话的输出流里发带着这份设置的 `ThemeApplied`，连着的前端到那里才应用，
-    /// 不管是不是自己发的，见 `HostMsg::ThemeApplied`。
+    /// 不管是不是自己发的。
     SetTheme { settings: TermSettings },
     /// 改宿主的选项：终端里的程序读写剪贴板（OSC 52）的规矩。
     SetOptions {
@@ -201,7 +201,7 @@ pub enum ClientMsg {
     PastePath { req: u32, id: SessionId, path: PathBuf },
     /// 要 app 里各个终端摆在哪，宿主转给界面，回 `HostMsg::Layout`。问过的连接之后在布局变了时
     /// 收到 `HostMsg::LayoutChanged`。没有界面连着时宿主照自己手里的布局回；界面自己发时也回宿主手里
-    /// 的布局，不转给界面，见 `LayoutChanged`。
+    /// 的布局，不转给界面。
     Layout { req: u32 },
     /// 界面里的布局变了（开关窗口、工作区、标签、分屏，换了焦点、调了分屏大小）。只有桌面的界面发，
     /// 不用回；宿主转成 `HostMsg::LayoutChanged` 告诉问过布局的连接。`windows` 是新的布局，宿主记下
@@ -282,7 +282,7 @@ pub enum ClientMsg {
     /// `name` 去掉首尾空白后为空时回 `Error`。
     RenameWorkspace { req: u32, window: u32, workspace: u32, name: String },
     /// 列 `dir` 这个目录里能跑的命令（Makefile 的目标、package.json 的 scripts），回
-    /// `HostMsg::Tasks`，见 `tasks` 模块；`dir` 不是绝对路径、不是目录时回 `Error`。
+    /// `HostMsg::Tasks`；`dir` 不是绝对路径、不是目录时回 `Error`。
     /// 宿主自己办，不转给界面。
     ListTasks { req: u32, dir: PathBuf },
     /// 列宿主这台机器上新建终端时可以挑的 shell，回 `HostMsg::Shells`。宿主自己办，不转给界面。
@@ -296,7 +296,7 @@ pub enum ClientMsg {
         path: Option<OsString>,
         programs: Vec<String>,
     },
-    /// 在会话 `id` 的 shell 当前所在的仓库里读写 git，见 `git` 模块。一条连接上的这些请求按到达的
+    /// 在会话 `id` 的 shell 当前所在的仓库里读写 git。一条连接上的这些请求按到达的
     /// 先后一件一件办，推送、拉取这类要等网络的会排着后面的。办不了时回的 `Error` 只带 `req`、不带
     /// `id`：错是这件请求的（git 的报错、没有这个会话），不是会话出了事。
     Git { req: u32, id: SessionId, request: GitRequest },
@@ -305,7 +305,7 @@ pub enum ClientMsg {
     /// 界面写好后回 `Done`，`req` 为 0（没有发请求的一方，也就没有它的编号）。前端直接发给宿主的
     /// 回 `Error`。
     WriteClipboard { id: SessionId, text: ClipboardContent },
-    /// 会话 `id` 里的程序用 OSC 52 读剪贴板。和 `WriteClipboard` 一样只出现在 `HostMsg::UiRequest`
+    /// 会话 `id` 里的程序用 OSC 52 读剪贴板，只出现在 `HostMsg::UiRequest`
     /// 里。`ask` 为真时界面先弹框问用户（配置项 `clipboard-read` 是 `ask`），`program` 是那时会话
     /// 前台的程序名，问的时候给用户看。界面回 `HostMsg::ClipboardText`；用户不让读、剪贴板里没有
     /// 文字或者文字太长时 `text` 为空，宿主回给程序一个空的剪贴板。
@@ -318,7 +318,7 @@ pub enum ClientMsg {
     /// 新版本的宿主（`ClientKind::Successor`）要接手：旧宿主把 PTY 和监听的 socket 交过去后退出。
     /// `min_format`..=`max_format` 是新宿主读得了的交接格式（`handoff::HANDOFF_FORMAT`），旧宿主
     /// 只写自己的那一个，不在范围里时回 `HandoffRefused { UnsupportedFormat }`，否则回
-    /// `HandoffBegin`，接着在同一条连接上发描述符消息（见 `handoff::HandoffPart`）。
+    /// `HandoffBegin`，接着在同一条连接上发描述符消息。
     Handoff {
         #[serde(default)]
         min_format: u32,
@@ -335,10 +335,9 @@ pub enum ClientMsg {
     },
     /// 新宿主收到 `Commit` 并接管了监听的 socket，旧宿主可以退出了。
     HandoffDone,
-    /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动，见
-    /// `GoodbyeReason`。
+    /// 让宿主退出。`kill_sessions` 为假时会话跟着宿主一起留到交接或者下次启动。
     Shutdown { kill_sessions: bool },
-    /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的凭据，见 `push`：带中转的官方构建
+    /// 手机登记（`token` 为空时注销）这台电脑给它推通知用的凭据：带中转的官方构建
     /// （`push::OFFICIAL_BUNDLE`）交中转服务给的句柄，没带中转的 Android 构建交 FCM registration token
     /// 原文（带冒号，句柄没有冒号，电脑据此分辨），别的交 APNs 的 device token（十六进制）。
     /// `env` 是 token 所属的 APNs 环境，`bundle` 是 App 的 bundle id（APNs 的 topic；Android 上是
@@ -364,9 +363,9 @@ pub enum ClientMsg {
     /// 收发会卡上一两秒，打的字攒着一起到；一直有包来回它就醒着。宿主在 `Welcome` 的 `keep_awake`
     /// 里说自己认得它时手机才发。
     KeepAwake,
-    /// 要看板上的任务和定时（见 `todo` 模块），宿主回 `Todos`；之后任务或定时有变化时给这条连接发
+    /// 要看板上的任务和定时，宿主回 `Todos`；之后任务或定时有变化时给这条连接发
     /// `TodosChanged`。完成了的任务只给最近的，更早的用 `ListDoneTodos` 翻。下面这几条宿主自己办，宿主在 `Welcome` 的 `todos`
-    /// 里说自己认得它们；还没打开任务库（见 `runode_host` 的 `Host::serve_todos`）、正在交出会话时回
+    /// 里说自己认得它们；还没打开任务库、正在交出会话时回
     /// `Error`。
     ListTodos { req: u32 },
     /// 加一张待办的任务（不开始），回 `TodoAdded`。
@@ -390,7 +389,7 @@ pub enum ClientMsg {
     StartTodo { req: u32, id: String },
     /// 接回开始过的任务（完成了的也行）的会话，回 `Opened`：会话还在跑时就是那个；没了时在任务的目录（工作树
     /// 还在时在工作树）里开一个新的，在提示符上跑这家 agent 接着任务那场对话的命令（不能按对话号接的接这个
-    /// 目录里最近一次，见 `runode_agent::models::resume_command`），认不出是哪家时只开 shell。不重跑任务的提示词。
+    /// 目录里最近一次），认不出是哪家时只开 shell。不重跑任务的提示词。
     ResumeTodo { req: u32, id: String },
     /// 翻完成了的任务（完成了多久的都有），完成得晚的在前，跳过前 `offset` 张；`schedule` 给了时只要这个定时
     /// 开出的。回 `DoneTodos`，一次最多 `todo::DONE_TODOS_PAGE` 张。
@@ -471,8 +470,8 @@ pub enum ClientMsg {
 /// 东西后稍后再来。前端按开头认出它，所以一字不能改：新旧宿主和新旧前端要互相认得。
 pub const ERROR_BACKED_UP: &str = "the connection is backed up; read what the host already sent first";
 
-/// `HostMsg::Error` 以这句开头（后面跟着会话标识）表示会话已经没了。和 `ERROR_BACKED_UP` 一样是前端
-/// 认错误种类的约定，不能改字。
+/// `HostMsg::Error` 以这句开头（后面跟着会话标识）表示会话已经没了。是前端认错误种类的
+/// 约定，不能改字。
 pub const ERROR_NO_SESSION: &str = "no session";
 
 fn is_zero(n: &u32) -> bool {
@@ -560,7 +559,7 @@ pub enum HostMsg {
         req: u32,
         id: SessionId,
     },
-    /// 回 `Attach`。`channel` 是这个会话的帧在这条连接上用的通道，见 `Frame::channel`；
+    /// 回 `Attach`。`channel` 是这个会话的帧在这条连接上用的通道；
     /// `mode` 是宿主实际给的，前端要快照、构建又不一样时退成 `VtReplay`。之后先是快照帧和
     /// `SnapshotEnd`（`MetaOnly` 时没有），再是输出。`settings` 是宿主那份 VT 现在套着的主题，
     /// `VtReplay` 时前端按它和 `size` 新建自己的 VT 再喂重放（快照里本来就带着）。
@@ -683,7 +682,7 @@ pub enum HostMsg {
         req: u32,
         windows: Vec<WindowLayout>,
     },
-    /// 电脑上 app 的布局变了（见 `ClientMsg::LayoutChanged`），想知道新的布局再发 `ClientMsg::Layout`。
+    /// 电脑上 app 的布局变了，想知道新的布局再发 `ClientMsg::Layout`。
     /// 只发给这条连接上问过 `Layout` 的，不用回。
     LayoutChanged,
     /// 回 `ClientMsg::ListDirs`。`path` 是实际列的目录：规范化后的绝对路径，请求里没给时是家目录。
@@ -728,7 +727,7 @@ pub enum HostMsg {
         ui: u64,
         request: Box<ClientMsg>,
     },
-    /// 请求没法办，`req`、`id` 是对得上的那条请求的。前端要分辨的两种原因见 `ERROR_BACKED_UP` 和
+    /// 请求没法办，`req`、`id` 是对得上的那条请求的。前端要分辨的两种原因是 `ERROR_BACKED_UP` 和
     /// `ERROR_NO_SESSION`。`message` 是英文的原因；`reason` 是前端能换成自己的话说的几种，认不出或没有时
     /// 显示 `message`。
     Error {
@@ -822,7 +821,7 @@ impl HostMsg {
     }
 }
 
-/// 剪贴板里的文字，见 `ClientMsg::WriteClipboard`、`HostMsg::ClipboardText`。线上就是一个字符串；
+/// `ClientMsg::WriteClipboard`、`HostMsg::ClipboardText` 带的剪贴板里的文字。线上就是一个字符串；
 /// `Debug` 只写字节数，带着它的消息（以及包着它们的 `UiRequest`、`UiReply`）怎么记进日志都不会带出
 /// 剪贴板的内容。
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -867,7 +866,7 @@ pub enum Placement {
 
 /// shell 集成报告的东西：shell 自己的 PATH 和函数名，对应 `SessionMeta` 的 `shell_path`、
 /// `shell_names`。函数名可能有几百个，宿主只给说了 `Caps::shell_report` 的前端拆出来单独带，没变时
-/// 不再发，见 `HostMsg::Meta::shell`。
+/// 不再发。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ShellReport {
@@ -941,7 +940,7 @@ pub struct SessionInfo {
     /// shell 已经退出，会话还留着给前端看最后的屏幕。
     #[serde(default)]
     pub exited: bool,
-    /// 现在决定这个会话尺寸的前端的设备名，见 `HostMsg::SizeOwner`；没有 owner 或者它没报设备名
+    /// 现在决定这个会话尺寸的前端的设备名；没有 owner 或者它没报设备名
     /// 时为空。
     #[serde(default)]
     pub size_owner: Option<String>,
@@ -962,7 +961,7 @@ pub enum GoodbyeReason {
     Unknown,
 }
 
-/// 宿主为什么不交接，见 `HostMsg::HandoffRefused`。
+/// 宿主为什么不交接。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HandoffRefusal {

@@ -56,7 +56,7 @@ pub struct PairingTicket {
     expires_at: u64,
 }
 
-/// 配对进行到哪了，见 `PairingTicket::poll`。
+/// 配对进行到哪了。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PairingProgress {
     /// 还在等设备来配对。

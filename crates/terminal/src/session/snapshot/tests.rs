@@ -6,8 +6,7 @@
 //!
 //! 唯一允许不同的是回滚历史最老的那几行留没留着：回滚按 page 整块丢弃，page 怎么划分不在
 //! 快照里，解出来的 VT 之后丢的行数可能多也可能少。所以最后只比两边都还留着的那些行。
-//! 刚解完、还没接着喂的时候不一样：解出来的历史必须一行不少，见 `assert_history_survives`
-//! 和 `decoding_keeps_a_full_scrollback`。
+//! 刚解完、还没接着喂的时候不一样：解出来的历史必须一行不少。
 
 use libghostty_vt::{
     Terminal,
@@ -279,14 +278,14 @@ struct Sample {
     cols: u16,
     rows: u16,
     data: Vec<u8>,
-    /// 随机切点的个数，另外还有落在序列中间的切点和两头，见 `cut_points`。调试构建的
+    /// 随机切点的个数，另外还有落在序列中间的切点和两头。调试构建的
     /// libghostty 每次写入都做完整性检查，几十 KB 就要喂好几秒，大的数据少切几刀。
     cuts: usize,
     /// 回滚历史的字节上限；`None` 用默认的。
     scrollback_bytes: Option<usize>,
 }
 
-/// 各份数据；`scale` 放大随机生成的数据和切点的个数，见 `snapshots_survive_a_long_soak`。
+/// 各份数据；`scale` 放大随机生成的数据和切点的个数。
 fn samples(seed: u64, scale: usize) -> Vec<Sample> {
     let mut rng = Rng::new(seed);
     let sample = |name, cols, rows, data: &[u8]| Sample {
@@ -374,7 +373,7 @@ fn samples(seed: u64, scale: usize) -> Vec<Sample> {
             b"\x1b[1;2;3;4;5;7;8;9;53mall\x1b[0m\x1b[4:3;58;2;10;20;30mcurly\x1b[59;4:0m\x1b[21mdouble\x1b[22;23;24;25;27;28;29m\
               \x1b[38:2::1:2:3mcolon\x1b[39;49m\x1b[100;97mbright\x1b[m\x1b[3$}\x1b[0$}",
         ),
-        // 喂到要丢掉最老的 page 为止，见 `long_scrollback`。
+        // 喂到要丢掉最老的 page 为止。
         Sample {
             name: "long scrollback",
             cols: LONG_SCROLLBACK_COLS,
@@ -404,7 +403,7 @@ fn samples(seed: u64, scale: usize) -> Vec<Sample> {
 
 /// 一个 page 能放的行数随列数变：200 列时不到 500 行，20 列时四千多行。用宽的终端、小一些的
 /// 字节上限（默认的 10 MiB 在 200 列要喂好几千行才满，调试构建太慢），少喂一些就能让回滚
-/// 历史丢掉好几个 page。字节上限不能太小，见 `decoding_drops_history_under_a_tight_byte_limit`。
+/// 历史丢掉好几个 page。字节上限不能太小。
 const LONG_SCROLLBACK_COLS: u16 = 200;
 const LONG_SCROLLBACK_BYTES: Option<usize> = Some(2_000_000);
 
@@ -538,7 +537,7 @@ fn decoding_keeps_the_scrollback_limits() {
 
 /// 字节上限很紧（不到三个 page，约 1.2 MB；比如 libghostty 自己默认的 10000 字节）时，解码会
 /// 丢掉一大截回滚历史：80 列、700 行带样式的输出，651 行历史解出来只剩几十行，多半是解码后
-/// 按字节上限又剪了一遍。默认的 10 MiB 下不会这样，见 `decoding_keeps_a_full_scrollback`。
+/// 按字节上限又剪了一遍。默认的 10 MiB 下不会这样。
 #[test]
 fn decoding_drops_history_under_a_tight_byte_limit() {
     let mut source = vt::new_terminal(size(80, 50)).unwrap();
@@ -596,7 +595,7 @@ fn pending_wrap_off_the_last_column_survives() {
 
 /// 停在各种序列的每一个字节后面编快照：都编得出，解出来的 VT 停在同一个地方（是否在 ground），
 /// 不用等回到 ground 就能再编（宿主交接时就是这样），接着喂剩下的字节后和一口气喂完的那份
-/// 一样。8 位 C1 字节开头的序列也编得出，见 `vt::tests::a_c1_control_ending_a_string_still_encodes`。
+/// 一样。8 位 C1 字节开头的序列也编得出。
 #[test]
 fn a_snapshot_cut_inside_any_sequence_resumes() {
     const SEQUENCES: [&[u8]; 26] = [
@@ -689,7 +688,7 @@ fn a_session_resumes_from_a_snapshot() {
     source.feed(&RECORDED_ZSH_VIM_LESS[..cut]);
     original.feed(&RECORDED_ZSH_VIM_LESS[..cut]);
     // 快照里带着默认颜色和光标样式，这里不再 `apply_theme`：它会改 VT 的状态（比如光标还跟着
-    // 默认样式时换掉形状），只在宿主标出的位置套，见 `vt::apply_theme`。
+    // 默认样式时换掉形状），只在宿主标出的位置套。
     let mut resumed = session_from(&source);
     assert_eq!(resumed.size(), size(cols, rows_count));
     for session in [&mut original, &mut resumed] {

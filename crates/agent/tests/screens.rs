@@ -1,4 +1,4 @@
-//! 内置规则对各 agent 典型界面的判断。屏幕文字的格式同 `Signals::screen`：行尾空白去掉，
+//! 内置规则对各 agent 典型界面的判断。屏幕文字照 `Signals::screen` 要的格式：行尾空白去掉，
 //! 一行一个 `\n`。
 
 use runode_agent::{RuleBook, Signals, Verdict};

@@ -40,8 +40,9 @@ pub(crate) fn get(url: &str, timeout: Duration, progress: &dyn Fn(u64, u64)) -> 
     })
 }
 
-/// 把 `url` 下载成文件 `to`，和 `get` 一样阻塞、报进度、判 HTTP 状态，但内容由系统边收边写进临时
-/// 文件，不经内存。HTTP 状态不是 2xx 时不留 `to`。
+/// 把 `url` 下载成文件 `to`，阻塞到下完或者出错，最多 `timeout`；下载期间每隔 `PROGRESS_INTERVAL` 调一次
+/// `progress(已收到的字节, 总字节)`。内容由系统边收边写进临时文件，不经内存。HTTP 状态不是 2xx 时算出错，
+/// 不留 `to`。
 #[cfg(target_os = "macos")]
 pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn Fn(u64, u64)) -> Result<(), Error> {
     use block2::RcBlock;
@@ -63,7 +64,7 @@ pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn F
             };
             let _ = done.send(outcome);
         });
-        // SAFETY: 同 `get`。
+        // SAFETY: 回调的签名和 NSURLSession 的下载任务要的一致，它只在别的线程上被调一次。
         Retained::into_super(unsafe { session.downloadTaskWithURL_completionHandler(target, &handler) })
     })
 }
@@ -140,7 +141,7 @@ pub(crate) fn get(url: &str, timeout: Duration, _progress: &dyn Fn(u64, u64)) ->
     })
 }
 
-/// 下载成文件，每 250 毫秒报一次已收到的字节（总字节未知，报 0）；失败时不留 `to`。
+/// 下载成文件，每隔 `PROGRESS_INTERVAL` 报一次已收到的字节（总字节未知，报 0）；失败时不留 `to`。
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn download(url: &str, to: &Path, timeout: Duration, progress: &dyn Fn(u64, u64)) -> Result<(), Error> {
     retry_unrevoked(url, |no_revoke| download_once(url, to, timeout, progress, no_revoke))

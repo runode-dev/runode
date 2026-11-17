@@ -3,7 +3,7 @@
 //! `runode_protocol::remote`，这里是 Mac 这边的实现。
 //!
 //! `Listener` 是开着的监听：IPv4 和 IPv6 各一个 TCP 监听，一个线程接连接，每条连接一个线程。连接
-//! 先做 TLS 1.3（rustls，ring 后端，证书是第一次开时生成的自签证书，见 `identity`），再过门禁
+//! 先做 TLS 1.3（rustls，ring 后端，证书是第一次开时生成的自签证书），再过门禁
 //! （`gate`：登录验签、配对验口令），通过后检查第一帧是和设备种类对得上的 `Hello`，然后经调用方给的
 //! `Connect` 要一条到宿主的新连接，在两边之间搬字节（`bridge`）；别的电脑配对成的桌面设备还能开读写项目
 //! （`ConnectProject`）和转到本机端口的专用连接。手机登记推送的请求不转给宿主，
@@ -55,7 +55,7 @@ pub use push::{ApnsKey, PushSettings, TestPush, send_test_push};
 pub use service::{Listen, Service};
 pub use status::{ListenerStatus, listener_status};
 
-/// 要一条到宿主的新连接，见 `Listener`。返回的连接还没说过话，第一帧由这边转发手机的 `Hello`。
+/// 要一条到宿主的新连接。返回的连接还没说过话，第一帧由这边转发手机的 `Hello`。
 pub type Connect = Arc<dyn Fn() -> io::Result<UnixStream> + Send + Sync>;
 
 /// 现在的 Unix 秒。设备表、配对口令的时间都按它记，命令行和设置页算「多久以前」「还剩多久」也用它。

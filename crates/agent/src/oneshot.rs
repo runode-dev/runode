@@ -380,7 +380,7 @@ fn keep_within(bytes: &mut Vec<u8>, read: &[u8], limit: usize) -> bool {
 fn set_nonblocking(fd: RawFd) -> io::Result<()> {
     // SAFETY: `fd` 是调用方拿着、开着的管道，F_GETFL 只读它的状态标志。
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    // SAFETY: 同上，F_SETFL 只改这个 fd 自己的状态标志。
+    // SAFETY: `fd` 是调用方拿着、开着的管道，F_SETFL 只改这个 fd 自己的状态标志。
     if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
         return Err(io::Error::last_os_error());
     }

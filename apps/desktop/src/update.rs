@@ -1,4 +1,4 @@
-//! 自动更新：在后台查 GitHub 上的新版本、下载好，退出时换上，见 `runode_update`。
+//! 自动更新：在后台查 GitHub 上的新版本、下载好，退出时换上。
 //!
 //! 配置项 `auto-update` 开着时，启动后过 `FIRST_CHECK` 查一次，之后每隔 `CHECK_INTERVAL` 再查，
 //! 查到新版本直接在后台下载；这份 app 不能自己更新时（自己打包的、不在 .app 里、放在写不了的位置）
@@ -13,7 +13,7 @@
 //! 重启。不重启也行：app 退出时装上（`on_app_quit`），下次打开就是新版本。重启
 //! （`window::quit_to_update`）按退出走，会话留得下就留在后台，不看配置项 `terminal-host`；退出时
 //! 装上新版本，GPUI 的 `restart` 等 app 退出后把它重新打开（Windows 上由安装程序装完后打开）。
-//! 新版本打开时发现宿主是旧的构建，照升级的规矩让新宿主接手会话，见 `host_client`。
+//! 新版本打开时发现宿主是旧的构建，照升级的规矩让新宿主接手会话。
 
 use std::{
     sync::{
@@ -53,7 +53,7 @@ enum Phase<S = Staged> {
     Ready(S),
 }
 
-/// 查完了谁在等结果，见 `Phase::finish_check`。
+/// 查完了谁在等结果。
 #[derive(Debug, PartialEq, Eq)]
 enum Asked {
     /// 后台定时查的：查到新版本直接下，别的不说。
@@ -64,7 +64,7 @@ enum Asked {
     Download,
 }
 
-/// 要查一次时接着做什么，见 `Phase::start_check`。
+/// 要查一次时接着做什么。
 #[derive(Debug, PartialEq, Eq)]
 enum Start {
     /// 在后台查。
@@ -101,7 +101,7 @@ impl<S> Phase<S> {
         manual
     }
 
-    /// 查完了：回到空闲（见 `finish`），返回谁在等这次的结果。
+    /// 查完了：回到空闲，返回谁在等这次的结果。
     fn finish_check(&mut self) -> Asked {
         let accepted = matches!(self, Self::Checking { accepted: true, .. });
         match self.finish() {

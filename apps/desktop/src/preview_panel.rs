@@ -4,10 +4,10 @@
 //! 标签能拖动换位置，中键关掉，右键有关闭其他、关闭右侧这些。文本用终端的字体，带行号和相对 HEAD 的改动标记，能按行选中复制，
 //! 语法高亮在后台做完再换上；图片按栏宽等比缩小；二进制、读不了、太大的文件只给一句说明。
 //! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。Markdown 文件默认显示排版后的
-//! 样子，在后台解析，见 `markdown`。按 `open` 的 `edit` 打开的文本文件读完直接进编辑模式，Markdown
+//! 样子，在后台解析。按 `open` 的 `edit` 打开的文本文件读完直接进编辑模式，Markdown
 //! 也一样，编辑的是源码，退出编辑才看到排版。
 //!
-//! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开，见 `diff`。
+//! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开。
 //!
 //! 预览栏是一个单独的视图（`PreviewPanel`），一个窗口一个，标签按 workspace 各记一份（`PreviewTabs`），
 //! 显示的是 app 经 `set_workspace` 说的那个 workspace 的。字体、栏宽和预览字号经 `set_input` 交进来，
@@ -83,10 +83,10 @@ const BODY_PADDING: f32 = 6.;
 /// 长行右边缘渐隐的宽度。
 const FADE_WIDTH: f32 = 24.;
 
-/// 仓库根目录和它解析过符号链接的路径，见 `PreviewTabs::real_root`。
+/// 仓库根目录和它解析过符号链接的路径。
 type RealRoot = (PathBuf, PathBuf);
 
-/// app 每次画预览栏之前交进来的东西，见 `PreviewPanel::set_input`。
+/// app 每次画预览栏之前交进来的东西。
 #[derive(Clone, PartialEq)]
 pub struct Input {
     /// 预览栏的宽度，即终端区的宽。
@@ -169,7 +169,7 @@ struct Preview {
     /// 要滚到的条目（文本的行或 diff 的行）和滚到哪儿。等画的时候再滚：内容可能还没读完，
     /// 换行时条目在第几行也要那时才知道。
     reveal: Cell<Option<(usize, ScrollStrategy)>>,
-    /// 在编辑模式里时正文换成它，见 `edit`。
+    /// 在编辑模式里时正文换成它。
     editor: Option<edit::Editor>,
     /// 下次读完是能编辑的文本就进编辑模式，读完即清掉：从文件树打开的。
     edit_on_load: bool,
@@ -252,7 +252,7 @@ impl Preview {
 
     /// 按 git 状态 `git` 重算改动标记和标签上的状态：子模块和嵌套仓库里的文件按它们自己那个
     /// 仓库算；不在仓库里或文件不在仓库下时都没有。字面上不在仓库根下的按真实路径比，仓库根的真实路径
-    /// 是 `real_root`（见 `PreviewTabs::real_root`），还没解析好时它就是字面的根目录。
+    /// 是 `real_root`，还没解析好时它就是字面的根目录。
     fn refresh_marks(&mut self, git: Option<&git::Repos>, real_root: Option<&RealRoot>) {
         let stat;
         (self.marks, self.status, stat) = git
@@ -319,8 +319,7 @@ impl Preview {
 
     /// 这个标签要不要重读：还没读过；普通标签是文件在磁盘上变过，diff 标签是 git 状态变过。工作区的 diff
     /// 标签也比文件：窗口在后台、切到了别的 workspace 时听不到文件事件，二进制、改动太多的文件扫描结果
-    /// 又看不出再改过一次（见 `affected_by`）。`stamp` 是文件现在的大小和修改时间，由调用方在后台取，
-    /// 见 `PreviewPanel::reload_if`。
+    /// 又看不出再改过一次。`stamp` 是文件现在的大小和修改时间，由调用方在后台取。
     fn stale(&self, stamp: Option<Stamp>) -> bool {
         self.content.is_none() || self.reload || (self.follows_file() && stamp != self.stamp)
     }
@@ -490,21 +489,21 @@ fn loaded(content: Content, svg: &SvgRenderer, cell_width: fn(char) -> u8) -> Lo
     }
 }
 
-/// 画出来最宽的那一行，见 `shown_width`。
+/// 画出来最宽的那一行。
 fn widest_line(lines: &[String], cell_width: fn(char) -> u8) -> usize {
     lines.iter().enumerate().max_by_key(|(_, line)| shown_width(line, cell_width)).map_or(0, |(ix, _)| ix)
 }
 
-/// `line` 画出来占几格：制表符照 `display_line` 展开，一个字按 `cell_width` 算。
+/// `line` 画出来占几格（制表符展开后），一个字按 `cell_width` 算。
 fn shown_width(line: &str, cell_width: fn(char) -> u8) -> usize {
     runode_preview::display_width(line, MAX_COLUMNS, |ch| usize::from(cell_width(ch)))
 }
 
-/// 预览栏，见模块说明。
+/// 预览栏。
 pub struct PreviewPanel {
     /// 各 workspace 的标签，没开过预览的 workspace 不在表里。
     workspaces: HashMap<WorkspaceId, PreviewTabs>,
-    /// 显示的是哪个 workspace 的标签，见 `set_workspace`。
+    /// 显示的是哪个 workspace 的标签。
     ws: WorkspaceId,
     input: Input,
     /// 预览栏的焦点：点了预览的文字后 cmd+c 复制选中的行。
@@ -539,7 +538,7 @@ impl MenuHost for PreviewPanel {
 }
 
 impl PreviewPanel {
-    /// `cell_width` 说一个字在终端里占几格，见 `PreviewPanel::cell_width`。
+    /// `cell_width` 说一个字在终端里占几格。
     pub fn new(cell_width: fn(char) -> u8, cx: &mut Context<Self>) -> Self {
         Self {
             workspaces: HashMap::new(),
@@ -564,7 +563,7 @@ impl PreviewPanel {
         }
     }
 
-    /// 换上 app 画预览栏时的字体、栏宽这些，见 `Input`；和上次不同时返回真，app 缓存着它，要叫它重画。
+    /// 换上 app 画预览栏时的字体、栏宽这些；和上次不同时返回真，app 缓存着它，要叫它重画。
     pub fn set_input(&mut self, input: Input) -> bool {
         let changed = self.input != input;
         self.input = input;
@@ -573,7 +572,7 @@ impl PreviewPanel {
 
     /// workspace `ws` 最近读到的 git 状态，改动标记和 diff 按它算。和上次交来的不是同一份时，重算各标签的
     /// 改动标记，这个文件的改动变了的 diff 标签记下要重读。主仓库换了根目录时在单独的线程上解析它的真实路径，
-    /// 解析好了再重算一遍，见 `PreviewTabs::real_root`。
+    /// 解析好了再重算一遍。
     pub fn set_git(&mut self, ws: WorkspaceId, git: Option<Arc<git::Repos>>, cx: &mut Context<Self>) {
         let tabs = self.workspaces.entry(ws).or_default();
         let same = crate::git_view::same_repos(&tabs.git, &git);
@@ -747,7 +746,7 @@ impl PreviewPanel {
         self.open_tab(path, None, pin, edit, cx);
     }
 
-    /// 和 `open` 一样打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它，有 `hit`
+    /// 打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它，有 `hit`
     /// （这一行里的字节范围）时只选中那段，免得接着打字把整行换掉。
     pub fn open_at(
         &mut self,
@@ -1006,7 +1005,7 @@ impl PreviewPanel {
         let Some(preview) = self.preview_mut() else {
             return;
         };
-        // 起读之前就清掉要重读的标记（和 `load_diff` 一样）：读的期间文件又变了时重新标上，读完不能把它抹掉。
+        // 起读之前就清掉要重读的标记：读的期间文件又变了时重新标上，读完不能把它抹掉。
         preview.reload = false;
         preview.cancel.store(true, Ordering::Relaxed);
         preview.cancel = Arc::new(AtomicBool::new(false));

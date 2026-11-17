@@ -208,15 +208,16 @@ fn bash_at_least(major: u32, minor: u32) -> bool {
 }
 
 impl RealShell {
-    /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`，见 `find_shell`），`rc` 写进它的启动配置；
+    /// 起 `shell`（`bash`、`zsh`、`fish`、`elvish` 或 `nu`），`rc` 写进它的启动配置；
     /// `name` 在同时跑的测试里各不相同，失败时也用它说是哪一个。系统里没有这个 shell 时为 `None`，
     /// 设了环境变量 `RUNODE_REQUIRE_SHELLS` 时直接失败（CI 用它保证 fish、elvish、nushell 真的测到）。
-    /// 口令和 `shell_integration::prepare` 一样经 `RUNODE_REPORT_TOKEN_FILE` 指着的文件交给集成。
+    /// 口令经 `RUNODE_REPORT_TOKEN_FILE` 指着的文件交给集成。起 shell 和交口令的做法要和
+    /// `shell_integration::prepare` 的一致，不然测的不是真实的启动路径。
     fn start(shell: &str, name: &str, rc: &str, prompt: &'static str, idle: &'static [&'static str]) -> Option<Self> {
         Self::start_handing_token(shell, name, rc, prompt, idle, false)
     }
 
-    /// 同 `start`；`legacy` 时直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令，不经文件。
+    /// 起 `shell`；`legacy` 时直接经环境变量 `RUNODE_REPORT_TOKEN` 交口令，不经文件。
     fn start_handing_token(
         shell: &str,
         name: &str,
@@ -236,7 +237,7 @@ impl RealShell {
         let home = std::env::temp_dir().join(format!("rn-cmdout-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
-        // 和 `shell_integration::prepare` 一样：bash 用 --rcfile 起非登录的交互式 shell，脚本自己加载
+        // bash 用 --rcfile 起非登录的交互式 shell，脚本自己加载
         // 登录配置；zsh 把 ZDOTDIR 指到集成目录，那里的 .zshenv 还原 ZDOTDIR 后加载用户配置和集成；
         // fish、nushell 的数据目录加进 XDG_DATA_DIRS，它们自己加载里面的集成；elvish 用 -rc 读集成，
         // 集成再加载用户的 rc.elv。

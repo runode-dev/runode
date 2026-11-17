@@ -70,7 +70,7 @@ pub struct TermSettings {
     pub search_selected_background: TerminalColor,
     pub search_selected_foreground: TerminalColor,
     pub option_as_alt: OptionAsAlt,
-    /// 回滚历史最多占多少字节，见 `DEFAULT_SCROLLBACK_LIMIT`。
+    /// 回滚历史最多占多少字节。
     pub scrollback_limit: usize,
     /// 之后启动的 shell 的集成脚本开哪些功能；已经在跑的 shell 不变。
     #[serde(default)]

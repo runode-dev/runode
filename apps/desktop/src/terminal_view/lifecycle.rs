@@ -3,8 +3,8 @@
 //! 状态的判断在宿主里，结果随 `HostMsg::Meta` 到达。
 //!
 //! 和视图所在主机（`HostId`）的宿主之间经那台主机的 `Link` 说话：连上会话时宿主给一份当时的屏幕（同一个构建时是
-//! 快照，否则是 VT 重放），之后的输出和标记按先后到达；事件按界面这份 VT 现在的样子怎么处理见
-//! `ScreenState`。响铃只认宿主的 `HostMsg::Bell`，不看界面这份 VT 的 `on_bell`：两边认的是同一个
+//! 快照，否则是 VT 重放），之后的输出和标记按先后到达。
+//! 响铃只认宿主的 `HostMsg::Bell`，不看界面这份 VT 的 `on_bell`：两边认的是同一个
 //! BEL，都认会响两次；宿主那份在视图只看状态时也认得到，VT 重放出来的屏幕也不会再响一遍。
 
 use std::{
@@ -139,7 +139,7 @@ fn attach_later(link: &HostLink, id: SessionId) -> (ScreenState<Session>, Unboun
 }
 
 /// 连上宿主里的会话 `id`，等它给第一份屏幕，建好界面这边的 VT，返回它和收之后的事件的一端。
-/// 连不上时结束这个会话（用于刚开的会话）；宿主积压着时不结束，见 `attach_later`。
+/// 连不上时结束这个会话（用于刚开的会话）；宿主积压着时不结束。
 fn connect(
     link: &HostLink,
     id: SessionId,
@@ -203,7 +203,7 @@ impl WindowWatches {
 pub(super) struct Opening {
     start: bool,
     attach: Attach,
-    /// 等着会话开好的，见 `TerminalView::opened`。
+    /// 等着会话开好的。
     waiting: Vec<oneshot::Sender<Option<SessionId>>>,
     /// 开会话的后台线程和 `TerminalView::end` 在这里碰头，谁后到谁结束会话：视图结束后可能马上被丢掉，
     /// 等不到回话，开出来的会话没人结束。
@@ -217,7 +217,7 @@ struct Claim {
     opened: Option<SessionId>,
 }
 
-/// 唤醒时叫醒等着的线程，主线程上等宿主给屏幕时用，见 `TerminalView::wait_for_screen`。
+/// 唤醒时叫醒等着的线程，主线程上等宿主给屏幕时用。
 struct Unpark(thread::Thread);
 
 impl ArcWake for Unpark {
@@ -233,7 +233,7 @@ impl TerminalView {
     }
 
     /// 建好视图，在主机 `host` 的 `cwd` 下启动 `shell`（为空时宿主的默认 shell），`cwd` 为 `None` 时从家目录
-    /// 开始；shell 等第一次布局后才启动，见 `start`。伪终端开不了时返回错误，不建视图。
+    /// 开始；shell 等第一次布局后才启动。伪终端开不了时返回错误，不建视图。
     pub fn spawn(
         host: &HostId,
         cwd: Option<&Path>,
@@ -248,9 +248,9 @@ impl TerminalView {
     }
 
     /// 建好视图但先不启动 shell，等 `start` 时再在 `cwd` 下启动。恢复布局时显示出来的终端用它，
-    /// 等第一次布局量出尺寸再启动；看不见的连会话都不开，见 `deferred`。`cwd` 不是目录时从 `fallback` 开。
+    /// 等第一次布局量出尺寸再启动；看不见的连会话都不开。`cwd` 不是目录时从 `fallback` 开。
     /// `resume` 是出了提示符后接回的 agent 对话。远端主机上的会话不在主线程上等宿主回话，先建成
-    /// `deferred` 的视图，显示出来时在后台开，见 `open_session`。
+    /// `deferred` 的视图，显示出来时在后台开。
     pub fn unstarted(
         host: &HostId,
         cwd: Option<&Path>,
@@ -417,7 +417,7 @@ impl TerminalView {
     }
 
     /// 远端主机还没连上时恢复存档里的终端：先按断开显示，主机连上后会话 `id` 还在就接回，不在了就在
-    /// `cwd`（为空时 `fallback`）新开、接回 `resume` 这个 agent 对话，见 `host_reconnected`。
+    /// `cwd`（为空时 `fallback`）新开、接回 `resume` 这个 agent 对话。
     #[allow(clippy::too_many_arguments)]
     pub fn awaiting(
         host: &HostId,
@@ -452,7 +452,7 @@ impl TerminalView {
     /// 用宿主里已有的会话 `id` 建视图（存档恢复、接上后台会话）。`cwd` 是调用方记着的目录，宿主
     /// 还没报告目录时当作它的目录。`visible` 为假时视图只看状态（`AttachMode::MetaOnly`），等
     /// `request_visible` 再看屏幕。会话已经启动过，不再 `start`。连不上时返回错误，不结束会话；宿主
-    /// 积压着时不算连不上，见 `attach_later`。`shell` 是建这个会话时挑的，会话没了在原目录重开时用。
+    /// 积压着时不算连不上。`shell` 是建这个会话时挑的，会话没了在原目录重开时用。
     pub fn reattach(
         host: &HostId,
         id: SessionId,
@@ -503,7 +503,7 @@ impl TerminalView {
         self.started
     }
 
-    /// 启动 `unstarted` 建的视图的 shell：等下一次布局量出实际尺寸再启动，见 `start_pending`。
+    /// 启动 `unstarted` 建的视图的 shell：等下一次布局量出实际尺寸再启动。
     pub fn start(&mut self, cx: &mut Context<Self>) {
         if !self.started {
             self.start_pending = true;
@@ -512,7 +512,7 @@ impl TerminalView {
     }
 
     /// 告诉宿主这个会话在这边是不是当前看着的（焦点进出这个终端，包括它的搜索栏）。获得焦点也算一次
-    /// 交互：几个前端看同一个会话时，宿主让最近交互的那个决定尺寸，见 `ScreenState::size_owner`。
+    /// 交互：几个前端看同一个会话时，宿主让最近交互的那个决定尺寸。
     /// 宿主里还没开会话时没什么可报的。
     pub(super) fn report_focus(&self, focused: bool) {
         let Some(id) = self.id else {
@@ -534,12 +534,12 @@ impl TerminalView {
     }
 
     /// 收宿主发来的事件的任务：把排队的事件合并成一批处理，再重绘。收事件的一端在视图里，
-    /// 只在取事件时借用：回到显示时主线程要直接从它取（见 `wait_for_screen`）。取满一批（见
-    /// `MAX_OUTPUT_BATCH`、`MAX_EVENT_BATCH`）时处理完先让出主线程（`yield_now`），积压很多时也能
+    /// 只在取事件时借用：回到显示时主线程要直接从它取。取满一批
+    /// （`MAX_OUTPUT_BATCH`、`MAX_EVENT_BATCH`）时处理完先让出主线程（`yield_now`），积压很多时也能
     /// 在批与批之间画帧、处理输入。
     fn read_events(events: Events, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn_in(window, async move |this, cx| {
-            // 建视图时已经到了的结束（见 `pending_end`）先处理：任务排上主线程时外层已经订阅好了。
+            // 建视图时已经到了的结束先处理：任务排上主线程时外层已经订阅好了。
             let ended = this.update_in(cx, |view, window, cx| view.handle_pending_end(window, cx));
             if !matches!(ended, Ok(false)) {
                 return;
@@ -574,9 +574,9 @@ impl TerminalView {
         })
     }
 
-    /// 按先后处理宿主发来的一批事件（见 `ScreenState::apply`），再把变化转给外层：标题、agent、
-    /// 退出等事件，要重新连上的就连，然后重绘。响铃留给调用方用 `ring_bell` 转发，
-    /// 见 `new`；这一批里有退出时在退出之前转发。
+    /// 按先后处理宿主发来的一批事件，再把变化转给外层：标题、agent、
+    /// 退出等事件，要重新连上的就连，然后重绘。响铃留给调用方用 `ring_bell` 转发；
+    /// 这一批里有退出时在退出之前转发。
     fn handle_link_events(&mut self, events: Vec<LinkEvent>, window: &mut Window, cx: &mut Context<Self>) {
         let settings = self.config.term_settings();
         let link = self.host_link.clone();
@@ -587,7 +587,7 @@ impl TerminalView {
     }
 
     /// 等 shell 出了提示符（有 shell 集成时 `SessionMeta::prompt_cwd` 有了）把 `command` 打进去回车，已经出了
-    /// 的马上打；等了 `PROMPT_TIMEOUT` 还没等到时照样打，和 `runode open -- 命令` 一样。
+    /// 的马上打；等了 `PROMPT_TIMEOUT` 还没等到时照样打。
     pub fn run_command(&mut self, command: String, cx: &mut Context<Self>) {
         self.pending_command = Some(command);
         self.command_overdue = false;
@@ -740,7 +740,7 @@ impl TerminalView {
     /// 视图在不在窗口里显示（窗口当前 workspace 当前标签里的分屏，被放大的分屏挡住的也算）。
     /// 离开显示 `HIDE_GRACE` 后（刷屏的更早）只看状态、丢掉界面这份 VT；回到显示时要是已经丢了，
     /// 按视图的尺寸发出要屏幕的 `Attach` 并返回 true，接着用 `wait_for_screen` 等（最多 `SHOW_WAIT`，等不到先画
-    /// 背景，到了再补上）。一次显示好几个终端时先都发出去再一起等（见 `WindowView::sync_visibility`），
+    /// 背景，到了再补上）。一次显示好几个终端时先都发出去再一起等，
     /// 不必一个等完再要下一个。
     pub fn request_visible(&mut self, visible: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let attach = self.screen.set_visible(visible, Instant::now());
@@ -766,7 +766,7 @@ impl TerminalView {
         false
     }
 
-    /// 视图显示着，见 `request_visible`。
+    /// 视图显示着。
     pub fn visible(&self) -> bool {
         self.screen.visible()
     }
@@ -829,7 +829,7 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// 处理建视图时就已经到了的那件「之后不再有事件」的事（退出、断开），见 `pending_end`；返回
+    /// 处理建视图时就已经到了的那件「之后不再有事件」的事（退出、断开）；返回
     /// 有没有。
     fn handle_pending_end(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(end) = self.pending_end.take() else {
@@ -841,7 +841,7 @@ impl TerminalView {
     }
 
     /// 和宿主断开后点了「在原目录重开」：先重新连上宿主；这个终端的会话还在就接着用它，不在了就
-    /// 在原来的目录开一个新的换上。别的断开着的终端里会话还在的随之重新连上，见 `HostReconnected`。
+    /// 在原来的目录开一个新的换上。别的断开着的终端里会话还在的随之重新连上。
     pub(super) fn reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.screen.is_lost() {
             return;
@@ -1018,7 +1018,7 @@ impl TerminalView {
         }
     }
 
-    /// 接上启动时提前拉起的 shell（见 `prespawn`）并建好它的视图。
+    /// 接上启动时提前拉起的 shell并建好它的视图。
     pub fn adopt(shell: Prespawned, window: &mut Window, cx: &mut App) -> anyhow::Result<Entity<Self>> {
         let size = shell.size;
         let id = shell.into_id();
@@ -1044,7 +1044,7 @@ impl TerminalView {
 
         let config_watch = cx.observe_global_in::<AppConfig>(window, |view, window, cx| {
             let old = std::mem::replace(&mut view.config, cx.global::<AppConfig>().0.clone());
-            // 主题等宿主标出位置后再换，见 `HostMsg::ThemeApplied`。
+            // 主题等宿主标出位置后再换。
             let settings = view.config.term_settings();
             match view.screen.shown_mut() {
                 Some(session) => session.apply_config(&settings),
@@ -1209,13 +1209,13 @@ impl TerminalView {
         self.screen.meta()
     }
 
-    /// 最近一次别的终端里的程序操作这个会话的记录，见 `SessionMeta::driver`。
+    /// 最近一次别的终端里的程序操作这个会话的记录。
     pub fn driver(&self) -> Option<&Driver> {
         self.screen.meta().driver.as_ref()
     }
 
     /// 结束宿主里的会话（关标签、关分屏这类用户明确要关掉终端的时候）。之后丢掉视图时不再
-    /// 另外发什么；没调过它就丢掉视图时见 `Drop`。
+    /// 另外发什么。
     pub fn end(&mut self) {
         if std::mem::replace(&mut self.ended, true) {
             return;

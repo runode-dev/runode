@@ -1,6 +1,6 @@
 //! 窗口布局的存档：开着哪些窗口，各自的 workspace、标签和分屏，以及每个终端所在的目录和
 //! 宿主里的会话。布局一变就写，下次启动时读回来：会话还在宿主里（宿主单独一个进程跑时）就
-//! 接上它，不在了就在原来的目录里重新开 shell，见 `plan_restore`。
+//! 接上它，不在了就在原来的目录里重新开 shell。
 //!
 //! 这里只管存档的格式、读写文件和恢复时哪些会话接得上，和界面之间的转换由 `WindowView` 负责。
 
@@ -40,7 +40,7 @@ pub struct SavedWindow {
     pub sidebar: Option<bool>,
     /// 用户拖动过侧栏宽度时是那个宽度；没拖过时为空，用默认宽度。
     pub sidebar_width: Option<f32>,
-    /// 侧栏里收起来的主机组，写法同 `SavedWorkspace::host`：本机为空。
+    /// 侧栏里收起来的主机组，`HostId::key` 的写法：本机为空。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collapsed_hosts: Vec<Option<String>>,
     /// 侧栏里收起来的项目。
@@ -225,7 +225,7 @@ pub enum SavedNode {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         /// 写存档时终端的 shell 还没启动过。shell 启动时布局不变、不一定重写存档，所以这一项可能
-        /// 已经过时，恢复时以宿主为准（见 `plan_restore`）。
+        /// 已经过时，恢复时以宿主为准。
         #[serde(default, skip_serializing_if = "is_false")]
         unstarted: bool,
         /// 前台 agent 在进行的对话：会话接不上、要在原目录新开时接着它。
@@ -261,7 +261,7 @@ impl SavedNode {
     }
 }
 
-/// 恢复时会话怎么办，见 `plan_restore`。
+/// 恢复时会话怎么办。
 #[derive(Clone, Debug, PartialEq)]
 pub struct RestorePlan {
     /// 要恢复的窗口：叶子的 `session` 只留下这次接得上的，其余清空（在原目录新开）。
@@ -314,7 +314,7 @@ pub fn plan_restore(mut windows: Vec<SavedWindow>, live: &[SessionInfo]) -> Rest
     RestorePlan { windows, end }
 }
 
-/// 把没开 app 时经宿主办的事接进要恢复的存档：宿主手里的布局 `held`（见 `ClientMsg::LayoutChanged`）
+/// 把没开 app 时经宿主办的事接进要恢复的存档：宿主手里的布局 `held`
 /// 里有、存档里没有的工作区，没人连着的活会话，以及改过的工作区名字。两边按窗口的序号对，窗口里目录
 /// 一样的工作区是同一个，名字跟着宿主改，新会话各开一个标签加在后面；存档里没有的目录在对应序号的窗口
 /// 末尾新建，没有名字时用 `name_of` 按目录取。宿主不知道目录的工作区不接，里面的会话成为后台会话。
@@ -431,7 +431,7 @@ fn read(path: &Path) -> io::Result<Option<State>> {
     Ok(Some(serde_json::from_str(&text)?))
 }
 
-/// 写存档，见 `write_at`。
+/// 写存档。
 pub fn write(state: &State) -> io::Result<()> {
     let path = path().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no home directory"))?;
     write_at(&path, state)

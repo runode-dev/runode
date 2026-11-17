@@ -79,7 +79,7 @@ pub struct TextareaState {
     /// 高度在这么多行之间伸缩。
     min_lines: usize,
     max_lines: usize,
-    /// 高度撑满父元素，不随行数伸缩，见 `fill_height`。
+    /// 高度撑满父元素，不随行数伸缩。
     fill: bool,
     /// 左边画一栏行号。
     line_numbers: bool,
@@ -347,7 +347,7 @@ impl TextareaState {
         Snapshot { text: self.content.clone(), selected: self.selected.clone(), reversed: self.reversed }
     }
 
-    /// 编辑前记下当前状态供撤销，见 `History::record`。
+    /// 编辑前记下当前状态供撤销。
     fn record(&mut self, kind: Option<EditKind>) {
         let now = || Snapshot { text: self.content.clone(), selected: self.selected.clone(), reversed: self.reversed };
         self.history.record(kind, now);
@@ -617,7 +617,7 @@ impl TextareaState {
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         // 组字时输入法把 Cmd+V 交回来（`doCommandBySelector:`）也会派发到这里：换掉选区会把还没确定的字
-        // 当成已经打上的，之后输入法再改它就对不上了，同 `cut`、`undo`。
+        // 当成已经打上的，之后输入法再改它就对不上了。
         if self.marked.is_some() {
             return;
         }
@@ -651,8 +651,7 @@ impl TextareaState {
 }
 
 /// 多行输入框的外框（照 shadcn 的 `Textarea`），里面是 `TextareaState`：和单行的 `Input` 一样的边框、底色、
-/// 圆角和左右留白，另有上下留白，高度跟着行数。子元素画在文字后面。调用方接着写的样式盖在这些上面，见
-/// `Input`。
+/// 圆角和左右留白，另有上下留白，高度跟着行数。子元素画在文字后面。调用方接着写的样式盖在这些上面。
 #[derive(IntoElement)]
 pub struct Textarea {
     frame: Frame<TextareaState>,
@@ -694,7 +693,7 @@ impl Render for TextareaState {
             .when_some(self.label.clone(), |el, label| el.aria_label(label))
             .when(!self.placeholder.is_empty(), |el| el.aria_placeholder(self.placeholder.clone()))
             .aria_value(SharedString::from(self.committed.clone()))
-            // 辅助工具直接写入的文字和 `set_text` 一样：可撤销，发 `Changed`。
+            // 辅助工具直接写入的文字可撤销，发 `Changed`。
             .on_a11y_action(AccessibleAction::SetValue, move |data, _, cx| {
                 if let Some(ActionData::Value(value)) = data {
                     let value = value.to_string();

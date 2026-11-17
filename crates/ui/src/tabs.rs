@@ -16,7 +16,7 @@ use crate::{
     theme::ActiveTheme as _,
 };
 
-/// 标签上关闭按钮的边长，和 `ButtonSize::IconXs` 一样。
+/// 标签上关闭按钮的边长，要等于 `ButtonSize::IconXs` 的边长，否则给关闭按钮留的位置和按钮对不上。
 pub const TAB_CLOSE_SIZE: f32 = 16.;
 
 /// 拖动排序时目标上的落点提示：画在目标靠近原位置的另一侧，往后（右、下）拖插到它后面，往前

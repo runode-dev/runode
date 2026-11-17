@@ -361,7 +361,7 @@ impl WindowView {
     }
 }
 
-/// `path` 照 `quoting` 打进终端时的写法，见 `WindowView::insert_paths`。图片写绝对路径：Claude Code 只把
+/// `path` 照 `quoting` 打进终端时的写法。图片写绝对路径：Claude Code 只把
 /// 绝对路径认成图片附件。
 fn path_text(path: &Path, lines: Option<(u32, u32)>, cwd: Option<&Path>, quoting: Quoting) -> String {
     if lines.is_none() && is_image(path) {

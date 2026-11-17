@@ -52,16 +52,16 @@ pub(crate) enum Action {
     TodoFailed(SessionId, String, Vec<String>),
 }
 
-/// 各会话等没等回答、推没推过，见模块文档。
+/// 各会话等没等回答、推没推过。
 pub(crate) struct Rounds {
     tracked: HashMap<SessionId, Track>,
-    /// 下一份列表只记现状，见 `reconnected`。
+    /// 下一份列表只记现状。
     baseline: bool,
     /// 变成等回答以后过多久才推。
     delay: Duration,
     /// 带屏幕上的文字；不带时不读屏幕，`Action::Notify` 的几行为空。
     text: bool,
-    /// 这一轮的任务表和会话列表，先到的那份等着另一份，见 `check_todos`。
+    /// 这一轮的任务表和会话列表，先到的那份等着另一份。
     todos: Option<Vec<Todo>>,
     sessions: Option<Vec<SessionInfo>>,
     /// 各任务（按 `Todo::id`）上一轮在哪一列、什么时候做完的。
@@ -135,13 +135,13 @@ impl Rounds {
         self.check_todos(now, unix)
     }
 
-    /// 收到一份会话列表，看任务用；参数同 `set_todos`。
+    /// 收到一份会话列表，看任务用。`unix` 是现在的 Unix 秒，推列要用。
     pub(crate) fn todo_sessions(&mut self, sessions: &[SessionInfo], now: Instant, unix: u64) -> Vec<Action> {
         self.sessions = Some(sessions.to_vec());
         self.check_todos(now, unix)
     }
 
-    /// 同一轮的任务表和会话列表都到了时看任务做没做完，见模块文档；看过的两份都放掉。
+    /// 同一轮的任务表和会话列表都到了时看任务做没做完；看过的两份都放掉。
     fn check_todos(&mut self, now: Instant, unix: u64) -> Vec<Action> {
         let (Some(todos), Some(sessions)) = (&self.todos, &self.sessions) else { return Vec::new() };
         let blocked = |id: SessionId| {

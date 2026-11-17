@@ -3,7 +3,7 @@
 //! `a11y` 的 `Press`，不可用时调用方自己灰掉、报 `aria_disabled`、不挂点击。
 //!
 //! 给了 `label` 时那段文字画在轨道右边，和轨道是同一个节点，点文字也算点开关。调用方接着写的样式盖在
-//! 组件自己的上面，写法同 `Button`。
+//! 组件自己的上面。
 
 use gpui::{
     App, Div, ElementId, Hsla, InteractiveElement, Interactivity, IntoElement, ParentElement, RenderOnce, SharedString,

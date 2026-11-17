@@ -146,7 +146,7 @@ pub enum SelectionAdjust {
 ///   `right`、`home`、`end`、`pageup`、`pagedown`、`f1`–`f12`。
 ///
 /// 按 Shift 才打得出的符号（`?`、`!` 这类）不是键，当文字打出去。同一个组合键连按几下写成
-/// `down*3`，见 `parse_keys`。
+/// `down*3`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyChord {
     pub key: Key,
@@ -342,7 +342,7 @@ impl std::fmt::Display for KeyChord {
     }
 }
 
-/// 一项按键的写法：一个组合键（见 `KeyChord`），后面可以跟 `*N` 表示连按 N 下（`down*3`，
+/// 一项按键的写法：一个组合键，后面可以跟 `*N` 表示连按 N 下（`down*3`，
 /// N 从 1 到 `MAX_KEY_REPEAT`）。返回展开后的每一下。
 pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, String> {
     // `*` 不是哪个键的名字，最后一个 `*` 后面是次数。
@@ -361,7 +361,7 @@ pub fn parse_keys(spec: &str) -> Result<Vec<KeyChord>, String> {
     Ok(vec![chord; times as usize])
 }
 
-/// 一串按键写法（见 `parse_keys`）按先后展开成每一下，合起来超过 `MAX_KEYS` 下时报错。
+/// 一串按键写法按先后展开成每一下，合起来超过 `MAX_KEYS` 下时报错。
 pub fn parse_key_list<S: AsRef<str>>(specs: &[S]) -> Result<Vec<KeyChord>, String> {
     let mut keys = Vec::new();
     for spec in specs {

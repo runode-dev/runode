@@ -248,7 +248,7 @@ impl WindowView {
     }
 
     /// 在后台问当前工作区的主机能挑哪些 shell；和上次问到的不一样时换上，菜单开着就换掉它的各项。宿主答不上来
-    /// （旧版本的宿主不认这个请求、连不上、超时）时当作没有可挑的。
+    /// （宿主不认这个请求、连不上、超时）时当作没有可挑的。
     fn list_shells(&mut self, cx: &mut Context<Self>) {
         let (host, job) = self.ask_shells(cx);
         cx.spawn(async move |this, cx| {

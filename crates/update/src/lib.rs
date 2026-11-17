@@ -1,21 +1,21 @@
-//! 桌面 app 的自动更新：从 GitHub 上最新的 Release 读版本清单（`latest.json`，见 `Release`），
+//! 桌面 app 的自动更新：从 GitHub 上最新的 Release 读版本清单（`latest.json`），
 //! 比版本号，把这台 Mac 的架构对应的 dmg 下载、把里面的 .app 拷到装着的 Runode.app 旁边的暂存目录里，核对
 //! 签名后留着（`Installation::stage`），等 app 退出时和装着的那份原子地对调（`Staged::install`）。
 //! 正在跑的进程不受影响，下次启动就是新版本。
 //!
-//! Windows 上更新包是 setup.exe，签名者证书要和在跑的 runode.exe 一样，见 `windows`。Linux 上更新包是
-//! AppImage，没有签名，按 `SHA256SUMS` 核对，见 `linux`。
+//! Windows 上更新包是 setup.exe，签名者证书要和在跑的 runode.exe 一样。Linux 上更新包是
+//! AppImage，没有签名，按 `SHA256SUMS` 核对。
 //!
 //! 只有用 Developer ID 签过名的 .app 才自己更新：新包也要是 Developer ID Application 证书签的，
 //! 和在跑的这份出自同一个 Team ID、是同一个 bundle id（`codesign --verify -R`），这就认定了是同一个
 //! 发布者的构建，不另做签名。下好时核对一次，退出时装上前再核对一次。
 //! 自己打包的（ad-hoc 签名）、没打包成 .app 的和放在写不了的位置（dmg 里、被系统隔离转移到只读
-//! 目录）的都不更新，见 `Installation::current`。
+//! 目录）的都不更新。
 //!
 //! 下载经 NSURLSession，跟着系统的代理设置和证书。app 自己下载的文件不带隔离属性，换上去以后
 //! Gatekeeper 也不会再拦一次。
 //!
-//! 装到 SSH 远端的发布包也从这里取，见 `bundle`。
+//! 装到 SSH 远端的发布包也从这里取。
 
 #[cfg(any(windows, test))]
 mod authenticode;
@@ -42,7 +42,8 @@ pub use windows::{Installation, Staged};
 /// 最新版本的清单：GitHub 上「最新的 Release」（不含预发布）里的 `latest.json`，由发版的 workflow
 /// 生成。经这个固定的下载地址取，不经 GitHub 的 API，没有未登录时每小时 60 次的限制。
 pub const MANIFEST_URL: &str = "https://github.com/runode-dev/runode/releases/latest/download/latest.json";
-/// 新包的签名里要是这个 bundle id，和桌面 app 的 `CFBundleIdentifier` 一样（桌面的测试对着两边）。
+/// 新包的签名里要是这个 bundle id。要等于桌面 app 的 `CFBundleIdentifier`，否则正经发布的新包也核对不过；
+/// 由桌面的测试核对两边。
 pub const BUNDLE_ID: &str = "dev.runode.app";
 
 /// 取清单最多等这么久。
@@ -75,7 +76,7 @@ impl Release {
         Ok(release)
     }
 
-    /// 这台机器（见 `arch`）的更新包；没有时只能手动下载。
+    /// 这台机器的更新包；没有时只能手动下载。
     pub fn archive(&self) -> Option<&str> {
         self.archives.get(arch()).map(String::as_str)
     }
