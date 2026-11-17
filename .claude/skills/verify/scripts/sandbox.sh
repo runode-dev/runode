@@ -309,11 +309,19 @@ cmd_stop() {
     # 先记下后代：宿主一退出，它起的 shell 就过继给 launchd，再也按父进程认不出来。
     # shellcheck disable=SC2086 # 进程号为空时不传参数
     kids="$(descendants $app $host)"
+    # 后代的 pid 连同启动时间一起记下：宿主先退出时它们可能已经没了，pid 被复用就对不上，跳过不杀。
+    local started=() i=0
+    for pid in $kids; do started+=("$(ps -o lstart= -p "$pid" 2>/dev/null || true)"); done
     [ -z "$app" ] || stop_pid "$app" app
     rm -f "$STATE/app.pid"
     # 宿主不跟着 app 退出，收到 SIGTERM 时结束所有会话再退出。
     [ -z "$host" ] || stop_pid "$host" 宿主
-    for pid in $kids; do stop_pid "$pid" "宿主或 app 起的进程"; done
+    for pid in $kids; do
+        if [ -n "${started[$i]}" ] && [ "$(ps -o lstart= -p "$pid" 2>/dev/null || true)" = "${started[$i]}" ]; then
+            stop_pid "$pid" "宿主或 app 起的进程"
+        fi
+        i=$((i + 1))
+    done
     # 会话里 double-fork 出去的守护进程（gpg-agent 等）已过继给 launchd，按环境里的 HOME=$SANDBOX 认；
     # 系统自带的程序（/usr/bin 等）ps -E 看不到环境，漏掉的由下面的 lsof 列出。
     for pid in $(ps -Eww -o pid=,command= -U "$(id -u)" 2>/dev/null | H="HOME=$SANDBOX" awk '{for (i = 2; i <= NF; i++) if ($i == ENVIRON["H"]) { print $1; break }}'); do
