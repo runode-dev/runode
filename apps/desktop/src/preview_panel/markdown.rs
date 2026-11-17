@@ -36,7 +36,7 @@ use gpui::{
     AccessibleAction, AnyElement, App, ClipboardItem, Context, CursorStyle, DispatchPhase, FontStyle, FontWeight,
     HighlightStyle, Hsla, ImageSource, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, Role, SMOOTH_SVG_SCALE_FACTOR, SharedString, StrikethroughStyle, StyledText,
-    UnderlineStyle, WeakEntity, Window, canvas, div, img, list, prelude::*, px, relative, svg,
+    TextStyle, UnderlineStyle, WeakEntity, Window, canvas, div, img, list, prelude::*, px, relative, svg,
 };
 use runode_preview::{Alert, Align, Block, Image as MdImage, Inline, InlineStyle, LinkTarget, Span, link_target};
 use select::{MdPos, TextKey};
@@ -150,7 +150,7 @@ fn row_hint(font_size: f32) -> Pixels {
 }
 
 /// 表格每列估计最宽的格子在第几行（表头算第 0 行）：按终端里占几格（`cell_width`）估，不量字体。表格只画
-/// 看得见的行，每列另垫一个看不见的这格撑住列宽，滚动时列宽不跟着露出的行跳。
+/// 看得见的行，量列宽时另外量上这格，滚动时列宽不跟着露出的行跳。
 fn widest_cells(columns: usize, head: &[Rich], rows: &[Vec<Rich>], cell_width: fn(char) -> u8) -> Vec<usize> {
     let cells = || std::iter::once(head).chain(rows.iter().map(Vec::as_slice)).enumerate();
     let width = |rich: &Rich| rich.text.chars().map(|ch| usize::from(cell_width(ch))).sum::<usize>();
@@ -816,6 +816,30 @@ fn rich_highlights(rich: &Rich, colors: Colors, hover: Option<usize>) -> Vec<(Ra
         .collect()
 }
 
+/// 表格一格的文字排出来多宽：照 `Paint::rich` 交给 `StyledText` 的样式排一遍，取最宽的一行、向上取整。
+/// `base` 是这格继承到的文字样式。
+fn cell_text_width(window: &Window, rich: &Rich, base: &TextStyle, mono: &SharedString, colors: Colors) -> f32 {
+    let mut runs = Vec::new();
+    let mut at = 0;
+    for ((range, style, _), (_, highlight)) in rich.runs.iter().zip(rich_highlights(rich, colors, None)) {
+        if at < range.start {
+            runs.push(base.to_run(range.start - at));
+        }
+        let mut run = base.clone().highlight(highlight).to_run(range.len());
+        if style.code || style.kbd {
+            run.font.family = mono.clone();
+        }
+        runs.push(run);
+        at = range.end;
+    }
+    if at < rich.text.len() {
+        runs.push(base.to_run(rich.text.len() - at));
+    }
+    let font_size = base.font_size.to_pixels(window.rem_size());
+    let lines = window.text_system().shape_text(rich.text.clone(), font_size, &runs, None, None);
+    lines.map_or(0., |lines| lines.iter().map(|line| f32::from(line.width())).fold(0., f32::max).ceil())
+}
+
 /// 画一行时共用的东西。
 struct Paint {
     mono: SharedString,
@@ -1175,29 +1199,39 @@ impl PreviewPanel {
                 let (head_h, body_h) = (line_height + 14., line_height + 13.);
                 let shown = shown_rows(top, viewport, ix, head_h, body_h, rows.len());
                 let (above, below) = (shown.start as f32 * body_h, (rows.len() - shown.end) as f32 * body_h);
-                // 一列一列排：每列的宽是它最宽的格子（max-content），格子一样高，各行自然对齐。只画表头
-                // 和露出来的行，上下用空白占住没画的行；每列垫一个看不见、不占高的估计最宽的格子撑住列宽。
-                let table = div().flex().flex_none().whitespace_nowrap().children((0..columns).map(|column| {
-                    let sizer = widest.get(column).and_then(|&row_ix| {
-                        let cell = all().nth(row_ix)?.get(column)?;
-                        let mono: Vec<_> = cell
-                            .runs
-                            .iter()
-                            .filter(|(_, style, _)| style.code || style.kbd)
-                            .map(|(range, ..)| (range.clone(), mono.clone()))
-                            .collect();
-                        let styled = StyledText::new(cell.text.clone())
-                            .with_highlights(rich_highlights(cell, colors, None))
-                            .with_font_family_overrides(mono);
-                        let sizer = div().h_0().overflow_hidden().invisible().px(px(13.)).border_r_1();
-                        Some(sizer.when(row_ix == 0, |cell| cell.font_weight(FontWeight::SEMIBOLD)).child(styled))
-                    });
-                    let body = rows.iter().enumerate().skip(shown.start).take(shown.len());
-                    let cells = std::iter::once((0, head))
-                        .chain(body.map(|(row_ix, row)| (row_ix + 1, row)))
-                        .map(|(row_ix, row)| (row_ix, row.get(column).unwrap_or(&empty)));
-                    let cells = cells.map(|(row_ix, cell)| {
-                        // 表头算第 0 行；表体的偶数行（第 2、4……行）垫底色。
+                // 表头算第 0 行，表体从第 1 行起。
+                let body = || {
+                    rows.iter().enumerate().skip(shown.start).take(shown.len()).map(|(row_ix, row)| (row_ix + 1, row))
+                };
+                let pad_x = 13.;
+                // 每列的宽是它最宽的格子（max-content）：各行分开排，列宽要先量出来。量表头、露出来的行和
+                // 估计最宽的那格，滚动时列宽不跟着露出的行跳；格子的字号、表头的粗细这时还没套到继承的样式上。
+                let mut plain = window.text_style();
+                plain.font_size = px(size).into();
+                let mut bold = plain.clone();
+                bold.font_weight = FontWeight::SEMIBOLD;
+                let measure = |row_ix: usize, cell: &Rich| {
+                    let base = if row_ix == 0 { &bold } else { &plain };
+                    cell_text_width(window, cell, base, &mono, colors)
+                };
+                let widths: Vec<f32> = (0..columns)
+                    .map(|column| {
+                        let estimated =
+                            widest.get(column).and_then(|&row_ix| Some((row_ix, all().nth(row_ix)?.get(column)?)));
+                        let content = std::iter::once((0, head))
+                            .chain(body())
+                            .filter_map(|(row_ix, row)| Some((row_ix, row.get(column)?)))
+                            .chain(estimated)
+                            .map(|(row_ix, cell)| measure(row_ix, cell))
+                            .fold(0., f32::max);
+                        // 左右内边距和右边框，第一列另有左边框。
+                        content + 2. * pad_x + 1. + if column == 0 { 1. } else { 0. }
+                    })
+                    .collect();
+                let table_row = |row_ix: usize, row: &[Rich]| {
+                    let cells = widths.iter().enumerate().map(|(column, &cell_w)| {
+                        let cell = row.get(column).unwrap_or(&empty);
+                        // 表体的偶数行（第 2、4……行）垫底色。
                         let border = if row_ix == 0 { 2. } else { 1. };
                         div()
                             .id(("md-cell", columns * row_ix + column))
@@ -1206,8 +1240,10 @@ impl PreviewPanel {
                             .aria_row_index(row_ix)
                             .aria_column_index(column)
                             .children(link_nodes(cell, &weak))
+                            .w(px(cell_w))
+                            .flex_none()
                             .h(px(line_height + 12. + border))
-                            .px(px(13.))
+                            .px(px(pad_x))
                             .flex()
                             .items_center()
                             .map(|cell| match aligns.get(column) {
@@ -1220,19 +1256,28 @@ impl PreviewPanel {
                             .when(row_ix == 0, |cell| cell.border_t_1().font_weight(FontWeight::SEMIBOLD))
                             .when(column == 0, |cell| cell.border_l_1())
                             .border_color(colors.border)
-                            .when(row_ix > 0 && row_ix % 2 == 0, |cell| cell.bg(colors.subtle))
+                            .when(row_ix > 0 && row_ix.is_multiple_of(2), |cell| cell.bg(colors.subtle))
                             .child(paint.rich(cell, (ix, columns * row_ix + column)))
-                            .into_any_element()
                     });
-                    let mut cells: Vec<AnyElement> = cells.collect();
-                    if above > 0. {
-                        cells.insert(1, div().h(px(above)).into_any_element());
-                    }
-                    if below > 0. {
-                        cells.push(div().h(px(below)).into_any_element());
-                    }
-                    div().flex_none().flex().flex_col().children(sizer).children(cells)
-                }));
+                    div()
+                        .id(("md-table-row", row_ix))
+                        .role(Role::Row)
+                        .aria_row_index(row_ix)
+                        .flex()
+                        .flex_none()
+                        .children(cells)
+                        .into_any_element()
+                };
+                // 只画表头和露出来的行，上下用空白占住没画的行。
+                let mut table_rows = vec![table_row(0, head)];
+                if above > 0. {
+                    table_rows.push(div().h(px(above)).into_any_element());
+                }
+                table_rows.extend(body().map(|(row_ix, row)| table_row(row_ix, row)));
+                if below > 0. {
+                    table_rows.push(div().h(px(below)).into_any_element());
+                }
+                let table = div().flex().flex_col().flex_none().whitespace_nowrap().children(table_rows);
                 div()
                     .id("md-table")
                     .role(Role::Table)
