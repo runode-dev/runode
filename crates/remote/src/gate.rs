@@ -31,6 +31,7 @@ use crate::{
     bridge::{Relay, Upstream, bridge, push::PushRequests, unpair::UnpairRequests},
     devices::{self, Device},
     files::random,
+    limit::Source,
     listener::{Lane, Shared},
     now_unix,
 };
@@ -44,14 +45,14 @@ const MAX_DEVICE_NAME: usize = 64;
 
 /// 服务手机连来的 `tcp`（从 `peer` 来）：过了门禁就一直搬到有一边断开，没过就回话后断开。`cut`
 /// 被置上时（撤销、关掉远程访问）尽快结束。返回前关掉连接。
-pub(crate) fn serve(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool) {
+pub(crate) fn serve(shared: &Shared, id: u64, tcp: &TcpStream, peer: Source, cut: &AtomicBool) {
     if let Err(err) = run(shared, id, tcp, peer, cut) {
         tracing::debug!("remote connection from {peer} ended: {err}");
     }
     let _ = tcp.shutdown(Shutdown::Both);
 }
 
-fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool) -> io::Result<()> {
+fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: Source, cut: &AtomicBool) -> io::Result<()> {
     let _ = tcp.set_nodelay(true);
     if let Err(err) = keep_alive(tcp) {
         tracing::warn!("cannot turn on keepalive for a remote connection: {err}");
@@ -81,7 +82,7 @@ fn run(shared: &Shared, id: u64, tcp: &TcpStream, peer: IpAddr, cut: &AtomicBool
     };
     let device_id = match verdict {
         Ok(device_id) => {
-            shared.limiter().succeeded(peer, Instant::now());
+            shared.limiter().succeeded(peer, device_id, Instant::now());
             device_id
         }
         Err(reason) => {
@@ -262,9 +263,9 @@ fn auth(
     id: DeviceId,
     signature: &Bytes,
     signed: &[u8],
-    peer: IpAddr,
+    peer: Source,
 ) -> Result<DeviceId, RejectReason> {
-    let (device, seen_from) = match devices::find_with_address(&shared.dirs, id) {
+    let (device, last) = match devices::find_with_address(&shared.dirs, id) {
         Ok(Some(found)) => found,
         Ok(None) => return Err(RejectReason::UnknownDevice),
         Err(err) => {
@@ -277,9 +278,9 @@ fn auth(
         return Err(RejectReason::BadSignature);
     }
     let now = now_unix();
-    // 地址和这台设备上次的不一样也记一笔：监听重开时要认得出它，见 `devices::seen_from`。按设备比，不看
-    // 这个地址这次监听里过没过门禁：DHCP 换了地址、几台设备走同一个出口时，那是别的设备过的。
-    if (seen_from != Some(peer) || now.saturating_sub(device.last_seen) >= SEEN_GRANULARITY)
+    // 来源（地址或隧道公钥）和这台设备上次的不一样也记一笔：监听重开时要认得出它。按设备比，不看
+    // 这个来源这次监听里过没过门禁：DHCP 换了地址、几台设备走同一个出口时，那是别的设备过的。
+    if (last.is_new(peer) || now.saturating_sub(device.last_seen) >= SEEN_GRANULARITY)
         && let Err(err) = devices::touch(&shared.dirs, id, now, peer)
     {
         tracing::warn!("cannot record when {id} was last seen: {err}");
@@ -294,14 +295,14 @@ struct Claimed<'a> {
     public_key: Bytes,
 }
 
-/// 第一次配对：口令对得上（见 `pairing::Desk`），签名用设备给的公钥验得过，就登记这台设备。
+/// 第一次配对：口令对得上，签名用设备给的公钥验得过，就登记这台设备。
 fn pair(
     shared: &Shared,
     secret: &Bytes,
     claimed: Claimed<'_>,
     signature: &Bytes,
     signed: &[u8],
-    peer: IpAddr,
+    peer: Source,
 ) -> Result<DeviceId, RejectReason> {
     if secret.0.len() != SECRET_LEN {
         return Err(RejectReason::PairingInvalid);
@@ -325,7 +326,7 @@ fn pair(
         })
     })?;
     tracing::info!("paired remote {:?} device {} ({})", device.kind, device.device_id, device.name);
-    // 配对用的这条连接接着用，下一次登录可能隔很久：地址现在就记下，见 `auth`。
+    // 配对用的这条连接接着用，下一次登录可能隔很久：来源现在就记下。
     if let Err(err) = devices::touch(&shared.dirs, device.device_id, device.last_seen, peer) {
         tracing::warn!("cannot record where {} paired from: {err}", device.device_id);
     }

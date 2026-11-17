@@ -2,15 +2,16 @@
 //! 配对和最近一次登录的时刻。监听方配对时加、登录时更新 `last_seen`，命令行撤销时删；改的一方都
 //! 先拿 `remote_access_devices_lock_file` 的锁，读的一方不用（文件整个换掉写，读不到一半的）。
 //!
-//! 同一个文件里还有手机登记的推送（`PushRegistration`，见 `runode_protocol::push`），按设备一条，和
+//! 同一个文件里还有手机登记的推送（`PushRegistration`），按设备一条，和
 //! `Device` 分开放：`runode remote list --json` 把 `Device` 整个打印出来，token 不该跟着出去。撤销设备时
 //! 一起删。
 //!
-//! 每台设备最近一次登录的来源地址（`SeenFrom`）也这样另外放，只留最近一个，不打印出去：监听重开时
-//! 据此认出连过的手机，见 `seen_from`。
+//! 每台设备最近一次登录的来源也这样另外放，不打印出去：局域网的地址（`SeenFrom`）和经隧道来的
+//! 公钥（`TunnelSeen`）各留最近一个，回环地址不记。监听重开时据此认出连过的手机。
 
 use std::{io, net::IpAddr, path::PathBuf};
 
+use iroh::EndpointId;
 use runode_paths::Dirs;
 use runode_protocol::{
     push::{ApnsEnv, PushService},
@@ -18,7 +19,10 @@ use runode_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::files::{no_home, private_options, read_json, write_json};
+use crate::{
+    files::{no_home, private_options, read_json, write_json},
+    limit::Source,
+};
 
 /// 设备表格式的版本，格式变了、旧版本读不懂时加一。
 const TABLE_VERSION: u32 = 1;
@@ -40,7 +44,7 @@ pub struct Device {
     pub last_seen: u64,
 }
 
-/// 一台设备登记的推送，见 `runode_protocol::ClientMsg::PushRegister`。
+/// 一台设备登记的推送。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushRegistration {
     pub device_id: DeviceId,
@@ -67,6 +71,33 @@ struct SeenFrom {
     ip: IpAddr,
 }
 
+/// 一台设备最近一次经隧道登录时用的公钥。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct TunnelSeen {
+    device_id: DeviceId,
+    /// 对端的 iroh 公钥，十六进制。
+    node: String,
+}
+
+/// 一台设备上次登录时从哪儿来：最近的地址和最近的隧道公钥。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LastSeen {
+    ip: Option<IpAddr>,
+    node: Option<EndpointId>,
+}
+
+impl LastSeen {
+    /// `source` 值得记下，又和上次记的不一样。
+    pub(crate) fn is_new(&self, source: Source) -> bool {
+        match source {
+            Source::Ip(ip) => {
+                source.identifies_device() && self.ip.map(|seen| seen.to_canonical()) != Some(ip.to_canonical())
+            }
+            Source::Tunnel(node) => self.node != Some(node),
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Table {
     version: u32,
@@ -75,6 +106,13 @@ struct Table {
     push: Vec<PushRegistration>,
     #[serde(default)]
     seen_from: Vec<SeenFrom>,
+    #[serde(default)]
+    tunnel_from: Vec<TunnelSeen>,
+}
+
+/// 从 `ip` 来的登录值不值得记下（`Source::identifies_device`）。
+fn worth_remembering(ip: IpAddr) -> bool {
+    Source::from(ip).identifies_device()
 }
 
 /// 所有配对过的设备，按配对的先后。
@@ -86,12 +124,15 @@ pub fn list_devices(dirs: &Dirs) -> io::Result<Vec<Device>> {
 pub fn revoke_device(dirs: &Dirs, id: DeviceId) -> io::Result<bool> {
     let mut revoked = false;
     update(dirs, |table| {
-        let before = (table.devices.len(), table.push.len(), table.seen_from.len());
+        let lens =
+            |table: &Table| (table.devices.len(), table.push.len(), table.seen_from.len(), table.tunnel_from.len());
+        let before = lens(table);
         table.devices.retain(|device| device.device_id != id);
         table.push.retain(|push| push.device_id != id);
         table.seen_from.retain(|seen| seen.device_id != id);
+        table.tunnel_from.retain(|seen| seen.device_id != id);
         revoked = table.devices.len() != before.0;
-        (table.devices.len(), table.push.len(), table.seen_from.len()) != before
+        lens(table) != before
     })?;
     Ok(revoked)
 }
@@ -152,11 +193,14 @@ pub(crate) fn find(dirs: &Dirs, id: DeviceId) -> io::Result<Option<Device>> {
     Ok(find_with_address(dirs, id)?.map(|(device, _)| device))
 }
 
-/// 同 `find`，连同这台设备最近一次登录的地址（见 `touch`）。
-pub(crate) fn find_with_address(dirs: &Dirs, id: DeviceId) -> io::Result<Option<(Device, Option<IpAddr>)>> {
+/// 表里的设备 `id`，连同它上次登录时从哪儿来。记着的公钥解析不了时当作没记。
+pub(crate) fn find_with_address(dirs: &Dirs, id: DeviceId) -> io::Result<Option<(Device, LastSeen)>> {
     let table = read(dirs)?;
-    let ip = table.seen_from.iter().find(|seen| seen.device_id == id).map(|seen| seen.ip);
-    Ok(table.devices.into_iter().find(|device| device.device_id == id).map(|device| (device, ip)))
+    let last = LastSeen {
+        ip: table.seen_from.iter().find(|seen| seen.device_id == id).map(|seen| seen.ip),
+        node: table.tunnel_from.iter().find(|seen| seen.device_id == id).and_then(|seen| seen.node.parse().ok()),
+    };
+    Ok(table.devices.into_iter().find(|device| device.device_id == id).map(|device| (device, last)))
 }
 
 /// 加一台新配对的设备。
@@ -169,24 +213,53 @@ pub(crate) fn add(dirs: &Dirs, device: Device) -> io::Result<()> {
     .map(drop)
 }
 
-/// 记下设备 `id` 在 `now` 从 `ip` 登录过，地址换掉它上次的。
-pub(crate) fn touch(dirs: &Dirs, id: DeviceId, now: u64, ip: IpAddr) -> io::Result<()> {
+/// 记下设备 `id` 在 `now` 从 `from` 登录过。地址换掉它上次的地址，隧道公钥换掉它上次的公钥，另一样
+/// 留着；回环地址不记，这台设备记着的回环地址一起删掉。
+pub(crate) fn touch(dirs: &Dirs, id: DeviceId, now: u64, from: Source) -> io::Result<()> {
     update(dirs, |table| {
         let Some(device) = table.devices.iter_mut().find(|device| device.device_id == id) else { return false };
         device.last_seen = now;
-        table.seen_from.retain(|seen| seen.device_id != id);
-        table.seen_from.push(SeenFrom { device_id: id, ip });
+        match from {
+            Source::Ip(ip) if from.identifies_device() => {
+                table.seen_from.retain(|seen| seen.device_id != id);
+                table.seen_from.push(SeenFrom { device_id: id, ip });
+            }
+            Source::Ip(_) => table.seen_from.retain(|seen| seen.device_id != id || worth_remembering(seen.ip)),
+            Source::Tunnel(node) => {
+                table.tunnel_from.retain(|seen| seen.device_id != id);
+                table.tunnel_from.push(TunnelSeen { device_id: id, node: node.to_string() });
+            }
+        }
         true
     })
     .map(drop)
 }
 
-/// 表里各台设备最近一次登录的地址。
-pub(crate) fn seen_from(dirs: &Dirs) -> io::Result<Vec<IpAddr>> {
-    Ok(read(dirs)?.seen_from.into_iter().map(|seen| seen.ip).collect())
+/// 表里各台设备上次登录时的来源，带是哪台设备：地址和隧道公钥各一个。回环地址和解析不了的公钥跳过。
+pub(crate) fn remembered(dirs: &Dirs) -> io::Result<Vec<(DeviceId, Source)>> {
+    let table = read(dirs)?;
+    let ips = table
+        .seen_from
+        .into_iter()
+        .filter(|seen| worth_remembering(seen.ip))
+        .map(|seen| (seen.device_id, Source::from(seen.ip)));
+    let nodes = table
+        .tunnel_from
+        .into_iter()
+        .filter_map(|seen| Some((seen.device_id, Source::Tunnel(seen.node.parse().ok()?))));
+    Ok(ips.chain(nodes).collect())
 }
 
-/// 设备表文件现在的样子（修改时刻和大小），没变时不必重新读，见 `listener` 里撤销的检查。
+/// 删掉表里记着的回环地址。本来就没有时返回 false。
+pub(crate) fn forget_loopback(dirs: &Dirs) -> io::Result<bool> {
+    update(dirs, |table| {
+        let before = table.seen_from.len();
+        table.seen_from.retain(|seen| worth_remembering(seen.ip));
+        table.seen_from.len() != before
+    })
+}
+
+/// 设备表文件现在的样子（修改时刻和大小），没变时不必重新读。
 pub(crate) fn stamp(dirs: &Dirs) -> Option<(std::time::SystemTime, u64)> {
     let meta = std::fs::metadata(dirs.remote_access_devices_file()?).ok()?;
     Some((meta.modified().ok()?, meta.len()))
@@ -319,40 +392,109 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// 每台设备只留最近一次登录的地址，撤销时一起删；没有这一项的旧表照样读得了。
-    #[test]
-    fn only_the_latest_address_of_each_device_is_kept() {
-        let root = std::env::temp_dir().join(format!("rra-seen-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
-        let device = |n: u8| Device {
+    fn phone(n: u8) -> Device {
+        Device {
             device_id: DeviceId([n; 16]),
             name: format!("phone {n}"),
             kind: DeviceKind::Mobile,
             public_key: Bytes(vec![4; 65]),
             paired_at: 0,
             last_seen: 0,
-        };
-        add(&dirs, device(1)).unwrap();
-        add(&dirs, device(2)).unwrap();
-        let ip = |text: &str| text.parse::<IpAddr>().unwrap();
-        assert_eq!(seen_from(&dirs).unwrap(), Vec::<IpAddr>::new());
-        touch(&dirs, DeviceId([1; 16]), 10, ip("192.0.2.1")).unwrap();
-        touch(&dirs, DeviceId([2; 16]), 10, ip("192.0.2.2")).unwrap();
-        touch(&dirs, DeviceId([1; 16]), 20, ip("2001:db8::1")).unwrap();
-        assert_eq!(seen_from(&dirs).unwrap(), [ip("192.0.2.2"), ip("2001:db8::1")]);
+        }
+    }
+
+    fn ip(text: &str) -> Source {
+        text.parse::<IpAddr>().unwrap().into()
+    }
+
+    fn node(n: u8) -> EndpointId {
+        iroh::SecretKey::from_bytes(&[n; 32]).public()
+    }
+
+    /// 每台设备的地址和隧道公钥各只留最近一个，撤销时一起删；没有这两项的旧表照样读得了。
+    #[test]
+    fn only_the_latest_address_of_each_device_is_kept() {
+        let root = std::env::temp_dir().join(format!("rra-seen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let (one, two) = (DeviceId([1; 16]), DeviceId([2; 16]));
+        add(&dirs, phone(1)).unwrap();
+        add(&dirs, phone(2)).unwrap();
+        assert!(remembered(&dirs).unwrap().is_empty());
+        touch(&dirs, one, 10, ip("192.0.2.1")).unwrap();
+        touch(&dirs, two, 10, ip("192.0.2.2")).unwrap();
+        touch(&dirs, one, 20, ip("2001:db8::1")).unwrap();
+        assert_eq!(remembered(&dirs).unwrap(), [(two, ip("192.0.2.2")), (one, ip("2001:db8::1"))]);
+        // 隧道公钥另记一个，换掉上次的公钥，不动地址。
+        touch(&dirs, two, 30, Source::Tunnel(node(1))).unwrap();
+        touch(&dirs, two, 40, Source::Tunnel(node(2))).unwrap();
+        assert_eq!(
+            remembered(&dirs).unwrap(),
+            [(two, ip("192.0.2.2")), (one, ip("2001:db8::1")), (two, Source::Tunnel(node(2)))]
+        );
+        let (device, last) = find_with_address(&dirs, two).unwrap().unwrap();
+        assert_eq!(device.last_seen, 40);
+        assert!(!last.is_new(ip("192.0.2.2")));
+        assert!(!last.is_new(Source::Tunnel(node(2))));
+        assert!(last.is_new(Source::Tunnel(node(1))));
+        assert!(last.is_new(ip("192.0.2.3")));
+        assert!(!last.is_new(ip("127.0.0.1")));
+        // 回环地址只改登录的时刻，上次的地址留着。
+        touch(&dirs, one, 50, ip("127.0.0.1")).unwrap();
+        assert_eq!(read(&dirs).unwrap().seen_from.len(), 2);
+        assert_eq!(find(&dirs, one).unwrap().unwrap().last_seen, 50);
         // 没登记的设备不记。
         touch(&dirs, DeviceId([3; 16]), 20, ip("192.0.2.3")).unwrap();
-        assert_eq!(seen_from(&dirs).unwrap().len(), 2);
-        assert!(revoke_device(&dirs, DeviceId([1; 16])).unwrap());
-        assert_eq!(seen_from(&dirs).unwrap(), [ip("192.0.2.2")]);
-        // 设备本身的样子（`runode remote list --json` 打印的）不带地址。
-        let printed = serde_json::to_value(&list_devices(&dirs).unwrap()[0]).unwrap();
-        assert!(!printed.to_string().contains("192.0.2.2"), "{printed}");
+        touch(&dirs, DeviceId([3; 16]), 20, Source::Tunnel(node(3))).unwrap();
+        assert_eq!(remembered(&dirs).unwrap().len(), 3);
+        assert!(revoke_device(&dirs, two).unwrap());
+        assert_eq!(remembered(&dirs).unwrap(), [(one, ip("2001:db8::1"))]);
+        assert!(read(&dirs).unwrap().tunnel_from.is_empty());
+        // 设备本身的样子（`runode remote list --json` 打印的）不带来源。
+        touch(&dirs, one, 60, Source::Tunnel(node(1))).unwrap();
+        let printed = serde_json::to_value(&list_devices(&dirs).unwrap()[0]).unwrap().to_string();
+        assert!(!printed.contains("2001:db8::1") && !printed.contains(&node(1).to_string()), "{printed}");
 
         std::fs::write(path(&dirs).unwrap(), r#"{"version":1,"devices":[]}"#).unwrap();
-        assert_eq!(seen_from(&dirs).unwrap(), Vec::<IpAddr>::new());
+        assert!(remembered(&dirs).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 回环地址不当作来源记着：`touch` 删掉这台设备旧的回环地址，`forget_loopback` 删掉表里所有的，
+    /// `remembered` 跳过还留着的和解析不了的公钥。
+    #[test]
+    fn loopback_addresses_are_not_remembered() {
+        let root = std::env::temp_dir().join(format!("rra-loopback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let (one, two) = (DeviceId([1; 16]), DeviceId([2; 16]));
+        let old = serde_json::json!({
+            "version": 1,
+            "devices": [phone(1), phone(2)],
+            "seen_from": [
+                { "device_id": one, "ip": "127.0.0.1" },
+                { "device_id": two, "ip": "::1" },
+                { "device_id": two, "ip": "::ffff:127.0.0.1" },
+                { "device_id": two, "ip": "192.0.2.2" },
+            ],
+            "tunnel_from": [
+                { "device_id": one, "node": "not a key" },
+                { "device_id": two, "node": node(2).to_string() },
+            ],
+        });
+        dirs.create_remote_access_dir().unwrap();
+        std::fs::write(path(&dirs).unwrap(), old.to_string()).unwrap();
+        assert_eq!(remembered(&dirs).unwrap(), [(two, ip("192.0.2.2")), (two, Source::Tunnel(node(2)))]);
+        assert!(find_with_address(&dirs, one).unwrap().unwrap().1.is_new(Source::Tunnel(node(1))));
+
+        touch(&dirs, one, 10, ip("::1")).unwrap();
+        assert_eq!(read(&dirs).unwrap().seen_from.len(), 3);
+        assert!(forget_loopback(&dirs).unwrap());
+        let seen: Vec<IpAddr> = read(&dirs).unwrap().seen_from.into_iter().map(|seen| seen.ip).collect();
+        assert_eq!(seen, ["192.0.2.2".parse::<IpAddr>().unwrap()]);
+        assert!(!forget_loopback(&dirs).unwrap());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

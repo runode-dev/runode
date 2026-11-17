@@ -23,24 +23,25 @@ use crate::{
     Connect, UnixStream, addrs, bonjour, devices,
     files::{no_home, write_json},
     gate, identity,
-    limit::{self, RateLimiter},
+    limit::{RateLimiter, Source},
     pairing::Desk,
     poll,
     status::{ListenerStatus, lock_listener},
-    tunnel::Tunnel,
+    tunnel::{Tunnel, TunnelPorts},
 };
 
 /// 还没过门禁的连接最多这么多，再来的直接关掉。
 const MAX_GATING: usize = 32;
-/// 同一个地址还没过门禁的连接最多这么多，一个地址占不满 `MAX_GATING`。
-const MAX_GATING_PER_SOURCE: usize = 4;
-/// 同一个 IPv6 /64 前缀（见 `limit::prefix`）里所有地址合起来还没过门禁的连接最多这么多：换着地址
-/// 连的也占不满 `MAX_GATING`，但比单个地址宽，局域网里共用一段 /64 的设备不会互相挤掉。
+/// 同一个来源（`Source`）还没过门禁的连接最多这么多，一个来源占不满 `MAX_GATING`。
+pub(crate) const MAX_GATING_PER_SOURCE: usize = 4;
+/// 同一组来源（`Source::group`：同一个 IPv6 /64 前缀里的地址，或者所有经隧道来的）合起来还没过门禁的
+/// 连接最多这么多：换着地址连的也占不满 `MAX_GATING`，但比单个来源宽，局域网里共用一段 /64 的设备
+/// 不会互相挤掉。
 ///
-/// 局域网里一台主机有好几段前缀（链路本地、全局、IPv4）时仍能凑满 `MAX_GATING`，所以过过门禁的地址
+/// 局域网里一台主机有好几段前缀（链路本地、全局、IPv4）时仍能凑满 `MAX_GATING`，所以过过门禁的来源
 /// （`RateLimiter::trusted`）这两个名额都不看，只受 `MAX_GATING_PER_SOURCE` 和 `MAX_CONNECTIONS` 管：
 /// 连过的手机不会被别人占满的门禁挡在外面。
-const MAX_GATING_PER_PREFIX: usize = 16;
+pub(crate) const MAX_GATING_PER_GROUP: usize = 16;
 /// 连接（含已经接到宿主上的）最多这么多。
 pub(crate) const MAX_CONNECTIONS: usize = 64;
 /// 同一台设备最多同时连着这么多条终端、远程桌面、识别、收图片视频和项目的连接；过了门禁、还没发第一帧的另算，也是这么多。
@@ -73,16 +74,16 @@ pub type ConnectProject = Arc<dyn Fn(&str) -> Result<UnixStream, ChannelRefusal>
 /// 怎么开监听。
 #[derive(Clone)]
 pub struct Options {
-    /// 证书、设备表这些文件放在哪，见 `runode_paths::Dirs::remote_access_dir`。
+    /// 证书、设备表这些文件放在哪。
     pub dirs: Dirs,
-    /// 端口；0 时由系统挑一个（只用于 `Bind::Loopback`），见 `Listener::local_addrs`。
+    /// 端口；0 时由系统挑一个（只用于 `Bind::Loopback`）。
     pub port: u16,
     pub bind: Bind,
-    /// 给手机看的主机名；`None` 时用电脑名，见 `host_name`。
+    /// 给手机看的主机名；`None` 时用电脑名。
     pub host_name: Option<String>,
     /// 用 Bonjour 公布。
     pub advertise: bool,
-    /// 另开 iroh 端点，手机不在同一个网络时也连得上，见 `tunnel`。它转给本机回环地址上的监听，
+    /// 另开 iroh 端点，手机不在同一个网络时也连得上。它转给本机回环地址上的监听，
     /// 所以只和 `Bind::All`、`Bind::Loopback` 一起开，配 `Bind::Addr` 时不开。
     pub tunnel: bool,
     /// 门禁过了以后要一条到宿主的新连接。
@@ -109,7 +110,7 @@ pub struct Listener {
     thread: Option<JoinHandle<()>>,
     _bonjour: Option<bonjour::Registration>,
     _tunnel: Option<Tunnel>,
-    /// 一直拿着，丢掉时放开，见 `status::lock_listener`。
+    /// 一直拿着，丢掉时放开。
     _lock: File,
 }
 
@@ -119,7 +120,7 @@ pub(crate) struct Shared {
     pub(crate) host_name: String,
     /// 跨网络连接的地址，`RemoteChallenge` 里带给手机。
     pub(crate) node: Option<String>,
-    /// 开监听时写进状态文件的，设备连上、断开时填上 `connected` 重写，见 `publish`。
+    /// 开监听时写进状态文件的，设备连上、断开时填上 `connected` 重写。
     status: ListenerStatus,
     pub(crate) tls: Arc<ServerConfig>,
     pub(crate) connect: Connect,
@@ -131,8 +132,10 @@ pub(crate) struct Shared {
     pub(crate) stopping: AtomicBool,
     connections: Mutex<HashMap<u64, Live>>,
     next_id: AtomicU64,
-    limiter: Mutex<RateLimiter>,
+    limiter: Arc<Mutex<RateLimiter>>,
     desk: Mutex<Desk>,
+    /// 经隧道转来的连接是哪个 iroh 对端的，接连接时按对方地址取。
+    tunnel_ports: Arc<TunnelPorts>,
 }
 
 /// 一条连着的连接。
@@ -143,8 +146,8 @@ struct Live {
     device: Option<DeviceId>,
     /// 第一帧定下的这条连接算哪一类；还没读到第一帧时为 `None`。
     lane: Option<Lane>,
-    /// 从哪个地址来。
-    ip: IpAddr,
+    /// 从哪儿来。
+    source: Source,
     cut: Arc<AtomicBool>,
 }
 
@@ -223,7 +226,7 @@ impl Shared {
         }
     }
 
-    /// 把正连着的设备写进状态文件，见 `ListenerStatus::connected`。写不了只记日志。已经停了的不写：
+    /// 把正连着的设备写进状态文件。写不了只记日志。已经停了的不写：
     /// 它的连接线程晚收尾时会把删掉的、或者重开的监听写好的状态文件换回旧的。
     fn publish(&self, connections: &HashMap<u64, Live>) {
         if self.stopping.load(Ordering::Relaxed) {
@@ -296,16 +299,20 @@ impl Listener {
         let port = addrs.first().map_or(port, SocketAddr::port);
         let host_name = host_name.unwrap_or_else(addrs::host_name);
         let fp = encode_base64url(&fingerprint);
-        let limiter = remembered_limiter(&dirs);
+        let limiter = Arc::new(Mutex::new(remembered_limiter(&dirs)));
         let bound = match bind {
             Bind::Addr(addr) => Some(addr),
             Bind::All | Bind::Loopback => None,
         };
         let tunnel = tunnel && bound.is_none();
-        let tunnel = tunnel.then(|| Tunnel::start(&dirs, port)).transpose().unwrap_or_else(|err| {
-            tracing::warn!("remote access stays on this network only: {err}");
-            None
-        });
+        let tunnel_ports = Arc::<TunnelPorts>::default();
+        let tunnel = tunnel
+            .then(|| Tunnel::start(&dirs, port, tunnel_ports.clone(), limiter.clone()))
+            .transpose()
+            .unwrap_or_else(|err| {
+                tracing::warn!("remote access stays on this network only: {err}");
+                None
+            });
         let node = tunnel.as_ref().map(|tunnel| tunnel.node().to_owned());
         let status = ListenerStatus {
             port,
@@ -330,8 +337,9 @@ impl Listener {
             stopping: AtomicBool::new(false),
             connections: Mutex::default(),
             next_id: AtomicU64::new(1),
-            limiter: Mutex::new(limiter),
+            limiter,
             desk: Mutex::default(),
+            tunnel_ports,
         });
         let (wake_rx, wake) = poll::waker()?;
         let thread_shared = shared.clone();
@@ -363,6 +371,24 @@ impl Listener {
     /// 实际在听的地址。
     pub fn local_addrs(&self) -> &[SocketAddr] {
         &self.addrs
+    }
+}
+
+#[cfg(test)]
+impl Listener {
+    /// 经隧道转来的连接的登记表，测试里把只走本机的隧道接上来。
+    pub(crate) fn tunnel_ports(&self) -> Arc<TunnelPorts> {
+        self.shared.tunnel_ports.clone()
+    }
+
+    /// 门禁的限速，测试里交给只走本机的隧道。
+    pub(crate) fn rate_limiter(&self) -> Arc<Mutex<RateLimiter>> {
+        self.shared.limiter.clone()
+    }
+
+    /// 还在门禁阶段的连接各从哪儿来。
+    pub(crate) fn gating_sources(&self) -> Vec<Source> {
+        self.shared.connections().values().filter(|live| live.device.is_none()).map(|live| live.source).collect()
     }
 }
 
@@ -463,8 +489,9 @@ fn accept_loop(shared: &Arc<Shared>, listeners: &[TcpListener], wake: &poll::Wak
     }
 }
 
-/// 设备表变了（或者第一次看）时读一遍，断开撤销了的设备连着的连接。读不了时不断开谁，下一轮
-/// 照样重读，一时读失败时刚好撤销的设备也不会漏掉；`failing` 记着在读不了，警告只记第一次。
+/// 设备表变了（或者第一次看）时读一遍，断开撤销了的设备连着的连接，它们来过的来源也不再算过过
+/// 门禁。读不了时不断开谁，下一轮照样重读，一时读失败时刚好撤销的设备也不会漏掉；`failing` 记着
+/// 在读不了，警告只记第一次。
 fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>, failing: &mut bool) {
     let stamp = devices::stamp(&shared.dirs);
     if seen.as_ref() == Some(&stamp) {
@@ -476,6 +503,7 @@ fn check_revoked(shared: &Shared, seen: &mut Option<Option<(SystemTime, u64)>>, 
             *failing = false;
             let known: HashSet<DeviceId> = list.iter().map(|device| device.device_id).collect();
             shared.cut_revoked(&known);
+            shared.limiter().revoke(&known);
         }
         Err(err) => {
             if *failing {
@@ -505,14 +533,10 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool
                 return;
             }
         };
-        // IPv4 映射成的 IPv6 地址按 IPv4 算，限速才认得出是同一个地址。
-        let ip = match peer.ip() {
-            IpAddr::V6(v6) => v6.to_canonical(),
-            ip => ip,
-        };
+        let source = shared.tunnel_ports.take(peer).map_or_else(|| Source::from(peer.ip()), Source::Tunnel);
         // 被限速的来源不握手、不占线程，直接关掉。
-        if shared.limiter().limited(ip, Instant::now()) {
-            tracing::debug!("dropping a remote connection from rate limited {ip}");
+        if shared.limiter().limited(source, Instant::now()) {
+            tracing::debug!("dropping a remote connection from rate limited {source}");
             continue;
         }
         if let Err(err) = tcp.set_nonblocking(false) {
@@ -520,11 +544,11 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool
             continue;
         }
         // 名额满着时只在刚满那次记警告，之后记调试日志，免得有人反复建连接把日志刷满。
-        let Some((id, cut)) = register(shared, &tcp, ip) else {
+        let Some((id, cut)) = register(shared, &tcp, source) else {
             if *crowded {
-                tracing::debug!("still too many remote connections, dropping one from {ip}");
+                tracing::debug!("still too many remote connections, dropping one from {source}");
             } else {
-                tracing::warn!("too many remote connections, dropping one from {ip}");
+                tracing::warn!("too many remote connections, dropping one from {source}");
             }
             *crowded = true;
             continue;
@@ -532,7 +556,7 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool
         *crowded = false;
         let thread_shared = shared.clone();
         let spawned = thread::Builder::new().name("remote-connection".into()).spawn(move || {
-            gate::serve(&thread_shared, id, &tcp, ip, &cut);
+            gate::serve(&thread_shared, id, &tcp, source, &cut);
             thread_shared.remove(id);
         });
         if let Err(err) = spawned {
@@ -542,15 +566,19 @@ fn accept_ready(shared: &Arc<Shared>, listener: &TcpListener, crowded: &mut bool
     }
 }
 
-/// 门禁的限速，先记上设备表里各台设备最近一次登录的地址：不然监听一重开（重启、交接宿主、改名字），
-/// 别人先占满门禁的名额，连过的手机就过不了门禁，也就再也成不了 `RateLimiter::trusted`。
+/// 门禁的限速，先记上设备表里各台设备上次登录的来源（`devices::remembered`）：不然监听一重开（重启、
+/// 交接宿主、改名字），别人先占满门禁的名额，连过的手机就过不了门禁，也就再也成不了
+/// `RateLimiter::trusted`。表里记着的回环地址先删掉，不凭它信任谁。
 fn remembered_limiter(dirs: &Dirs) -> RateLimiter {
+    if let Err(err) = devices::forget_loopback(dirs) {
+        tracing::warn!("cannot drop loopback addresses from the paired device table: {err}");
+    }
     let mut limiter = RateLimiter::default();
-    match devices::seen_from(dirs) {
-        Ok(ips) => {
+    match devices::remembered(dirs) {
+        Ok(sources) => {
             let now = Instant::now();
-            for ip in ips {
-                limiter.succeeded(ip, now);
+            for (device, source) in sources {
+                limiter.succeeded(source, device, now);
             }
         }
         Err(err) => tracing::warn!("cannot read where paired devices last connected from: {err}"),
@@ -558,29 +586,29 @@ fn remembered_limiter(dirs: &Dirs) -> RateLimiter {
     limiter
 }
 
-/// 登记一条从 `ip` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
-fn register(shared: &Shared, tcp: &TcpStream, ip: IpAddr) -> Option<(u64, Arc<AtomicBool>)> {
-    let trusted = shared.limiter().trusted(ip);
+/// 登记一条从 `source` 来的新连接，返回它的编号和断开它的开关；连接太多时返回 `None`。
+fn register(shared: &Shared, tcp: &TcpStream, source: Source) -> Option<(u64, Arc<AtomicBool>)> {
+    let trusted = shared.limiter().trusted(source);
     let mut connections = shared.connections();
-    if !room_for(&connections, ip, trusted) {
+    if !room_for(&connections, source, trusted) {
         return None;
     }
     let tcp = tcp.try_clone().ok()?;
     let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
     let cut = Arc::new(AtomicBool::new(false));
-    connections.insert(id, Live { tcp, device: None, lane: None, ip, cut: cut.clone() });
+    connections.insert(id, Live { tcp, device: None, lane: None, source, cut: cut.clone() });
     Some((id, cut))
 }
 
-/// 已经有 `connections` 时还能不能再收一条从 `ip` 来的连接；`trusted` 是 `ip` 过过门禁，见
-/// `MAX_GATING_PER_PREFIX`。
-fn room_for(connections: &HashMap<u64, Live>, ip: IpAddr, trusted: bool) -> bool {
-    let prefix = limit::prefix(ip);
+/// 已经有 `connections` 时还能不能再收一条从 `source` 来的连接。`trusted` 是 `source` 过过门禁：
+/// 过过的不受 `MAX_GATING` 和 `MAX_GATING_PER_GROUP` 管。
+fn room_for(connections: &HashMap<u64, Live>, source: Source, trusted: bool) -> bool {
+    let group = source.group();
     let gating = || connections.values().filter(|live| live.device.is_none());
     let crowded = gating().count() >= MAX_GATING
-        || gating().filter(|live| limit::prefix(live.ip) == prefix).count() >= MAX_GATING_PER_PREFIX;
+        || gating().filter(|live| live.source.group() == group).count() >= MAX_GATING_PER_GROUP;
     (trusted || !crowded)
-        && gating().filter(|live| live.ip == ip).count() < MAX_GATING_PER_SOURCE
+        && gating().filter(|live| live.source == source).count() < MAX_GATING_PER_SOURCE
         && connections.len() < MAX_CONNECTIONS
 }
 
@@ -588,51 +616,131 @@ fn room_for(connections: &HashMap<u64, Live>, ip: IpAddr, trusted: bool) -> bool
 mod tests {
     use super::*;
 
+    /// 一条还在门禁阶段、从 `source` 来的连接。
+    fn gating(tcp: &TcpStream, source: Source) -> Live {
+        Live { tcp: tcp.try_clone().unwrap(), device: None, lane: None, source, cut: Arc::default() }
+    }
+
+    fn some_tcp() -> TcpStream {
+        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        TcpStream::connect(server.local_addr().unwrap()).unwrap()
+    }
+
+    fn tunnel(n: u8) -> Source {
+        Source::Tunnel(iroh::SecretKey::from_bytes(&[n; 32]).public())
+    }
+
     #[test]
     fn rotating_addresses_cannot_shut_out_an_address_that_got_in_before() {
-        let server = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let tcp = TcpStream::connect(server.local_addr().unwrap()).unwrap();
-        let live =
-            |ip: IpAddr| Live { tcp: tcp.try_clone().unwrap(), device: None, lane: None, ip, cut: Arc::default() };
+        let tcp = some_tcp();
         // 同一台主机换着几段前缀里的地址占满门禁的名额。
         let mut connections = HashMap::new();
         for i in 0..MAX_GATING {
             let ip = if i % 2 == 0 { format!("2001:db8::{i:x}") } else { format!("fe80::{i:x}") };
-            connections.insert(i as u64, live(ip.parse().unwrap()));
+            connections.insert(i as u64, gating(&tcp, ip.parse::<IpAddr>().unwrap().into()));
         }
-        let phone: IpAddr = "2001:db8::abcd".parse().unwrap();
+        let phone = Source::from("2001:db8::abcd".parse::<IpAddr>().unwrap());
         assert!(!room_for(&connections, phone, false));
         assert!(room_for(&connections, phone, true));
         // 单个地址的名额照样管。
         for i in 0..MAX_GATING_PER_SOURCE {
-            connections.insert(1000 + i as u64, live(phone));
+            connections.insert(1000 + i as u64, gating(&tcp, phone));
         }
         assert!(!room_for(&connections, phone, true));
     }
 
-    /// 监听重开时，设备表里记着的上次登录的地址一开始就算过过门禁。
+    #[test]
+    fn one_tunnel_peer_cannot_take_another_ones_place() {
+        let tcp = some_tcp();
+        let mut connections = HashMap::new();
+        for i in 0..MAX_GATING_PER_SOURCE {
+            connections.insert(i as u64, gating(&tcp, tunnel(1)));
+        }
+        assert!(!room_for(&connections, tunnel(1), false));
+        assert!(room_for(&connections, tunnel(2), false));
+    }
+
+    #[test]
+    fn rotating_tunnel_peers_share_one_group() {
+        let tcp = some_tcp();
+        let mut connections = HashMap::new();
+        for n in 0..u8::try_from(MAX_GATING_PER_GROUP).unwrap() {
+            connections.insert(u64::from(n), gating(&tcp, tunnel(n)));
+        }
+        let newcomer = tunnel(200);
+        assert!(!room_for(&connections, newcomer, false));
+        // 过过门禁的隧道来源和局域网里的地址不受隧道这一组的名额管。
+        assert!(room_for(&connections, newcomer, true));
+        assert!(room_for(&connections, Source::from(IpAddr::from([192, 0, 2, 1])), false));
+    }
+
+    fn paired(dirs: &Dirs, n: u8) -> DeviceId {
+        let id = DeviceId([n; 16]);
+        let device = devices::Device {
+            device_id: id,
+            name: format!("phone {n}"),
+            kind: runode_protocol::remote::DeviceKind::Mobile,
+            public_key: Bytes(vec![4; 65]),
+            paired_at: 0,
+            last_seen: 0,
+        };
+        devices::add(dirs, device).unwrap();
+        id
+    }
+
+    /// 监听重开时，设备表里记着的上次登录的地址和隧道公钥一开始就算过过门禁；设备撤销后不再算。
     #[test]
     fn a_new_listener_trusts_where_devices_last_connected_from() {
         let root = std::env::temp_dir().join(format!("rra-remembered-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
-        let id = runode_protocol::remote::DeviceId([7; 16]);
-        let device = devices::Device {
-            device_id: id,
-            name: "phone".into(),
-            kind: runode_protocol::remote::DeviceKind::Mobile,
-            public_key: Bytes(vec![4; 65]),
-            paired_at: 0,
-            last_seen: 0,
-        };
-        devices::add(&dirs, device).unwrap();
-        let phone: IpAddr = "2001:db8::abcd".parse().unwrap();
+        let id = paired(&dirs, 7);
+        let other = paired(&dirs, 8);
+        let phone = Source::from("2001:db8::abcd".parse::<IpAddr>().unwrap());
         assert!(!remembered_limiter(&dirs).trusted(phone));
         devices::touch(&dirs, id, 1, phone).unwrap();
-        let limiter = remembered_limiter(&dirs);
+        devices::touch(&dirs, id, 2, tunnel(1)).unwrap();
+        devices::touch(&dirs, other, 2, tunnel(2)).unwrap();
+        let mut limiter = remembered_limiter(&dirs);
         assert!(limiter.trusted(phone));
-        assert!(!limiter.trusted("2001:db8::abce".parse().unwrap()));
+        assert!(limiter.trusted(tunnel(1)));
+        assert!(limiter.trusted(tunnel(2)));
+        assert!(!limiter.trusted("2001:db8::abce".parse::<IpAddr>().unwrap().into()));
+        assert!(!limiter.trusted(tunnel(3)));
+
+        assert!(devices::revoke_device(&dirs, id).unwrap());
+        let known: HashSet<DeviceId> =
+            devices::list_devices(&dirs).unwrap().iter().map(|device| device.device_id).collect();
+        limiter.revoke(&known);
+        assert!(!limiter.trusted(phone));
+        assert!(!limiter.trusted(tunnel(1)));
+        assert!(limiter.trusted(tunnel(2)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 设备表里记着的回环地址（本机转进来的连接）不算过过门禁，监听开起来时从表里删掉。
+    #[test]
+    fn a_new_listener_forgets_loopback_addresses() {
+        let root = std::env::temp_dir().join(format!("rra-forget-loopback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let dirs = Dirs::from_vars(|_| Some(root.clone().into()));
+        let id = paired(&dirs, 7);
+        let file = dirs.remote_access_devices_file().unwrap();
+        let mut table: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        table["seen_from"] = serde_json::json!([
+            { "device_id": id, "ip": "127.0.0.1" },
+            { "device_id": id, "ip": "::ffff:127.0.0.1" },
+            { "device_id": id, "ip": "192.0.2.1" },
+        ]);
+        std::fs::write(&file, table.to_string()).unwrap();
+
+        let limiter = remembered_limiter(&dirs);
+        assert!(!limiter.trusted(Source::from(IpAddr::from([127, 0, 0, 1]))));
+        assert!(limiter.trusted(Source::from(IpAddr::from([192, 0, 2, 1]))));
+        let table: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(table["seen_from"], serde_json::json!([{ "device_id": id, "ip": "192.0.2.1" }]));
         let _ = std::fs::remove_dir_all(&root);
     }
 }
