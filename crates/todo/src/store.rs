@@ -300,7 +300,7 @@ fn new_id(tx: &Transaction<'_>) -> Result<String> {
     Err("cannot pick an unused id".into())
 }
 
-/// 在 `tx` 里加一张待办的任务，见 `Store::add_todo`；`queued` 时排着队。
+/// 在 `tx` 里加一张待办的任务；`queued` 时排着队。
 fn insert_todo(
     tx: &Transaction<'_>,
     spec: &TodoSpec,
@@ -365,6 +365,55 @@ fn forget_schedule(tx: &Transaction<'_>, id: &str) -> Result<bool> {
     let removed = tx.execute("DELETE FROM schedules WHERE id = ?1", [id]).map_err(failed)? > 0;
     tx.execute("DELETE FROM schedule_runs WHERE schedule = ?1", [id]).map_err(failed)?;
     Ok(removed)
+}
+
+/// 在 `conn` 上加一个没停、还没跑过命令的定时 `id`，上一次到点是 `last_fired`；`run` 为空串、`run_timeout` 为 0
+/// 时都当没给。已经有 `id` 时什么都不做，为假。
+fn insert_schedule(
+    conn: &Connection,
+    id: &str,
+    spec: &TodoSpec,
+    when: &When,
+    run: Option<&str>,
+    run_timeout: Option<u32>,
+    last_fired: u64,
+) -> Result<bool> {
+    let (kind, [at, hour, minute, days, minutes], cron) = when_columns(when)?;
+    let inserted = conn
+        .execute(
+            &format!(
+                "INSERT INTO schedules ({SCHEDULE_COLUMNS})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0,
+                 ?21, ?22, NULL, NULL, NULL)
+             ON CONFLICT (id) DO NOTHING"
+            ),
+            params![
+                id,
+                spec.title,
+                spec.prompt,
+                path_bytes(&spec.dir),
+                spec.agent,
+                spec.worktree,
+                spec.skills.join("\n"),
+                spec.subagent,
+                paths_bytes(&spec.attachments),
+                spec.auto,
+                spec.auto_done,
+                spec.time_limit,
+                kind,
+                at,
+                hour,
+                minute,
+                days,
+                minutes,
+                cron,
+                last_fired as i64,
+                run.filter(|run| !run.is_empty()),
+                run_timeout.filter(|minutes| *minutes != 0)
+            ],
+        )
+        .map_err(failed)?;
+    Ok(inserted > 0)
 }
 
 /// 在 `tx` 里给定时 `schedule` 记一条检查记录，再删掉它超出 `SCHEDULE_RUNS_KEPT` 的旧记录。
@@ -447,6 +496,12 @@ impl Store {
         }
         tx.commit().map_err(failed)?;
         Ok(Self { conn })
+    }
+
+    /// 库的数据版本（`PRAGMA data_version`）：别的连接（别的 `Store`、别的进程）提交了改动以后变，这个
+    /// `Store` 自己提交的不变。只能和同一个 `Store` 先前读到的比。
+    pub fn data_version(&self) -> Result<i64> {
+        self.conn.query_row("PRAGMA data_version", [], |row| row.get(0)).map_err(failed)
     }
 
     /// 没完成的任务和最近 `DONE_KEPT` 内完成的，按先后排好。
@@ -814,41 +869,23 @@ impl Store {
     ) -> Result<String> {
         let tx = self.conn.transaction().map_err(failed)?;
         let id = new_id(&tx)?;
-        let (kind, [at, hour, minute, days, minutes], cron) = when_columns(when)?;
-        tx.execute(
-            &format!(
-                "INSERT INTO schedules ({SCHEDULE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, 0,
-                 ?21, ?22, NULL, NULL, NULL)"
-            ),
-            params![
-                id,
-                spec.title,
-                spec.prompt,
-                path_bytes(&spec.dir),
-                spec.agent,
-                spec.worktree,
-                spec.skills.join("\n"),
-                spec.subagent,
-                paths_bytes(&spec.attachments),
-                spec.auto,
-                spec.auto_done,
-                spec.time_limit,
-                kind,
-                at,
-                hour,
-                minute,
-                days,
-                minutes,
-                cron,
-                now as i64,
-                run.filter(|run| !run.is_empty()),
-                run_timeout.filter(|minutes| *minutes != 0)
-            ],
-        )
-        .map_err(failed)?;
+        insert_schedule(&tx, &id, spec, when, run, run_timeout, now)?;
         tx.commit().map_err(failed)?;
         Ok(id)
+    }
+
+    /// 把 `fire_schedule_run` 交出、命令还没记下结果的定时 `schedule` 照它交出时的样子放回库里，下次到点照常
+    /// 触发；不停着，没有上一次跑命令的结果。已经有这个定时时什么都不做，为假。
+    pub fn restore_schedule(&mut self, schedule: &Schedule) -> Result<bool> {
+        insert_schedule(
+            &self.conn,
+            &schedule.id,
+            &schedule.spec,
+            &schedule.when,
+            schedule.run.as_deref(),
+            schedule.run_timeout,
+            schedule.last_fired,
+        )
     }
 
     /// 改定时，只改给了的部分；改了 `when` 时从 `now` 重新算起。`run` 给空串时清掉（到点直接开任务），
@@ -1004,7 +1041,7 @@ impl Store {
     }
 
     /// 定时 `id` 到点了、这次跳过（比如上次开出的任务还在干活），不开任务：记下到点的时刻（一次性的删掉）。
-    /// 和 `fire_schedule` 一样照库里它现在的样子、在一个事务里办：决定跳过以后它可能被改过、被别处触发过，
+    /// 照库里它现在的样子、在一个事务里办：决定跳过以后它可能被改过、被别处触发过，
     /// 照现在的样子已经没了、或者还没到点时什么都不做，为假，不拿旧的到点时刻盖掉新的。带 `Schedule::run`、
     /// 没停着的另记一条 `RunOutcome::Skipped` 的检查记录，`blocker` 是挡住它的那张任务（上次的命令还在跑时为空）。
     pub fn skip_schedule(&mut self, id: &str, now: u64, blocker: Option<&str>) -> Result<bool> {

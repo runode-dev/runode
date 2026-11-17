@@ -38,7 +38,7 @@ const SEND_QUIET: Duration = Duration::from_secs(2);
 /// `send --wait` 发给 agent 以后，这么久还没看到它干活或提问就不再等：回车可能没提交上，
 /// 一直等到 `--timeout` 只会白等。
 const SEND_STALL: Duration = Duration::from_secs(10);
-/// 宿主升级（`client::Upgrading`）时，`wait` 最多花这么久重新连上新宿主，见 `Watch::recover`。
+/// 宿主升级（`client::Upgrading`）时，`wait` 最多花这么久重新连上新宿主。
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// 重连之间隔这么久。
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(100);
@@ -120,14 +120,22 @@ pub(crate) fn run(command: Command, env: &Env, out: &mut dyn Write, err: &mut dy
                 )
                 .into());
             }
-            // 发送前 agent 就在提问时记下屏幕，停滞检测到点时比一比，见 `Stall::asking`。
+            // 发送前 agent 就在提问时记下屏幕，停滞检测到点时比一比。
             let asking = match (&waiting, meta.agent) {
                 (Some(_), Some(agent)) if agent.state == AgentState::Blocked => {
                     Some(screen_keeping_events(&connection, id, None, None)?)
                 }
                 _ => None,
             };
-            // 从这里起宿主升级打断时不叫用户重跑：输入可能已经送到了，见 `after_sending`。
+            // 发出输入前丢掉在此之前结束的命令：宿主按发出的顺序回话，读屏幕的回话之前到的 `CommandFinished`
+            // 都不是这次打的命令。丢掉的 `Exited` 由 `Connection::exited` 记着。
+            if matches!(waiting, Some((Until::Command, _))) {
+                screen(&connection, id, Some(1), None)?;
+                if connection.exited(id) {
+                    return Err(Failure::Exited);
+                }
+            }
+            // 从这里起宿主升级打断时不叫用户重跑：输入可能已经送到了。
             let delivered = (|| -> Result<(), Failure> {
                 let mut sent = false;
                 if !text.is_empty() {
@@ -425,7 +433,7 @@ fn presses_enter(keys: &[String]) -> bool {
 }
 
 /// `wait`（和 `send --wait`）等着的会话和连着它的连接。宿主把会话交给新版本的宿主时（连接上
-/// 来了 `Goodbye { reason: Handoff }`），重新连上新宿主接着等，见 `recover`。
+/// 来了 `Goodbye { reason: Handoff }`），重新连上新宿主接着等。
 struct Watch<'a> {
     env: &'a Env,
     connection: Connection,
@@ -470,7 +478,7 @@ impl Watch<'_> {
         Ok(meta)
     }
 
-    /// 读一次整屏；宿主在升级时先重新连上新宿主再读，见 `recover`。
+    /// 读一次整屏；宿主在升级时先重新连上新宿主再读。
     fn read_screen(&mut self, deadline: Option<Instant>) -> Result<String, Failure> {
         loop {
             match screen(&self.connection, self.id, None, deadline) {
@@ -481,9 +489,9 @@ impl Watch<'_> {
     }
 }
 
-/// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。宿主升级时重新连上接着等（见
-/// `Watch::recover`），等命令运行完（`Until::Command`）除外：新宿主不会重报交接时正在跑的命令。
-/// 等 agent 时给了 `stall`，一段时间里 agent 既没干活也没提问就失败，见 `wait_for_agent`。
+/// 等到 `until`，到了就打印结果。`meta` 是连上时的状态。宿主升级时重新连上接着等，
+/// 等命令运行完（`Until::Command`）除外：新宿主不会重报交接时正在跑的命令。
+/// 等 agent 时给了 `stall`，一段时间里 agent 既没干活也没提问就失败。
 fn wait_until(
     watch: &mut Watch<'_>,
     meta: &SessionMeta,
@@ -583,7 +591,7 @@ fn screen(
     Ok(text)
 }
 
-/// 同 `screen`，但留着期间跳过的事件：之后还要照它们等的（`send --wait` 发送前记屏幕时来的 `Meta`）用它。
+/// 读一次屏幕，留着期间跳过的事件：之后还要照它们等的（`send --wait` 发送前记屏幕时来的 `Meta`）用它。
 fn screen_keeping_events(
     connection: &Connection,
     id: SessionId,
@@ -773,7 +781,7 @@ fn wait_for_prompt(connection: &Connection, id: SessionId, mut meta: SessionMeta
     Ok(meta)
 }
 
-/// 按写法找正好一个会话，见 `select`。
+/// 按写法找正好一个会话。
 fn resolve(connection: &Connection, env: &Env, selector: &Selector) -> anyhow::Result<SessionInfo> {
     let world = World::load(connection, env, selector.needs_layout())?;
     world.find(selector).cloned()
@@ -784,7 +792,7 @@ fn attach(connection: &Connection, id: SessionId) -> anyhow::Result<(u32, Sessio
     attach_before(connection, id, None)
 }
 
-/// 同 `attach`，但给了 `deadline` 时等回话不过它，见 `Connection::reply_before`。
+/// 只看状态地连上会话，返回通道和连上时的状态；给了 `deadline` 时等回话不过它。
 fn attach_before(
     connection: &Connection,
     id: SessionId,

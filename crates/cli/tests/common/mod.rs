@@ -1,4 +1,4 @@
-//! 假宿主：在临时 socket 上接连接，自动回 `Hello`，其余控制消息按测试给的脚本回话，收到的
+//! 假宿主：在临时 socket 上接连接，自动回 `Hello`，其余控制消息和输入按测试给的脚本回话，收到的
 //! 消息和输入都记下来给测试查。
 
 #![allow(dead_code)]
@@ -44,7 +44,16 @@ pub struct FakeHost {
 impl FakeHost {
     /// 起一个假宿主。`script` 对每条控制消息给出要回的消息；对 `Hello` 什么都不回时由假宿主回
     /// `welcome(false)`。连上来的每条连接都由它回话，同一个测试里能跑好几条命令。
-    pub fn start(name: &str, script: impl FnMut(&ClientMsg) -> Vec<HostMsg> + Send + 'static) -> Self {
+    pub fn start(name: &str, mut script: impl FnMut(&ClientMsg) -> Vec<HostMsg> + Send + 'static) -> Self {
+        Self::start_with_input(name, move |received| match received {
+            Received::Control(message) => script(message),
+            Received::Input(..) => vec![],
+        })
+    }
+
+    /// 起一个假宿主，`script` 对收到的每条控制消息和每段输入给出要回的消息；对 `Hello` 什么都不回时
+    /// 由假宿主回 `welcome(false)`。
+    pub fn start_with_input(name: &str, script: impl FnMut(&Received) -> Vec<HostMsg> + Send + 'static) -> Self {
         let dir = std::env::temp_dir().join(format!("rnc-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -76,24 +85,24 @@ impl FakeHost {
     }
 }
 
-/// 一条连接从头到尾：控制消息交给 `script`，它不回 `Hello` 时替它回。
-fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<impl FnMut(&ClientMsg) -> Vec<HostMsg>>) {
+/// 一条连接从头到尾：收到的交给 `script`，它不回 `Hello` 时替它回。
+fn serve(mut stream: UnixStream, tx: &mpsc::Sender<Received>, script: &Mutex<impl FnMut(&Received) -> Vec<HostMsg>>) {
     let mut writer = stream.try_clone().unwrap();
     let mut reply = |message: &HostMsg| {
         let frame = Frame::control(message).unwrap();
         write_frame(&mut writer, FrameKind::Control, 0, &frame.payload).is_ok()
     };
     while let Ok(Some(frame)) = read_frame(&mut stream) {
-        if frame.kind == FrameKind::Input {
-            let _ = tx.send(Received::Input(frame.channel, frame.payload));
-            continue;
-        }
-        let message: ClientMsg = frame.message().unwrap();
-        let mut replies = (script.lock().unwrap())(&message);
-        if replies.is_empty() && matches!(message, ClientMsg::Hello { .. }) {
+        let received = if frame.kind == FrameKind::Input {
+            Received::Input(frame.channel, frame.payload)
+        } else {
+            Received::Control(frame.message().unwrap())
+        };
+        let mut replies = (script.lock().unwrap())(&received);
+        if replies.is_empty() && matches!(received, Received::Control(ClientMsg::Hello { .. })) {
             replies.push(welcome(false));
         }
-        let _ = tx.send(Received::Control(message));
+        let _ = tx.send(received);
         if !replies.iter().all(&mut reply) {
             return;
         }

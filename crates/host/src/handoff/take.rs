@@ -1,4 +1,4 @@
-//! 接手会话的一方（新宿主），入口是 `Host::take_over`，见 `handoff` 的模块文档。
+//! 接手会话的一方（新宿主），入口是 `Host::take_over`。
 
 use std::{
     collections::HashMap,
@@ -193,7 +193,7 @@ impl Host {
 /// 握手：说自己是接手的新宿主，要旧宿主交接。返回要接手几个会话和旧宿主的进程号。
 ///
 /// 旧宿主正在把会话交给别的新宿主时，这条连接收到的是 `Goodbye { Handoff }`（交接开始前连上、
-/// 或者交接期间被接受的连接都这样）：和它回 `HandoffRefused { Busy }` 一样，当作别人正在交接。
+/// 或者交接期间被接受的连接都这样）。收到它或者 `HandoffRefused { Busy }` 都当作别人正在交接。
 fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::pid_t>), TakeOverError> {
     let failed = |what: &str, err: &dyn std::fmt::Display| TakeOverError::Failed(format!("{what}: {err}"));
     send(
@@ -246,7 +246,7 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
 
 /// 旧宿主的进程号：用它在 `Welcome` 里自报的 `reported`，收到 `Welcome` 以后再读一次连接对端
 /// （`peer_pid`，这时它已经 accept 了这条连接）对照，对不上时记一笔、仍以自报的为准。连上时就读
-/// 的对端进程号不准：监听的 socket 交接过以后，读到的是最早建它的那个宿主，见 `peer_pid`。
+/// 的对端进程号不准：监听的 socket 交接过以后，读到的是最早建它的那个宿主。
 fn old_host_pid(stream: &UnixStream, reported: u32) -> Option<libc::pid_t> {
     let reported = libc::pid_t::try_from(reported).ok().filter(|pid| *pid > 0);
     let peer = peer_pid(stream);

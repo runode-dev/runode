@@ -12,13 +12,13 @@ use runode_protocol::{
 use runode_types::{grid::GridSize, shell::IntegrationMode};
 
 use super::{
-    connection::MAX_WAITING,
+    connection::{ERROR_INPUT_FULL, MAX_WAITING},
     outbox::{MOBILE_OUTBOX_LIMIT, OUTBOX_HARD_LIMIT, OUTBOX_LIMIT},
     *,
 };
 use crate::{
     Host, SpawnOptions,
-    session::{Event, EventSink, Screen, Subscribe},
+    session::{Event, EventSink, MAX_PENDING_INPUT, Screen, Subscribe},
 };
 
 const SIZE: GridSize = GridSize { cols: 20, rows: 4, cell_width_px: 8, cell_height_px: 16 };
@@ -123,6 +123,12 @@ fn greet_from(host: &Host, client: ClientKind, session: Option<SessionId>) -> (C
 /// 开一个线程卡在不返回的 `Subscribe::start` 里、答不了话的会话；丢掉返回的发送端时放开。
 fn stuck_session(host: &Host) -> (SessionId, mpsc::Sender<()>) {
     let stuck = host.shared.spawn(options(CAT)).unwrap();
+    let release = stick(host, stuck);
+    (stuck, release)
+}
+
+/// 让会话 `stuck` 的线程卡在不返回的 `Subscribe::start` 里；丢掉返回的发送端时放开。
+fn stick(host: &Host, stuck: SessionId) -> mpsc::Sender<()> {
     let (release, released) = mpsc::channel::<()>();
     let (entered, stuck_now) = mpsc::channel();
     let start = Box::new(move |_: Screen| {
@@ -135,7 +141,124 @@ fn stuck_session(host: &Host) -> (SessionId, mpsc::Sender<()>) {
         Subscribe { connection: 0, size: None, mode: AttachMode::MetaOnly, start, desktop: false, device: None };
     assert!(host.shared.deliver(stuck, Inbox::Subscribe(subscribe)));
     stuck_now.recv_timeout(WAIT).unwrap();
-    (stuck, release)
+    release
+}
+
+/// 等请求 `req` 的回话，返回是不是 `Done`；`Error` 时返回它的说明。
+fn answer(frames: &mpsc::Receiver<Frame>, req: u32) -> Result<(), String> {
+    loop {
+        match message(frames) {
+            HostMsg::Done { req: done } if done == req => return Ok(()),
+            HostMsg::Error { req: Some(failed), message, .. } if failed == req => return Err(message),
+            _ => {}
+        }
+    }
+}
+
+/// 会话积压的输入到了上限：输入帧丢掉，带请求号的输入回 `ERROR_INPUT_FULL`，同一条连接上别的请求照常
+/// 及时回话；积压消了以后又收输入。
+#[test]
+fn input_to_a_session_that_does_not_take_it_is_refused() {
+    let host = Host::new(BuildId("test".into()));
+    let id = host.shared.spawn(options(CAT)).unwrap();
+    let other = host.shared.spawn(options(CAT)).unwrap();
+    let (mut stream, frames) = greet(&host, ClientKind::Cli);
+    send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
+    let channel = loop {
+        if let HostMsg::Attached { channel, .. } = message(&frames) {
+            break channel;
+        }
+    };
+    // 会话线程卡住，收下的输入都积压在收件箱里；先垫上差两帧到上限的量，不必真发那么多。
+    let release = stick(&host, id);
+    let handle = host.shared.registry().sessions[&id].clone();
+    let chunk = b"input\r";
+    // 没收下的输入不记谁在操作会话，收件箱里也就不多一条 `Driven`：命令行发的输入收下时标上会话。
+    let full = handle.pretend_pending_input(MAX_PENDING_INPUT);
+    write_frame(&mut *stream, FrameKind::Input, channel, chunk).unwrap();
+    send(&mut stream, &ClientMsg::Paste { req: 0, id, text: "x".into() });
+    assert_eq!(answer(&frames, 0), Err(ERROR_INPUT_FULL.into()));
+    assert!(!handle.driven(), "refused input marked the session as driven");
+    drop(full);
+    let padding = handle.pretend_pending_input(MAX_PENDING_INPUT - 2 * chunk.len());
+    for _ in 0..3 {
+        write_frame(&mut *stream, FrameKind::Input, channel, chunk).unwrap();
+    }
+    send(&mut stream, &ClientMsg::Paste { req: 1, id, text: "x".into() });
+    assert_eq!(answer(&frames, 1), Err(ERROR_INPUT_FULL.into()));
+    assert!(handle.driven(), "taken input marks the session as driven");
+    send(&mut stream, &ClientMsg::ReadScreen { req: Some(2), id: other, lines: None, command: None });
+    while !matches!(message(&frames), HostMsg::ScreenText { id, .. } if id == other) {}
+
+    drop(padding);
+    drop(release);
+    send(&mut stream, &ClientMsg::Paste { req: 3, id, text: "x".into() });
+    assert_eq!(answer(&frames, 3), Ok(()));
+    host.shared.kill_all();
+}
+
+/// 程序不读输入、输入积压在 PTY 的写队列里时也按上限拒绝；程序读走以后又收输入。
+#[cfg(unix)]
+#[test]
+fn input_backed_up_in_the_pty_is_refused_until_the_program_reads() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = std::env::temp_dir().join(format!("rnh-{}-pty-backlog", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (ready, go) = (dir.join("ready"), dir.join("go"));
+    // 不回显、不按行收，等 `go` 出现之前一个字节都不读。
+    let program = dir.join("stalled");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nstty raw -echo\ntouch '{}'\nwhile [ ! -e '{}' ]; do sleep 0.05; done\nexec cat >/dev/null\n",
+            ready.display(),
+            go.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let host = Host::new(BuildId("test".into()));
+    let id = host.shared.spawn(options(program.to_str().unwrap())).unwrap();
+    let deadline = Instant::now() + WAIT;
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "the program did not start");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let (mut stream, frames) = greet(&host, ClientKind::Cli);
+    send(&mut stream, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
+    let channel = loop {
+        if let HostMsg::Attached { channel, .. } = message(&frames) {
+            break channel;
+        }
+    };
+    // 垫上收件箱，剩下的名额由真积压在写队列里的输入占满，不必真发那么多。
+    let handle = host.shared.registry().sessions[&id].clone();
+    // 比内核里 PTY 的缓冲大得多，被拒绝不取决于内核先收下多少。
+    let room = 4 << 20;
+    let padding = handle.pretend_pending_input(MAX_PENDING_INPUT - room);
+    let chunk = vec![b'a'; 64 * 1024];
+    for _ in 0..2 * room / chunk.len() {
+        write_frame(&mut *stream, FrameKind::Input, channel, &chunk).unwrap();
+    }
+    send(&mut stream, &ClientMsg::Paste { req: 0, id, text: "x".repeat(room / 2) });
+    assert_eq!(answer(&frames, 0), Err(ERROR_INPUT_FULL.into()));
+
+    std::fs::write(&go, "").unwrap();
+    let deadline = Instant::now() + WAIT;
+    for req in 1.. {
+        send(&mut stream, &ClientMsg::Paste { req, id, text: "x".into() });
+        match answer(&frames, req) {
+            Ok(()) => break,
+            Err(err) => assert_eq!(err, ERROR_INPUT_FULL),
+        }
+        assert!(Instant::now() < deadline, "the input stayed refused after the program read it");
+        thread::sleep(Duration::from_millis(20));
+    }
+    drop(padding);
+    host.shared.kill_all();
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// 列会话、读屏幕要等会话线程回话，等的时候同一条连接上的输入照常转发：这里有个会话的线程
@@ -309,7 +432,7 @@ fn a_connection_that_stopped_reading_is_closed() {
         let host = Host::new(BuildId("test".into()));
         let (mut stream, frames) = greet(&host, client);
         let out = host.shared.peers().connections.values().find_map(|peer| peer.out.clone()).unwrap();
-        // 假装积压过了硬上限，同 `a_backed_up_connection_gets_no_more_snapshots_or_replies`。
+        // 假装积压过了硬上限。
         let kind = if snapshots { FrameKind::Snapshot } else { FrameKind::Control };
         out.queued.add(kind, OUTBOX_HARD_LIMIT + 1);
         // 输入不往积压上加回话，不断开。
@@ -351,6 +474,106 @@ fn requests_from_a_closed_connection_are_forgotten() {
     send(&mut desktop, &ClientMsg::UiReply { ui, reply: Box::new(HostMsg::Done { req: 1 }) });
     send(&mut desktop, &ClientMsg::ListSessions);
     assert!(matches!(message(&desktop_frames), HostMsg::SessionList { .. }));
+}
+
+/// 一条连接转给界面、界面还没回话的请求有上限：超出的当场回 `Error`，界面回完一条，名额放开。
+#[test]
+fn ui_requests_from_one_connection_are_limited() {
+    let host = Host::new(BuildId("test".into()));
+    let (mut desktop, desktop_frames) = greet(&host, ClientKind::Desktop);
+    let (mut cli, cli_frames) = greet(&host, ClientKind::Cli);
+    for req in 0..=MAX_WAITING as u32 {
+        send(&mut cli, &ClientMsg::Reveal { req, id: SessionId(9) });
+    }
+    match message(&cli_frames) {
+        HostMsg::Error { req: Some(req), message, .. } => {
+            assert_eq!(req, MAX_WAITING as u32);
+            assert!(message.contains("too many"), "{message}");
+        }
+        other => panic!("expected the extra request to be refused: {other:?}"),
+    }
+    let mut asked = Vec::new();
+    while asked.len() < MAX_WAITING {
+        if let HostMsg::UiRequest { ui, .. } = message(&desktop_frames) {
+            asked.push(ui);
+        }
+    }
+    assert!(
+        matches!(desktop_frames.recv_timeout(Duration::from_millis(200)), Err(mpsc::RecvTimeoutError::Timeout)),
+        "the refused request reached the desktop"
+    );
+    send(&mut desktop, &ClientMsg::UiReply { ui: asked[0], reply: Box::new(HostMsg::Done { req: 0 }) });
+    assert!(matches!(message(&cli_frames), HostMsg::Done { req: 0 }));
+    send(&mut cli, &ClientMsg::Reveal { req: 100, id: SessionId(9) });
+    match message(&desktop_frames) {
+        HostMsg::UiRequest { request, .. } => assert!(matches!(*request, ClientMsg::Reveal { req: 100, .. })),
+        other => panic!("expected the request to reach the desktop: {other:?}"),
+    }
+}
+
+/// 界面的连接积压过了上限：转给它的请求当场回 `Error`，不登记、不往它的积压上加；积压下去后照常转。
+#[test]
+fn ui_requests_to_a_backed_up_desktop_are_refused() {
+    let host = Host::new(BuildId("test".into()));
+    let (_desktop, desktop_frames) = greet(&host, ClientKind::Desktop);
+    let (mut cli, cli_frames) = greet(&host, ClientKind::Cli);
+    let out = {
+        let peers = host.shared.peers();
+        peers.connections[&peers.desktops[0]].out.clone().unwrap()
+    };
+    // 假装积压过了上限：写的线程只减它真写出去的那些，假的这份一直在。
+    out.queued.streaming.fetch_add(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+    send(&mut cli, &ClientMsg::Reveal { req: 3, id: SessionId(9) });
+    match message(&cli_frames) {
+        HostMsg::Error { req: Some(3), message, .. } => {
+            assert!(message.contains("not keeping up"), "{message}");
+            assert!(!message.starts_with(ERROR_BACKED_UP), "{message}");
+        }
+        other => panic!("expected the request to be refused: {other:?}"),
+    }
+    assert!(host.shared.peers().pending.is_empty());
+    out.queued.streaming.fetch_sub(OUTBOX_LIMIT + 1, Ordering::Relaxed);
+    send(&mut cli, &ClientMsg::Reveal { req: 4, id: SessionId(9) });
+    match message(&desktop_frames) {
+        HostMsg::UiRequest { request, .. } => assert!(matches!(*request, ClientMsg::Reveal { req: 4, .. })),
+        other => panic!("expected the request to reach the desktop: {other:?}"),
+    }
+}
+
+/// 会话读剪贴板、桌面一直不回话：等太久回了程序之后，转给界面的那条登记跟着撤掉。
+#[cfg(unix)]
+#[test]
+fn clipboard_reads_that_time_out_are_withdrawn() {
+    let host = Host::new(BuildId("test".into()));
+    host.set_clipboard_read_patience(Duration::from_millis(200));
+    let id = host.shared.spawn(options(CAT)).unwrap();
+    let (mut desktop, frames) = greet(&host, ClientKind::Desktop);
+    let clipboard = runode_types::clipboard::ClipboardAccess {
+        write: runode_types::clipboard::ClipboardWrite::Allow,
+        read: runode_types::clipboard::ClipboardRead::Allow,
+    };
+    send(&mut desktop, &ClientMsg::SetOptions { record_history: false, clipboard });
+    send(&mut desktop, &ClientMsg::Attach { id, size: None, mode: AttachMode::VtReplay });
+    let channel = loop {
+        if let HostMsg::Attached { channel, .. } = message(&frames) {
+            break channel;
+        }
+    };
+    // 终端回显的是 `^[`，`cat` 原样写回的那份才是程序发的 OSC 52。
+    write_frame(&mut *desktop, FrameKind::Input, channel, b"\x1b]52;c;?\x07\r").unwrap();
+    loop {
+        if let HostMsg::UiRequest { request, .. } = message(&frames)
+            && matches!(*request, ClientMsg::ReadClipboard { .. })
+        {
+            break;
+        }
+    }
+    let deadline = Instant::now() + WAIT;
+    while !host.shared.peers().pending.is_empty() {
+        assert!(Instant::now() < deadline, "the timed-out read is still waiting for the desktop");
+        thread::sleep(Duration::from_millis(5));
+    }
+    host.shared.kill_all();
 }
 
 /// 以桌面握手、带着屏幕连上会话 `id`；返回时会话线程已经记下这个桌面在看它。
@@ -562,7 +785,7 @@ fn a_handoff_waits_for_a_session_being_opened() {
 }
 
 #[cfg(unix)]
-/// 见 `stopping_waits_for_a_session_being_opened`：宿主因为 `reason` 退出。`marker` 让各个测试的 shell 认得出。
+/// 有会话还在开的时候宿主因为 `reason` 退出。`marker` 让各个测试的 shell 认得出。
 fn stops_after_a_session_being_opened(reason: Stopped, marker: u32) {
     use std::os::unix::fs::PermissionsExt as _;
 

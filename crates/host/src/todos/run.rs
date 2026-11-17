@@ -3,6 +3,7 @@
 //! 一个事务里记进库。
 
 use std::{
+    collections::hash_map::Entry,
     ffi::OsString,
     path::{Path, PathBuf},
     process::Command,
@@ -11,14 +12,14 @@ use std::{
 };
 
 use runode_agent::oneshot::{RunError, login_shell_path, run_command};
-use runode_protocol::todo::{DEFAULT_RUN_TIMEOUT, RunOutcome, Schedule, ScheduleRun, TodoSpec};
+use runode_protocol::todo::{DEFAULT_RUN_TIMEOUT, RunOutcome, Schedule, ScheduleRun, TodoSpec, When};
 
 use super::{
-    Todos,
+    State, Todos,
     check::{MAX_PROMPT, check_text},
-    unix_now,
+    db_in, unix_now,
 };
-use crate::Shared;
+use crate::{Shared, Stopped, server::Phase};
 
 /// 记进 `ScheduleRun::output` 的标准错误最多留末尾这么多个字。
 const RUN_OUTPUT_LIMIT: usize = 2000;
@@ -42,22 +43,34 @@ pub(super) struct Running {
 }
 
 impl Running {
-    /// 占住定时 `id`；它上一次的命令还没跑完时为空。
-    fn new(todos: &Arc<Todos>, id: &str) -> Option<Self> {
-        todos.lock().running_runs.insert(id.to_owned()).then(|| Self { todos: todos.clone(), id: id.to_owned() })
+    /// 占住定时 `schedule`（`by_hand` 是手动触发的）；它上一次的命令还没跑完时为空。
+    fn new(todos: &Arc<Todos>, schedule: &Schedule, by_hand: bool) -> Option<Self> {
+        let mut state = todos.lock();
+        let Entry::Vacant(entry) = state.running_runs.entry(schedule.id.clone()) else { return None };
+        entry.insert(once_fired(schedule, by_hand).then(|| schedule.clone()));
+        drop(state);
+        Some(Self { todos: todos.clone(), id: schedule.id.clone() })
     }
+}
+
+/// `schedule` 是到点触发（不是手动，`by_hand`）的一次性定时。它触发时已经从库里删掉：交出会话后接手的宿主不会
+/// 再触发它，结果由这个宿主照记；不交接就退出、命令还没记下结果时要放回库里，下次启动才会再到点，命令可能再
+/// 跑一遍。
+fn once_fired(schedule: &Schedule, by_hand: bool) -> bool {
+    !by_hand && matches!(schedule.when, When::Once { .. })
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         self.todos.lock().running_runs.remove(&self.id);
+        self.todos.runs_done.notify_all();
     }
 }
 
 impl Todos {
     /// 定时 `id` 上一次到点跑的命令还没跑完。
     pub(super) fn run_pending(&self, id: &str) -> bool {
-        self.lock().running_runs.contains(id)
+        self.lock().running_runs.contains_key(id)
     }
 
     /// 有定时的命令还没跑完。
@@ -71,7 +84,7 @@ impl Shared {
     /// 命令，跑完记下结果、按结果开任务（`finish_run`）。它上一次的命令还没跑完时什么都不做，为假。线程只拿着
     /// 宿主的弱引用，宿主没了就不记。
     pub(super) fn start_run(&self, schedule: Schedule, by_hand: bool) -> bool {
-        let Some(running) = Running::new(&self.todos, &schedule.id) else {
+        let Some(running) = Running::new(&self.todos, &schedule, by_hand) else {
             tracing::info!("schedule {} is still running its last command", schedule.id);
             return false;
         };
@@ -98,9 +111,8 @@ impl Shared {
         true
     }
 
-    /// 记下定时 `schedule` 这次跑命令的结果 `run`，给了 `todo` 时加一张排着队的任务（`Store::finish_schedule_run`，
-    /// `by_hand` 照传），再叫醒定时的线程去开始它；`running` 记进库以后放开。不归这个宿主办（正在交出会话、要
-    /// 退出了）时丢掉这次的结果。
+    /// 记下定时 `schedule` 这次跑命令的结果 `run`（`record_run`），再叫醒定时的线程去开始开出的任务；`running`
+    /// 记进库以后放开。这个宿主不记时丢掉这次的结果。
     fn finish_run(
         &self,
         schedule: &Schedule,
@@ -109,11 +121,13 @@ impl Shared {
         running: Option<Running>,
         by_hand: bool,
     ) {
-        if let Err(why) = self.todos_writable() {
-            tracing::info!("schedule {} ran its command, but the result is dropped: {why}", schedule.id);
-            return;
-        }
-        let finished = self.todos.with_db(|db| db.finish_schedule_run(schedule, run, todo, by_hand));
+        let finished = match self.record_run(schedule, run, todo, by_hand) {
+            Ok(finished) => finished,
+            Err(why) => {
+                tracing::info!("schedule {} ran its command, but the result is dropped: {why}", schedule.id);
+                return;
+            }
+        };
         // 先放开再通知：叫醒的定时线程马上再看，这个定时又到点时不因还占着跳过。
         drop(running);
         match finished {
@@ -131,6 +145,68 @@ impl Shared {
                 self.todos_changed();
             }
         }
+    }
+
+    /// 把定时 `schedule` 这次跑命令的结果记进库（`Store::finish_schedule_run`，参数照传），返回记库的结果。照常
+    /// 办事时记；正在交出会话时只记 `once_fired` 的；要退出了不记，`once_fired` 的放回库里（`put_back`）。不记时
+    /// 为不记的原因。记下以后 `State::running_runs` 里这个定时不再要放回库里。
+    fn record_run(
+        &self,
+        schedule: &Schedule,
+        run: &ScheduleRun,
+        todo: Option<&TodoSpec>,
+        by_hand: bool,
+    ) -> Result<Result<Option<String>, String>, &'static str> {
+        let mut state = self.todos.lock();
+        {
+            let peers = self.peers();
+            if let Some(why) = crate::refusal(&peers) {
+                let handing_over = matches!(peers.phase, Phase::HandingOver | Phase::Stopping(Stopped::Handoff));
+                if !(handing_over && once_fired(schedule, by_hand)) {
+                    drop(peers);
+                    // 交出会话时要放回的定时上面照记，这里还留着的只会是要退出了的。
+                    if let Some(restore) = state.running_runs.get_mut(&schedule.id).and_then(Option::take) {
+                        put_back(&mut state, &restore);
+                    }
+                    return Err(why);
+                }
+            }
+        }
+        let finished = db_in(&mut state, |db| db.finish_schedule_run(schedule, run, todo, by_hand));
+        if finished.is_ok()
+            && let Some(restore) = state.running_runs.get_mut(&schedule.id)
+        {
+            *restore = None;
+        }
+        Ok(finished)
+    }
+
+    /// 宿主要退出、`Peers::phase` 已是 `Stopping(Stopped::Shutdown | Stopped::Idle)` 以后调：把命令还没
+    /// 记下结果的 `once_fired` 的定时放回库里（`put_back`）。
+    ///
+    /// 一个定时的结果记下和放回恰好发生一件：`record_run` 在同一把 `state` 锁里读 `phase`，读到要退出了的不记、
+    /// 改为放回；两处都从 `State::running_runs` 里取走要放回的定时，取走的只放一次。先等拿着 `firing` 的触发
+    /// 办完，已经消费了的定时都占进了 `running_runs`；放开以后到点的定时不再被消费。
+    pub(crate) fn put_back_unfinished_runs(&self) {
+        drop(self.todos.firing());
+        let mut state = self.todos.lock();
+        let unfinished: Vec<Schedule> = state.running_runs.values_mut().filter_map(Option::take).collect();
+        for schedule in &unfinished {
+            put_back(&mut state, schedule);
+        }
+    }
+}
+
+/// 把到点触发、命令没记下结果的定时 `schedule` 放回 `state` 的库里（`Store::restore_schedule`）；放不回时只记日志。
+/// 这次运行不留记录：库里没有它的 `ScheduleRun`。
+fn put_back(state: &mut State, schedule: &Schedule) {
+    match db_in(state, |db| db.restore_schedule(schedule)) {
+        Ok(true) => tracing::info!(
+            "schedule {} is put back: the host is stopping, the result of its command is not recorded",
+            schedule.id
+        ),
+        Ok(false) => {}
+        Err(err) => tracing::warn!("cannot put back schedule {}: {err}", schedule.id),
     }
 }
 
@@ -255,9 +331,6 @@ fn span(timeout: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
-    use runode_protocol::todo::When;
-
     use super::*;
 
     #[cfg(unix)]
@@ -296,6 +369,119 @@ mod tests {
         let (run, todo) = execute(&schedule(&std::env::temp_dir(), &run), &env, None, Duration::from_secs(10));
         assert_eq!(run.outcome, RunOutcome::Fired, "{}", run.output);
         assert_eq!(todo.unwrap().prompt, "s:none");
+    }
+
+    /// 起一个开着看板的宿主，加一个 `when` 的定时：命令开跑以后宿主开始停下（`stopped`），再让命令跑完、输出
+    /// 一行，等它记完结果。返回库里这个定时开出的任务和库里还在不在这个定时。
+    #[cfg(unix)]
+    fn run_while_stopping(name: &str, when: When, stopped: Stopped) -> (Vec<runode_protocol::todo::Todo>, bool) {
+        let (host, dir, id) = running(name, when);
+        host.shared.peers().phase = Phase::Stopping(stopped);
+        finish(&host, &dir, &id)
+    }
+
+    /// 库里还在不在定时 `id`。
+    #[cfg(unix)]
+    fn kept(host: &crate::Host, id: &str) -> bool {
+        host.shared.todos.with_db(|db| db.list_schedules()).unwrap().iter().any(|kept| kept.id == id)
+    }
+
+    /// 单独跑的宿主因为 `stopped` 退出（`run_until_idle` 返回它）时，到点触发、命令还在跑的一次性定时放回了库里
+    /// 没有（返回的第一项）；再让命令跑完，返回 `finish` 的结果。
+    #[cfg(unix)]
+    fn exit_while_running(name: &str, stopped: Stopped) -> (bool, (Vec<runode_protocol::todo::Todo>, bool)) {
+        let (host, dir, id) = running(name, When::Once { at: 2 });
+        host.shared.peers().phase = Phase::Stopping(stopped);
+        assert_eq!(host.run_until_idle(Duration::from_secs(60)), stopped);
+        let put_back = kept(&host, &id);
+        (put_back, finish(&host, &dir, &id))
+    }
+
+    /// 不是交接的退出：命令没跑完的一次性定时放回库里，命令之后跑完的结果不记。
+    #[cfg(unix)]
+    #[test]
+    fn a_once_schedule_running_when_idle_exits_is_put_back() {
+        let (put_back, (todos, kept)) = exit_while_running("once-idle", Stopped::Idle);
+        assert!(put_back, "the schedule was not put back");
+        assert!(todos.is_empty(), "the result of the command was recorded");
+        assert!(kept);
+    }
+
+    /// 交接以后退出：不放回，接手的宿主不会再触发它；命令跑完照样记结果、开任务。
+    #[cfg(unix)]
+    #[test]
+    fn a_once_schedule_running_when_handed_over_is_not_put_back() {
+        let (put_back, (todos, kept)) = exit_while_running("once-handoff-exit", Stopped::Handoff);
+        assert!(!put_back, "the schedule was put back for the old host");
+        assert_eq!(todos.len(), 1, "the result of the command was dropped");
+        assert!(!kept);
+    }
+
+    /// 起一个单独跑、开着看板的宿主，加一个 `when` 的定时，等它的命令开跑；命令等目录里出现 `go` 才跑完、输出
+    /// 一行。返回宿主、目录和定时的标识。
+    #[cfg(unix)]
+    fn running(name: &str, when: When) -> (crate::Host, PathBuf, String) {
+        let dir = std::env::temp_dir().join(format!("rnh-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = crate::Host::new(runode_protocol::BuildId("test".into()));
+        host.mark_standalone();
+        host.listen(&dir.join("host.sock"), &dir.join("host.lock")).unwrap();
+        host.serve_todos(dir.join("todos.db"));
+        let spec = TodoSpec { title: "t".into(), dir: dir.clone(), agent: "true".into(), ..TodoSpec::default() };
+        let (started, go) = (dir.join("started"), dir.join("go"));
+        let run = format!(
+            "touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; printf task",
+            started.display(),
+            go.display()
+        );
+        let id = host.shared.todos.with_db(|db| db.add_schedule(&spec, &when, Some(&run), None, 1)).unwrap();
+        host.shared.todos_changed();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !started.exists() {
+            assert!(std::time::Instant::now() < deadline, "the command of the schedule did not start");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        (host, dir, id)
+    }
+
+    /// 让 `running` 起的命令跑完，等它记完结果。返回库里定时 `id` 开出的任务和库里还在不在这个定时。
+    #[cfg(unix)]
+    fn finish(host: &crate::Host, dir: &Path, id: &str) -> (Vec<runode_protocol::todo::Todo>, bool) {
+        std::fs::write(dir.join("go"), "").unwrap();
+        host.wait_for_schedule_runs();
+        let todos = host.shared.todos.with_db(|db| db.list_todos(unix_now())).unwrap();
+        let kept = kept(host, id);
+        let _ = std::fs::remove_dir_all(dir);
+        (todos.into_iter().filter(|todo| todo.schedule.as_deref() == Some(id)).collect(), kept)
+    }
+
+    /// 一次性的定时触发时已从库里删掉，接手的宿主不会再触发它：交出会话以后旧宿主照样记它的结果、开任务。
+    #[cfg(unix)]
+    #[test]
+    fn a_once_schedule_run_is_recorded_after_a_handoff() {
+        let (todos, _) = run_while_stopping("once-run", When::Once { at: 2 }, Stopped::Handoff);
+        assert_eq!(todos.len(), 1, "the result of the command was dropped");
+        assert!(todos[0].queued);
+        assert!(todos[0].spec.prompt.ends_with("task"), "{}", todos[0].spec.prompt);
+    }
+
+    /// 循环的定时还在库里，接手的宿主到点再触发：交出会话以后旧宿主丢掉这次的结果。
+    #[cfg(unix)]
+    #[test]
+    fn a_repeating_schedule_run_is_dropped_after_a_handoff() {
+        let (todos, kept) = run_while_stopping("every-run", When::Every { minutes: 60 }, Stopped::Handoff);
+        assert!(todos.is_empty());
+        assert!(kept);
+    }
+
+    /// 要退出了才跑完的一次性定时不记结果、不开任务，放回库里，下次启动再到点。
+    #[cfg(unix)]
+    #[test]
+    fn a_once_schedule_run_finishing_at_shutdown_is_put_back() {
+        let (todos, kept) = run_while_stopping("once-shutdown", When::Once { at: 2 }, Stopped::Shutdown);
+        assert!(todos.is_empty(), "the result of the command was recorded");
+        assert!(kept, "the schedule was not put back");
     }
 
     #[test]

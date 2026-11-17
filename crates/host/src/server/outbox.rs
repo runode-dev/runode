@@ -156,7 +156,7 @@ impl Outbox {
     /// 不算还没写出去的快照，只看排在后面的输出和状态有没有过上限。连上会话时排进去的一整份
     /// 屏幕（手机的 `VtReplay` 带着回滚，常常超过 `MOBILE_OUTBOX_LIMIT`）要是也算，紧接着的
     /// `SizeOwner` 就让这条连接上所有会话的 sink 回 `Resync`，前端重连又排一份，永远连不上。
-    fn streaming_backed_up(&self) -> bool {
+    pub(super) fn streaming_backed_up(&self) -> bool {
         self.streaming() > self.limit
     }
 

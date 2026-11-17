@@ -1,7 +1,7 @@
 //! 会话的尺寸怎么定。
 //!
-//! 尺寸归属：几个前端带着屏幕看同一个会话时，会话的尺寸由最近交互过的那个（owner）决定，见
-//! `Runner::owner`。只有带着屏幕连着、请求过尺寸的连接（`Viewer`）有资格：只看状态的（命令行都是）
+//! 尺寸归属：几个前端带着屏幕看同一个会话时，会话的尺寸由最近交互过的那个（owner）决定。
+//! 只有带着屏幕连着、请求过尺寸的连接（`Viewer`）有资格：只看状态的（命令行都是）
 //! 和从不说尺寸的（比如手机跟着 Mac 的尺寸看）没有，它们的输入和焦点不算交互，免得抢走 owner 却
 //! 没人改尺寸、桌面被裁切着画。交互是带尺寸的 `Inbox::Subscribe`、这条连接的 `Inbox::Input` 和
 //! `Inbox::Focus`；命令行的 `Inbox::Keys`、`Inbox::Paste` 不算。owner 的 `Inbox::Resize` 当场应用，
@@ -41,7 +41,7 @@ impl Runner {
     }
 
     /// 连接 `connection` 交互了一次：是请求过尺寸的 `Viewer` 的话轮到它决定尺寸。没资格的（只看
-    /// 状态、命令行，以及带着屏幕却从没请求过尺寸的）什么都不做，见模块文档。
+    /// 状态、命令行，以及带着屏幕却从没请求过尺寸的）什么都不做。
     pub(super) fn interact(&mut self, connection: u64) {
         let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection && v.requested.is_some()) else {
             return;

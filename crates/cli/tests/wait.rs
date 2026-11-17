@@ -26,36 +26,60 @@ fn finished(exit: Option<i32>) -> HostMsg {
     HostMsg::CommandFinished { id: id(S), command: FinishedCommand { cmd: "make".into(), cwd: None, exit, ts: 0 } }
 }
 
-/// 有一个会话 `S` 的假宿主：连上时的状态是 `meta`，接着发 `then`；读屏幕依次回 `screens` 里的文字，
-/// 读完了一直回最后一份。
+/// 收到发送时什么都不另发的 `sending_host`。
 fn host(name: &str, meta: SessionMeta, then: Vec<HostMsg>, screens: Vec<&'static str>) -> FakeHost {
+    sending_host(name, meta, then, vec![], screens)
+}
+
+/// 有一个会话 `S` 的假宿主：连上时的状态是 `meta`，接着发 `then`；收到第一段发送（打字、按键或粘贴）
+/// 时发 `sent`；读屏幕依次回 `screens` 里的文字，读完了一直回最后一份。
+fn sending_host(
+    name: &str,
+    meta: SessionMeta,
+    then: Vec<HostMsg>,
+    sent: Vec<HostMsg>,
+    screens: Vec<&'static str>,
+) -> FakeHost {
     let screens = Arc::new(Mutex::new(screens.into_iter().map(String::from).collect::<Vec<_>>()));
     let info_meta = meta.clone();
-    FakeHost::start(name, move |message| match message {
-        ClientMsg::ListSessions => vec![HostMsg::SessionList { sessions: vec![session(id(S), info_meta.clone())] }],
-        ClientMsg::Attach { id, .. } => {
-            let mut replies = vec![HostMsg::Attached {
-                id: *id,
-                channel: 7,
-                size: SIZE,
-                mode: AttachMode::MetaOnly,
-                meta: meta.clone(),
-                settings: None,
-                shell: None,
-            }];
-            replies.extend(then.iter().cloned());
-            replies
+    let mut sent = Some(sent);
+    FakeHost::start_with_input(name, move |received| {
+        let message = match received {
+            Received::Control(message) => message,
+            Received::Input(..) => return sent.take().unwrap_or_default(),
+        };
+        match message {
+            ClientMsg::ListSessions => {
+                vec![HostMsg::SessionList { sessions: vec![session(id(S), info_meta.clone())] }]
+            }
+            ClientMsg::Attach { id, .. } => {
+                let mut replies = vec![HostMsg::Attached {
+                    id: *id,
+                    channel: 7,
+                    size: SIZE,
+                    mode: AttachMode::MetaOnly,
+                    meta: meta.clone(),
+                    settings: None,
+                    shell: None,
+                }];
+                replies.extend(then.iter().cloned());
+                replies
+            }
+            ClientMsg::ReadScreen { id, .. } => {
+                let mut screens = screens.lock().unwrap();
+                let text = if screens.len() > 1 { screens.remove(0) } else { screens[0].clone() };
+                vec![HostMsg::ScreenText { req: None, id: *id, text, truncated: false }]
+            }
+            ClientMsg::SendKeys { req, .. } | ClientMsg::Paste { req, .. } => {
+                let mut replies = vec![HostMsg::Done { req: *req }];
+                replies.extend(sent.take().unwrap_or_default());
+                replies
+            }
+            ClientMsg::Layout { req } => {
+                vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into(), reason: None }]
+            }
+            _ => vec![],
         }
-        ClientMsg::ReadScreen { id, .. } => {
-            let mut screens = screens.lock().unwrap();
-            let text = if screens.len() > 1 { screens.remove(0) } else { screens[0].clone() };
-            vec![HostMsg::ScreenText { req: None, id: *id, text, truncated: false }]
-        }
-        ClientMsg::SendKeys { req, .. } | ClientMsg::Paste { req, .. } => vec![HostMsg::Done { req: *req }],
-        ClientMsg::Layout { req } => {
-            vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into(), reason: None }]
-        }
-        _ => vec![],
     })
 }
 
@@ -177,39 +201,66 @@ fn send_wait_picks_what_to_wait_for() {
     let agent = |state| meta("claude", Some((AgentKind::Claude, state)));
     let working = HostMsg::Meta { id: id(S), meta: agent(AgentState::Working), shell: None };
     let idle = HostMsg::Meta { id: id(S), meta: agent(AgentState::Idle), shell: None };
+    // 每例：命令、连上时的状态、连上后接着发的、收到发送时发的、等什么、退出码、输出。
     let cases = [
         // 有 agent：等它干完。
-        ("send 5e55 go --enter --wait", agent(AgentState::Idle), vec![working, idle], "--for done", exit::OK, "idle\n"),
+        (
+            "send 5e55 go --enter --wait",
+            agent(AgentState::Idle),
+            vec![],
+            vec![working, idle],
+            "--for done",
+            exit::OK,
+            "idle\n",
+        ),
         // shell 提示符、按了回车：等命令。
-        ("send 5e55 make --enter --wait", at_prompt(), vec![finished(Some(1))], "--for command", 4, "exit 1\n"),
-        ("send 5e55 make --key enter --wait", at_prompt(), vec![finished(Some(0))], "--for command", 0, "exit 0\n"),
+        ("send 5e55 make --enter --wait", at_prompt(), vec![], vec![finished(Some(1))], "--for command", 4, "exit 1\n"),
+        (
+            "send 5e55 make --key enter --wait",
+            at_prompt(),
+            vec![],
+            vec![finished(Some(0))],
+            "--for command",
+            0,
+            "exit 0\n",
+        ),
         // 刚开的 shell 还没出提示符：先等它出来，再照样等命令。
         (
             "send 5e55 make --enter --wait",
             SessionMeta { prompt_cwd: None, ..at_prompt() },
-            vec![HostMsg::Meta { id: id(S), meta: at_prompt(), shell: None }, finished(Some(1))],
+            vec![HostMsg::Meta { id: id(S), meta: at_prompt(), shell: None }],
+            vec![finished(Some(1))],
             "--for command",
             4,
             "exit 1\n",
         ),
         // 没按回车、没有 shell 集成、前台不是 shell：等屏幕安静。
-        ("send 5e55 make --wait", at_prompt(), vec![], "--for quiet", exit::OK, "quiet\n"),
-        ("send 5e55 make --enter --wait", meta("zsh", None), vec![], "--for quiet", exit::OK, "quiet\n"),
+        ("send 5e55 make --wait", at_prompt(), vec![], vec![], "--for quiet", exit::OK, "quiet\n"),
+        ("send 5e55 make --enter --wait", meta("zsh", None), vec![], vec![], "--for quiet", exit::OK, "quiet\n"),
         (
             "send 5e55 q --enter --wait",
             SessionMeta { foreground_is_shell: false, ..at_prompt() },
+            vec![],
             vec![],
             "--for quiet",
             exit::OK,
             "quiet\n",
         ),
     ];
-    for (i, (command, meta, then, waits, code, out)) in cases.into_iter().enumerate() {
-        let fake = host(&format!("sendwait{i}"), meta, then, vec!["$\n"]);
+    for (i, (command, meta, then, sent, waits, code, out)) in cases.into_iter().enumerate() {
+        let fake = sending_host(&format!("sendwait{i}"), meta, then, sent, vec!["$\n"]);
         let (got_code, got_out, err) = run(command, &fake.env);
         assert!(err.contains(waits), "{command}: {err}");
         assert_eq!((got_code, got_out.as_str()), (code, out), "{command}: {err}");
     }
+}
+
+/// 连上会话到发出输入之间，同一会话里别的命令运行完了：它不是这次打的命令，照样等下一条。
+#[test]
+fn send_wait_ignores_a_command_that_finished_before_sending() {
+    let fake = sending_host("sendstale", at_prompt(), vec![finished(Some(1))], vec![finished(Some(0))], vec!["$\n"]);
+    let (code, out, err) = run("send 5e55 make --enter --wait --timeout 5", &fake.env);
+    assert_eq!((code, out.as_str()), (exit::OK, "exit 0\n"), "{err}");
 }
 
 /// 等命令时，打进去的多行文字会被 shell 当成几条命令，等到第一条就返回，所以一个字都不打就拒绝；
@@ -217,7 +268,7 @@ fn send_wait_picks_what_to_wait_for() {
 #[test]
 fn send_wait_for_a_command_refuses_typed_line_breaks() {
     let send = |name: &str, paste: bool| {
-        let fake = host(name, at_prompt(), vec![finished(Some(0))], vec!["$\n"]);
+        let fake = sending_host(name, at_prompt(), vec![], vec![finished(Some(0))], vec!["$\n"]);
         let mut args = vec!["send", "5e55", "cd app\nmake", "--enter", "--wait"];
         if paste {
             args.push("--paste");

@@ -35,7 +35,7 @@ use runode_host::{
 use runode_protocol::{
     AttachMode, Caps, ClientKind, Frame, FrameKind, GoodbyeReason, HANDOFF_FORMAT, HandoffPart,
     OLDEST_READABLE_HANDOFF_FORMAT, PROTOCOL_VERSION, PaneLayout, PaneRect, TabLayout, WindowLayout, WorkspaceLayout,
-    decode_part, encode_part, read_frame, write_frame,
+    decode_part, encode_part, read_frame, write_control, write_frame,
 };
 use runode_terminal::fd_passing;
 use runode_types::{
@@ -52,12 +52,14 @@ const ROLE: &str = "RUNODE_HANDOFF_ROLE";
 const DIR: &str = "RUNODE_HANDOFF_DIR";
 /// 新宿主的结果文件、日志用的名字，连续交接时一个一个分开。
 const TAG: &str = "RUNODE_HANDOFF_TAG";
-/// 新宿主当自己的快照是这个格式版本，见 `TakeOverOptions::snapshot_format`。
+/// 新宿主当自己的快照是这个格式版本。
 const SNAPSHOT_FORMAT: &str = "RUNODE_HANDOFF_SNAPSHOT_FORMAT";
 /// 新宿主的构建，没设时是 `NEW_BUILD`。连续交接时每一棒要是不同的构建：同一个构建的不交接。
 const SUCCESSOR_BUILD: &str = "RUNODE_HANDOFF_BUILD";
 /// 假的新宿主收下所有会话后怎么办：`die` 退出，`hang` 一直不回话，`abort` 回 `HandoffAbort`，
-/// `die-after-commit` 回 `HandoffReady`、收到 `Commit` 后不回 `HandoffDone` 就退出。假的旧宿主收到
+/// `die-after-commit` 回 `HandoffReady`、收到 `Commit` 后不回 `HandoffDone` 就退出，`trickle` 一个字节一个
+/// 字节地慢慢回 `HandoffReady`、回完写 `fake.trickled` 后一直不动，`trickle-done` 照常回 `HandoffReady`、
+/// 收到 `Commit` 后同样慢慢回 `HandoffDone`、回完写 `fake.trickled` 后退出。假的旧宿主收到
 /// `HandoffReady` 后怎么办：`die` 退出，`disconnect` 只断开连接、进程留着。
 const FAKE: &str = "RUNODE_HANDOFF_FAKE";
 /// 假的旧宿主交出的那个会话。
@@ -135,7 +137,34 @@ fn role_fake_successor() {
             assert!(matches!(decode_part(&data).unwrap().0, HandoffPart::Commit { .. }));
             std::process::exit(0);
         }
+        "trickle" => {
+            trickle(&stream, &ClientMsg::HandoffReady, Duration::from_millis(100));
+            std::fs::write(dir.join("fake.trickled"), "1").unwrap();
+            loop {
+                thread::sleep(Duration::from_secs(3600));
+            }
+        }
+        "trickle-done" => {
+            send(&stream, &ClientMsg::HandoffReady);
+            let (data, _) = fd_passing::recv_with_fds(&stream).unwrap();
+            assert!(matches!(decode_part(&data).unwrap().0, HandoffPart::Commit { .. }));
+            trickle(&stream, &ClientMsg::HandoffDone, Duration::from_millis(500));
+            std::fs::write(dir.join("fake.trickled"), "1").unwrap();
+            std::process::exit(0);
+        }
         other => panic!("unknown fake {other}"),
+    }
+}
+
+/// 把一条控制消息一个字节一个字节地写出，每个字节之间隔 `pause`。写不出去（连接被断开）就不写了。
+fn trickle(stream: &UnixStream, message: &ClientMsg, pause: Duration) {
+    let mut data = Vec::new();
+    write_control(&mut data, message).unwrap();
+    for byte in data {
+        if (&*stream).write_all(&[byte]).is_err() {
+            return;
+        }
+        thread::sleep(pause);
     }
 }
 
@@ -803,6 +832,49 @@ fn a_stuck_or_giving_up_successor_is_rolled_back() {
     assert_counted(&mut again, id, count);
 }
 
+/// 新宿主一个字节一个字节地慢慢回 `HandoffReady`：每个字节都按时到，合起来却过了期限，旧宿主照样
+/// 杀掉它、回滚，不等它回完。会话都照常。
+#[test]
+fn a_successor_sending_ready_slowly_is_rolled_back() {
+    let dir = temp_dir("trickle");
+    let (old, socket) = old_here(&dir);
+    old.set_handoff_deadline(Duration::from_millis(500));
+    let mut cli = Peer::hello(&socket, false);
+    let count = 200;
+    let id = cli.spawn(&counter(&dir, "count.sh", count, 1, "0.01", 0));
+    wait_counted(&mut cli, id, 10);
+
+    let mut fake = Role::start("fake", &dir, &[(FAKE, "trickle")]);
+    assert_eq!(wait_file(&dir.join("fake.received")), "1");
+    assert_eq!(fake.wait().signal(), Some(libc::SIGKILL), "the slow successor must be killed");
+    assert!(!dir.join("fake.trickled").exists(), "the old host waited for the whole HandoffReady");
+    assert_handoff_goodbye(&cli);
+
+    let mut again = Peer::hello(&socket, false);
+    assert_counted(&mut again, id, count);
+}
+
+/// 新宿主收到 `Commit` 后一个字节一个字节地慢慢回 `HandoffDone`，合起来过了等它的期限：旧宿主当它没确认，
+/// 杀掉它、把会话接回来，不等它回完。
+#[test]
+fn a_successor_confirming_slowly_gives_the_sessions_back() {
+    let dir = temp_dir("trickledone");
+    let (_old, socket) = old_here(&dir);
+    let mut cli = Peer::hello(&socket, false);
+    let count = 200;
+    let id = cli.spawn(&counter(&dir, "count.sh", count, 1, "0.01", 0));
+    wait_counted(&mut cli, id, 10);
+
+    let mut fake = Role::start("fake", &dir, &[(FAKE, "trickle-done")]);
+    assert_eq!(wait_file(&dir.join("fake.received")), "1");
+    assert_eq!(fake.wait().signal(), Some(libc::SIGKILL), "the slow successor must be killed");
+    assert!(!dir.join("fake.trickled").exists(), "the old host waited for the whole HandoffDone");
+    assert_handoff_goodbye(&cli);
+
+    let mut again = Peer::hello(&socket, false);
+    assert_counted(&mut again, id, count);
+}
+
 /// 程序正在大量输出时交接：输出一行不丢、一行不重。程序一批一批地写满 PTY，交接完了测试才
 /// 叫它停（`stop` 文件），所以交接时它一定还在写；数到的行都留在回滚历史里（上限一万行）。
 #[test]
@@ -998,7 +1070,7 @@ fn twenty_handoffs_in_a_row_do_not_leak_descriptors() {
         }
     }
     assert!(fds.iter().all(|&count| count == fds[0]), "descriptors per host: {fds:?}");
-    // 每个新宿主收到 `Welcome` 后读到的连接对端都是旧宿主自报的进程号，见 `peer_pid_after_an_answer`。只有
+    // 每个新宿主收到 `Welcome` 后读到的连接对端都是旧宿主自报的进程号。只有
     // macOS 这样：Linux 上（`SO_PEERCRED`）读到的总是最早调 `listen` 的那个宿主，第二棒起新宿主都会记一笔对不上。
     #[cfg(target_os = "macos")]
     for n in 0..20 {

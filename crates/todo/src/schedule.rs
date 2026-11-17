@@ -146,7 +146,7 @@ pub(crate) fn local_tm(at: libc::time_t) -> Option<libc::tm> {
     // SAFETY: 两个指针都指向这里的局部变量，调用期间有效；函数只写 `tm`。
     #[cfg(unix)]
     let ok = !unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null();
-    // SAFETY: 同上。
+    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效；函数只写 `tm`。
     #[cfg(windows)]
     let ok = unsafe { libc::localtime_s(&raw mut tm, &raw const at) } == 0;
     ok.then_some(tm)

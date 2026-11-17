@@ -30,7 +30,7 @@ pub use process::process_args;
 pub(crate) use process::{group_members, process_name};
 pub(super) use vt_io::encode_reply;
 
-use super::{PtyEvent, PtySink, PtyWriter, WriterMsg, pty_size, set_current_thread_interactive};
+use super::{PtyEvent, PtySink, PtyWriter, WriterMsg, discard_queued, pty_size, set_current_thread_interactive};
 use crate::shell_integration;
 
 /// 伪控制台，shell 退出后由等它的线程取走关掉；之后改尺寸什么都不做。
@@ -60,13 +60,13 @@ pub struct Pty {
     /// 认出来的真正的 shell（`process::real_shell`），认出来以后不再变。
     real_shell: Cell<Option<u32>>,
     pub writer: PtyWriter,
-    /// 启动 shell 时交给集成脚本的报告口令，见 `shell_integration::prepare`。
+    /// 启动 shell 时交给集成脚本的报告口令。
     report_token: Option<String>,
     /// 交口令给集成脚本的文件，脚本读完自己删；shell 没读就退出时由 `Drop` 删。
     report_token_file: Option<PathBuf>,
-    /// 启动 shell 时另外设的环境变量，见 `set_env`。
+    /// 启动 shell 时另外设的环境变量。
     env: Vec<(OsString, OsString)>,
-    /// 启动 shell 时告诉集成脚本开哪些功能，见 `set_shell_features`。
+    /// 启动 shell 时告诉集成脚本开哪些功能。
     shell_features: String,
     /// 最近一次设给 PTY 的尺寸。
     size: Cell<GridSize>,
@@ -97,6 +97,7 @@ impl PtyWriter {
                         queued.fetch_sub(data.len(), Ordering::Relaxed);
                         if let Err(err) = written {
                             tracing::warn!("pty write failed: {err}");
+                            discard_queued(&rx, &queued);
                             return;
                         }
                     }
@@ -153,7 +154,7 @@ impl Pty {
         self.env.push((key.into(), value.into()));
     }
 
-    /// 启动 shell 时按 `settings` 告诉集成脚本开哪些功能，见 `shell_integration::features`。
+    /// 启动 shell 时按 `settings` 告诉集成脚本开哪些功能。
     pub fn set_shell_features(&mut self, settings: &TermSettings) {
         self.shell_features = shell_integration::features(settings);
     }
@@ -162,12 +163,12 @@ impl Pty {
         self.pending.is_none()
     }
 
-    /// shell 报告 PATH 等信息时要带的口令，见 `shell_integration::prepare`。
+    /// shell 报告 PATH 等信息时要带的口令。
     pub fn report_token(&self) -> Option<&str> {
         self.report_token.as_deref()
     }
 
-    /// 在 `cwd` 下启动 shell 和读线程，参数同 `spawn`。已经启动过时什么都不做。shell 起不来时
+    /// 在 `cwd` 下启动 shell 和读线程。已经启动过时什么都不做。shell 起不来时
     /// 什么都没动，还算没启动，可以换个参数再来。
     pub fn start(
         &mut self,

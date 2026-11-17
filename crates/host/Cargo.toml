@@ -17,12 +17,14 @@ anyhow.workspace = true
 # 认连上来的进程是谁（getpeereid）、拉起单独的宿主进程（posix_spawn）。
 libc.workspace = true
 tracing.workspace = true
-# 看板的库和定时，见 `todos`。
+# 看板的库和定时（`todos`）。
 runode-todo.workspace = true
 # 会话卡片上能跑的 Makefile 目标和 package.json 的 scripts。
 runode-tasks.workspace = true
 # 接回任务会话时各家 agent 怎么接着上次的对话。
 runode-agent.workspace = true
+# 单独跑的宿主把界面还没接过去的布局记进文件。
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # Windows 10 起有的 AF_UNIX socket，前端连宿主用。
@@ -39,7 +41,6 @@ windows-sys = { workspace = true, features = [
 [dev-dependencies]
 # 测试里假的旧宿主照着别的版本写交接消息，只写必填的字段；收发 `HostMsg` 和 `ClientMsg` 共用一对函数。
 serde.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

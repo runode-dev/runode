@@ -6,11 +6,11 @@
 //! 一些，程序输出得比宿主的 VT 处理得快时，被拖慢的是程序，不是内存。前端的请求不限量，发的
 //! 一方从不等。没有事的时候按 agent 识别和前台进程轮询要的时刻醒来。
 //!
-//! 宿主升级时会话交给新宿主（见 `handoff`，只在 Unix 上）：旧宿主这边 `Inbox::Prepare` 让会话停下来交出状态、
+//! 宿主升级时会话交给新宿主（只在 Unix 上）：旧宿主这边 `Inbox::Prepare` 让会话停下来交出状态、
 //! 冻结，`Inbox::Release` 提交（交出 PTY、线程结束）、`Inbox::Resume` 回滚；新宿主这边 `adopt`
 //! 接手，PTY 停在闸门上，`Inbox::Open` 提交后打开闸门，`Inbox::Release` 不接手了原样交回去。
 //!
-//! 程序读写剪贴板（OSC 52）的请求按配置办，要桌面办的交给最近和这个会话交互过的桌面，见 `clipboard`。
+//! 程序读写剪贴板（OSC 52）的请求按配置办，要桌面办的交给最近和这个会话交互过的桌面。
 
 use std::{
     any::Any,
@@ -61,7 +61,7 @@ use sizing::Viewer;
 /// 才写给程序。积压的输出按 `COALESCE_BYTES` 合成大块处理，这个量够会话线程短暂耽搁时读线程
 /// 不停下。
 const PTY_BACKLOG_BYTES: usize = 1024 * 1024;
-/// 会话线程一次最多把这么多字节相邻的 PTY 输出合成一块处理，见 `coalesce`。处理一块时不看
+/// 会话线程一次最多把这么多字节相邻的 PTY 输出合成一块处理。处理一块时不看
 /// 轮询的时刻和 `Handle::killed`，所以块的大小也是它们最多被耽搁多久：发布构建里 VT 喂一整块
 /// 很快；开发构建的 libghostty 是 Zig 的 Debug 构建，喂得极慢，前台进程和结束会话都跟着拖住，
 /// 所以开发构建合得小。
@@ -105,12 +105,12 @@ pub(crate) enum Inbox {
     Start {
         integration: IntegrationMode,
     },
-    /// 连接 `connection` 发来的输入帧，也算它的一次交互，见 `Runner::interact`。
+    /// 连接 `connection` 发来的输入帧，也算它的一次交互。
     Input {
         connection: u64,
         data: Vec<u8>,
     },
-    /// 连接 `connection` 的视图尺寸变了，见 `Runner::request_size`。
+    /// 连接 `connection` 的视图尺寸变了。
     Resize {
         connection: u64,
         size: GridSize,
@@ -121,20 +121,20 @@ pub(crate) enum Inbox {
     },
     ClearScreen,
     Theme(Arc<TermSettings>),
-    /// 连接上的前端连上来，见 `Subscribe`。
+    /// 连接上的前端连上来。
     Subscribe(Subscribe),
     /// 要这个会话在 `SessionList` 里的一项。
     Info(mpsc::Sender<SessionInfo>),
-    /// 读屏幕底部的文字（见 `HostSession::screen_text`），`command` 给了时改读倒数第几条命令的
-    /// 输出（见 `HostSession::command_output`）。回的是文字和开头是否已经被挤出回滚历史。
+    /// 读屏幕底部的文字，`command` 给了时改读倒数第几条命令的
+    /// 输出。回的是文字和开头是否已经被挤出回滚历史。
     ReadScreen {
         lines: Option<u32>,
         command: Option<u32>,
         reply: mpsc::Sender<Result<(String, bool)>>,
     },
-    /// 按宿主 VT 当前的模式编好这些键写给程序，见 `HostSession::encode_keys`。
+    /// 按宿主 VT 当前的模式编好这些键写给程序。
     Keys(Vec<KeyChord>),
-    /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序，见 `HostSession::encode_paste`。
+    /// 按宿主 VT 当前的模式把这段文字当粘贴写给程序。
     Paste(String),
     /// 把本机的这个路径转义后当粘贴写给程序。
     PastePath(PathBuf),
@@ -142,12 +142,11 @@ pub(crate) enum Inbox {
     /// `TYPE_AT_PROMPT_PATIENCE`（注入了集成的等 `TYPE_AT_INTEGRATED_PROMPT_PATIENCE`）。看板在新开的会话里打 agent 的命令用：shell 还在读配置时打进去的字
     /// 可能被配置里的程序读走。
     TypeAtPrompt(Vec<u8>),
-    /// 谁最近在操作这个会话，见 `SessionMeta::driver`：`Some` 是别的终端里的程序经 socket 做了
+    /// 谁最近在操作这个会话：`Some` 是别的终端里的程序经 socket 做了
     /// 一件事，排在那件事前面；`None` 是用户在界面里打了字，清掉记录。
     Driven(Option<Drive>),
     Kill,
-    /// 交接（旧宿主）：停下读 PTY、处理完已经读出来的输出，交出会话的状态，之后冻结，见
-    /// `Runner::hand_over`。
+    /// 交接（旧宿主）：停下读 PTY、处理完已经读出来的输出，交出会话的状态，之后冻结。
     #[cfg(unix)]
     Prepare(mpsc::Sender<Prepared>),
     /// 交出 PTY（不结束 shell），回交出时还没写进 PTY 的输入，线程随即结束：旧宿主在交接提交时
@@ -158,10 +157,10 @@ pub(crate) enum Inbox {
     #[cfg(unix)]
     Resume,
     /// 交接提交了（新宿主）：先把旧宿主没写进 PTY 的这些输入排进写队列，再打开读写线程的闸门；
-    /// 还在等提示符的从这时起重新等，同 `TypeAtPrompt`。
+    /// 还在等提示符再写的输入（`TypeAtPrompt`）从这时起重新等。
     #[cfg(unix)]
     Open(Unwritten),
-    /// 读写剪贴板的规矩改了，见 `ClientMsg::SetOptions`。
+    /// 读写剪贴板的规矩改了。
     Clipboard(ClipboardAccess),
     /// 界面回了会话经 `UiPort::ask` 请它办的事，`ui` 是那条请求的编号；界面没回就断开了时是
     /// `HostMsg::Error`。
@@ -169,6 +168,86 @@ pub(crate) enum Inbox {
         ui: u64,
         reply: Box<HostMsg>,
     },
+    /// 经 `Handle::send_input` 收下的一条输入（`Input`、`Keys`、`Paste`、`PastePath`）。`slot` 在它写进写队列
+    /// 之后、或者它被丢掉时放开。
+    Counted {
+        message: Box<Inbox>,
+        slot: InputSlot,
+    },
+}
+
+impl Inbox {
+    /// 记进 `PendingInput` 的大小：字节数，按键按个数算。
+    fn input_len(&self) -> usize {
+        match self {
+            Self::Input { data, .. } => data.len(),
+            Self::Keys(keys) => keys.len(),
+            Self::Paste(text) => text.len(),
+            Self::PastePath(path) => path.as_os_str().len(),
+            _ => 0,
+        }
+    }
+
+    /// 去掉 `Counted` 的外壳，名额随之放开。
+    #[cfg(unix)]
+    fn uncounted(self) -> Self {
+        match self {
+            Self::Counted { message, .. } => *message,
+            message => message,
+        }
+    }
+}
+
+/// 一个会话收下、还没写进 PTY 的输入最多这么多字节，超了拒绝，不阻塞收输入的连接线程。
+pub(crate) const MAX_PENDING_INPUT: usize = runode_protocol::MAX_PAYLOAD as usize;
+
+/// 一个会话收下、还没写进 PTY 的输入：收件箱里排着的（`InputSlot` 记着）加写队列里的（`pty::Queued`）。
+/// 程序不读输入时积压在写队列里，会话线程卡住或交接冻结着时积压在收件箱里。
+#[derive(Clone)]
+struct PendingInput {
+    inbox: Arc<AtomicUsize>,
+    queued: pty::Queued,
+}
+
+impl PendingInput {
+    fn new(queued: pty::Queued) -> Self {
+        Self { inbox: Arc::default(), queued }
+    }
+
+    /// 收下 `len` 字节，返回占着的名额；加上它超过 `MAX_PENDING_INPUT` 时为 `None`。一点都没积压时总收下，
+    /// 比上限还大的一条才发得出去。两份计数分开读，几条连接同时发时可能略超上限。
+    fn admit(&self, len: usize) -> Option<InputSlot> {
+        let queued = self.queued.bytes();
+        self.inbox
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |inbox| {
+                let pending = inbox.saturating_add(queued);
+                (pending == 0 || pending.saturating_add(len) <= MAX_PENDING_INPUT).then_some(inbox + len)
+            })
+            .ok()
+            .map(|_| InputSlot { inbox: self.inbox.clone(), len })
+    }
+}
+
+/// 收件箱里一条输入占的名额，丢掉时放开。
+pub(crate) struct InputSlot {
+    inbox: Arc<AtomicUsize>,
+    len: usize,
+}
+
+impl Drop for InputSlot {
+    fn drop(&mut self) {
+        self.inbox.fetch_sub(self.len, Ordering::AcqRel);
+    }
+}
+
+/// `Handle::send_input` 的结果。
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Delivery {
+    Sent,
+    /// 会话积压的输入到了上限，这条没收。
+    Full,
+    /// 会话线程已经结束。
+    Gone,
 }
 
 /// 开会话和接手会话共用的设置。
@@ -182,9 +261,9 @@ pub(crate) struct Setup {
     pub(crate) ui: UiPort,
     /// 一开始的读写剪贴板的规矩，之后改了经 `Inbox::Clipboard` 送来。
     pub(crate) clipboard: ClipboardAccess,
-    /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
+    /// 读剪贴板最多等界面多久。
     pub(crate) read_patience: Duration,
-    /// 会话线程拿着它，线程结束（`Pty` 丢掉、shell 杀掉）时才放开，见 `Threads`。
+    /// 会话线程拿着它，线程结束（`Pty` 丢掉、shell 杀掉）时才放开。
     pub(crate) alive: Alive,
 }
 
@@ -235,9 +314,9 @@ impl Drop for Alive {
     }
 }
 
-/// 别的终端里的程序对会话做了什么，见 `Inbox::Driven`。
+/// 别的终端里的程序对会话做了什么。
 pub(crate) struct Drive {
-    /// 发消息的程序所在的会话，见 `ClientMsg::Hello::session`。
+    /// 发消息的程序所在的会话。
     pub(crate) by: Option<SessionId>,
     pub(crate) action: DriveAction,
 }
@@ -248,7 +327,7 @@ pub(crate) struct Subscribe {
     /// 连上来的连接；它已经连着这个会话时，新的订阅换掉旧的。
     pub(crate) connection: u64,
     /// 前端视图的尺寸：要屏幕时算一次交互，先按尺寸归属改会话的尺寸，屏幕按改好的尺寸给；只看
-    /// 状态时只在还没有 owner 时改。见 `Runner::subscribe`。
+    /// 状态时只在还没有 owner 时改。
     pub(crate) size: Option<GridSize>,
     /// 要什么样的屏幕；`Snapshot` 编不出来时退成 `VtReplay`。
     pub(crate) mode: AttachMode,
@@ -257,7 +336,7 @@ pub(crate) struct Subscribe {
     pub(crate) start: Box<dyn FnOnce(Screen) -> Option<EventSink> + Send>,
     /// 是桌面的界面连上来，`SessionInfo::claimed` 据此算。
     pub(crate) desktop: bool,
-    /// 连接在 `Hello` 里报的设备名，见 `HostMsg::SizeOwner::owner`。
+    /// 连接在 `Hello` 里报的设备名。
     pub(crate) device: Option<String>,
 }
 
@@ -267,7 +346,7 @@ pub(crate) struct Screen {
     pub(crate) meta: SessionMeta,
     /// 宿主那份 VT 现在套着的主题。
     pub(crate) settings: TermSettings,
-    /// 实际给的屏幕，见 `HostMsg::Attached::mode`。
+    /// 实际给的屏幕。
     pub(crate) mode: AttachMode,
     /// 快照或 VT 重放的字节；`MetaOnly` 时为空。
     pub(crate) data: Vec<u8>,
@@ -286,9 +365,43 @@ pub(crate) struct Handle {
     driven: Arc<Mutex<bool>>,
     /// 会话线程写的 `Runner::desktop`。
     desktop: Arc<AtomicU64>,
+    /// 为空的只有测试里的 `detached`，不限。
+    input: Option<PendingInput>,
 }
 
 impl Handle {
+    /// 发一条输入（`Inbox::Input`、`Keys`、`Paste`、`PastePath`），积压的输入到了上限时不发。`admitted` 只在
+    /// 收下时调用，在它里面经这个会话的收件箱发的消息排在这条输入前面；调用时不拿着 `registry` 的锁。
+    pub(crate) fn send_input(&self, message: Inbox, admitted: impl FnOnce()) -> Delivery {
+        let slot = match &self.input {
+            Some(input) => match input.admit(message.input_len()) {
+                Some(slot) => Some(slot),
+                None => return Delivery::Full,
+            },
+            None => None,
+        };
+        admitted();
+        let message = match slot {
+            Some(slot) => Inbox::Counted { message: Box::new(message), slot },
+            None => message,
+        };
+        if self.inbox.send(message).is_ok() { Delivery::Sent } else { Delivery::Gone }
+    }
+
+    /// 测试用：假装收下了 `len` 字节还没写进 PTY 的输入，丢掉返回的名额时放开。
+    #[cfg(test)]
+    pub(crate) fn pretend_pending_input(&self, len: usize) -> InputSlot {
+        let input = self.input.as_ref().expect("a session thread's handle");
+        input.inbox.fetch_add(len, Ordering::AcqRel);
+        InputSlot { inbox: input.inbox.clone(), len }
+    }
+
+    /// 测试用：发过 `Inbox::Driven(Some(..))`、之后还没清过。
+    #[cfg(test)]
+    pub(crate) fn driven(&self) -> bool {
+        *self.driven.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// 发一条消息，会话线程已经结束时返回 false。没被标过的会话收到 `Inbox::Driven(None)` 时
     /// 什么都不发，返回 true。
     pub(crate) fn send(&self, message: Inbox) -> bool {
@@ -321,7 +434,7 @@ impl Handle {
     /// 测试用：发到 `inbox` 的一端，没有会话线程，由测试自己收、自己回话。
     #[cfg(all(test, unix))]
     pub(crate) fn detached(inbox: mpsc::Sender<Inbox>) -> Self {
-        Self { inbox, killed: Arc::default(), driven: Arc::default(), desktop: Arc::default() }
+        Self { inbox, killed: Arc::default(), driven: Arc::default(), desktop: Arc::default(), input: None }
     }
 }
 
@@ -333,6 +446,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
     let credits = Arc::new(Credits::default());
     let sink = pty_sink(&inbox, &credits);
     let mut pty = Pty::open(options.size, sink)?;
+    let input = PendingInput::new(pty.writer.queued());
     for (key, value) in env {
         pty.set_env(key, value);
     }
@@ -348,7 +462,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
     thread::Builder::new()
         .name(format!("session-{id}"))
         .spawn(move || {
-            // 最后丢掉，排在 `Pty` 后面，见 `Alive`。
+            // 最后丢掉，排在 `Pty` 后面。
             let _alive = alive;
             pty::set_current_thread_interactive();
             // 线程结束时放开读线程，免得它一直等着积压的块被处理。
@@ -370,7 +484,7 @@ pub(crate) fn spawn(setup: Setup, options: SpawnOptions) -> Result<Handle> {
         })
         .context("failed to start the session thread")?;
     created.recv().map_err(|_| anyhow!("the session thread ended while starting"))??;
-    Ok(Handle { inbox, killed, driven: Arc::default(), desktop })
+    Ok(Handle { inbox, killed, driven: Arc::default(), desktop, input: Some(input) })
 }
 
 /// 读线程交 PTY 输出的 `PtySink`：先记上字节数（积压太多就等），再排进收件箱。
@@ -385,7 +499,7 @@ struct Runner {
     id: SessionId,
     session: HostSession,
     subscribers: Vec<Subscriber>,
-    /// 带着屏幕连着的连接，有资格决定尺寸，见 `Viewer`。
+    /// 带着屏幕连着的连接，有资格决定尺寸。
     viewers: Vec<Viewer>,
     /// 决定会话尺寸的连接（`viewers` 里的一个）：最近交互过的那个。还没有谁交互过、或者没有
     /// `viewers` 时为空，这时谁的 `Inbox::Resize` 都照旧应用，只有一个前端时和没有尺寸归属一样。
@@ -396,7 +510,7 @@ struct Runner {
     redactor: ReportRedactor,
     /// 宿主那份 VT 现在套着的主题：最近一次 `Inbox::Theme` 的，还没有过时是开出来时的。
     settings: Arc<TermSettings>,
-    /// `Inbox::Start` 时启动的程序，见 `SpawnOptions::shell`。
+    /// `Inbox::Start` 时启动的程序。
     shell: Option<String>,
     credits: Arc<Credits>,
     /// 前端要清屏，等 VT 回到 ground 再清。
@@ -408,19 +522,21 @@ struct Runner {
     /// 上次因为有输出而重读前台进程的时刻，以及推迟到的那次。
     foreground_read_at: Instant,
     foreground_due: Option<Instant>,
-    /// 请界面办事的一头，见 `Setup::ui`。
+    /// 请界面办事的一头。
     ui: UiPort,
     /// `ui_connection` 的结果，0 表示没有；每处理完一条消息写一次，别的线程经 `Handle::desktop` 读。
     desktop: Arc<AtomicU64>,
-    /// 读写剪贴板的规矩，见 `set_clipboard`。
+    /// 读写剪贴板的规矩。
     clipboard: ClipboardAccess,
-    /// 读剪贴板最多等界面多久，见 `Setup::read_patience`。
+    /// 读剪贴板最多等界面多久。
     read_patience: Duration,
-    /// 在等界面回的那个读剪贴板的请求，见 `clipboard`。
+    /// 在等界面回的那个读剪贴板的请求。
     clipboard_read: Option<clipboard::PendingRead>,
-    /// 上次公布的 agent 状态和前台是不是 shell，见 `publish_meta`。
+    /// 在等界面回的那个写剪贴板的请求的编号；一个会话同时只等一条，来了新的就撤掉旧的。
+    clipboard_write: Option<u64>,
+    /// 上次公布的 agent 状态和前台是不是 shell。
     board_state: Option<(Option<AgentState>, bool)>,
-    /// 等着提示符出来再写的字节和收到请求的时刻，见 `Inbox::TypeAtPrompt`、`type_ahead_by`。
+    /// 等着提示符出来再写的字节和收到请求的时刻。
     type_ahead: Option<(Vec<u8>, Instant)>,
 }
 
@@ -454,6 +570,7 @@ impl Runner {
             clipboard: ClipboardAccess::default(),
             read_patience: CLIPBOARD_READ_PATIENCE,
             clipboard_read: None,
+            clipboard_write: None,
             board_state: None,
             type_ahead: None,
         };
@@ -463,7 +580,7 @@ impl Runner {
     }
 
     fn run(mut self, inbox: &mpsc::Receiver<Inbox>, killed: &Arc<AtomicBool>) {
-        // 合并输出时多取出来的那条消息，下一轮先办它，见 `coalesce`。
+        // 合并输出时多取出来的那条消息，下一轮先办它。
         let mut stash = None;
         loop {
             let message = match stash.take() {
@@ -530,8 +647,8 @@ impl Runner {
         true
     }
 
-    /// 这个会话要界面办的事交给哪条桌面的连接：连着这个会话的桌面里最近交互过的（尺寸归属里的交互，见
-    /// `Runner::interact`）；都没交互过时取最近连上这个会话的；没有桌面连着这个会话时为 `None`。
+    /// 这个会话要界面办的事交给哪条桌面的连接：连着这个会话的桌面里最近交互过的（尺寸归属里的交互）；
+    /// 都没交互过时取最近连上这个会话的；没有桌面连着这个会话时为 `None`。
     fn ui_connection(&self) -> Option<u64> {
         let last_active = |connection: u64| {
             self.viewers.iter().find(|viewer| viewer.connection == connection).map_or(0, |viewer| viewer.last_active)
@@ -745,6 +862,11 @@ impl Runner {
             }
             Inbox::Clipboard(clipboard) => self.set_clipboard(clipboard),
             Inbox::UiAnswer { ui, reply } => self.ui_answered(ui, *reply),
+            // 写进写队列以后才放开名额，中间不会有一段两边都没记着。
+            Inbox::Counted { message, slot } => {
+                self.handle(*message);
+                drop(slot);
+            }
             // 交接以外的时候收到的：`Prepare` 在 `run` 里办，丢掉回话的一端，等的一方当会话没了；
             // `Release` 在 `step` 里办；没有冻结着时 `Resume` 没什么可做。
             Inbox::Kill => {}
@@ -777,7 +899,7 @@ impl Runner {
             }
         }
         // 屏幕给的是之后收抹过的输出的前端：输出流正停在一条报告里时，宿主这份 VT 的续接里
-        // 带着口令，见 `HostSession::redacted_snapshot`。
+        // 带着口令。
         let (mode, data) = match mode {
             AttachMode::MetaOnly => (mode, Vec::new()),
             AttachMode::Snapshot => match self.session.redacted_snapshot(&self.redactor) {
@@ -801,7 +923,7 @@ impl Runner {
         {
             return;
         }
-        // 连接上的前端一律收抹过的输出，见 `ReportRedactor`：别的进程拿不到 shell 集成报告的
+        // 连接上的前端一律收抹过的输出：别的进程拿不到 shell 集成报告的
         // 口令。桌面经 `Host::connect_pair` 连上来时也一样：它那份 VT 不认这些报告（标题、目录、
         // shell 的名字都从 `Meta` 来），抹过的流喂出来的状态和宿主的一样。
         self.subscribers.push(Subscriber { connection, sink, desktop });
@@ -880,7 +1002,7 @@ impl Runner {
         self.clipboard_tick(now);
     }
 
-    /// 重读前台进程，排好下一次轮询；shell 还没启动时不排，见 `next_poll`。
+    /// 重读前台进程，排好下一次轮询；shell 还没启动时不排。
     fn refresh_foreground(&mut self, now: Instant) {
         self.session.refresh_foreground();
         self.foreground_read_at = now;
@@ -923,7 +1045,7 @@ struct Subscriber {
     /// 连接的编号，`Inbox::Detach` 按它找。
     connection: u64,
     sink: EventSink,
-    /// 是桌面的界面，见 `SessionInfo::claimed`。
+    /// 是桌面的界面。
     desktop: bool,
 }
 
@@ -1030,6 +1152,37 @@ mod tests {
         }
         let session = HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap();
         Runner::new(SessionId(1), session, Some(CAT.into()), TermSettings::default(), Arc::default())
+    }
+
+    /// 程序不读输入时积压在写队列里的输入也算进上限。
+    #[cfg(unix)]
+    #[test]
+    fn input_queued_for_the_pty_counts_against_the_limit() {
+        let mut pty = Pty::open(SIZE, Box::new(|_| true)).unwrap();
+        pty.start(Some(CAT), None, IntegrationMode::Off).unwrap();
+        let handoff = pty.release().unwrap();
+        // 停在闸门上的 PTY 一个字节都不写，排进写队列的一直积压着，像不读输入的程序。
+        let paused = Pty::adopt_paused(handoff, Box::new(|_| true)).unwrap();
+        let input = PendingInput::new(paused.writer.queued());
+        assert!(input.admit(1).is_some());
+        paused.writer.send(vec![b'x'; MAX_PENDING_INPUT]);
+        assert!(input.admit(1).is_none());
+    }
+
+    /// 收件箱里的名额在输入写进写队列以后放开，没办就丢掉的也放开；什么都没积压时比上限还大的一条也收。
+    #[test]
+    fn counted_input_is_released_once_written_or_dropped() {
+        let mut pty = Pty::open(SIZE, Box::new(|_| true)).unwrap();
+        pty.start(Some(CAT), None, IntegrationMode::Off).unwrap();
+        let input = PendingInput::new(pty.writer.queued());
+        let session = HostSession::new(SIZE, pty, None, &TermSettings::default()).unwrap();
+        let mut runner = Runner::new(SessionId(1), session, Some(CAT.into()), TermSettings::default(), Arc::default());
+        let slot = input.admit(MAX_PENDING_INPUT + 1).expect("nothing is pending");
+        assert!(input.admit(1).is_none());
+        drop(slot);
+        let slot = input.admit(3).unwrap();
+        runner.handle(Inbox::Counted { message: Box::new(Inbox::Paste("ls\r".into())), slot });
+        assert_eq!(input.inbox.load(Ordering::Acquire), 0);
     }
 
     #[test]

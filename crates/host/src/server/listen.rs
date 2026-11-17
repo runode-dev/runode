@@ -203,8 +203,7 @@ fn accept_ready(listener: &UnixListener) -> (Vec<UnixStream>, bool) {
 }
 
 impl Host {
-    /// 在 `socket` 上监听别的进程来的前端，之后在后台线程里一直接受连接，直到宿主退出（见
-    /// `Host::run_until_idle`）。
+    /// 在 `socket` 上监听别的进程来的前端，之后在后台线程里一直接受连接，直到宿主退出。
     ///
     /// `lock` 是同一目录里的锁文件：拿到它的进程才监听，另一个宿主已经在监听时返回错误。
     /// 拿到锁以后，`socket` 上已有的文件只能是上次没清掉的，删掉重建。宿主退出时删掉 `socket`
@@ -307,8 +306,7 @@ pub fn bind_fresh(socket: &Path) -> io::Result<UnixListener> {
     }
 }
 
-/// 把 socket 文件的权限设成只有自己能读写。Windows 上的 socket 文件继承所在目录的权限，见
-/// `Dirs::create_runtime_dir`。
+/// 把 socket 文件的权限设成只有自己能读写。Windows 上的 socket 文件继承所在目录的权限。
 fn restrict(socket: &Path) -> Result<()> {
     #[cfg(unix)]
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;

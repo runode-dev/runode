@@ -43,7 +43,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 包装：把 FIFO（`$0`）开到 fd 3（`STATUS_FD`）上，写一行 pid，再换成 `"$@"`。
 const KEEP_STATUS: &str = r#"exec 3>"$0" && echo $$ >&3 && exec "$@""#;
-/// 同 `KEEP_STATUS`，写完 pid 就关掉 fd 3。
+/// 包装：把 FIFO（`$0`）开到 fd 3（`STATUS_FD`）上，写一行 pid 就关掉 fd 3，再换成 `"$@"`。
 const CLOSE_STATUS: &str = r#"exec 3>"$0" && echo $$ >&3 && exec 3>&- && exec "$@""#;
 
 /// 这个进程提交过几个任务，拼进 Label。
@@ -128,7 +128,7 @@ fn access_executable(path: &Path) -> io::Result<()> {
 
 fn make_fifo(path: &Path) -> io::Result<()> {
     let path = CString::new(path.as_os_str().as_bytes())?;
-    // SAFETY: 同 `access_executable`。
+    // SAFETY: 路径以 NUL 结尾，调用期间活着。
     if unsafe { libc::mkfifo(path.as_ptr(), 0o600) } != 0 {
         return Err(io::Error::last_os_error());
     }

@@ -137,7 +137,7 @@ pub(super) fn windows_quote(arg: &str) -> String {
 }
 
 /// 把 `arg` 引成批处理文件收得到的一个参数：cmd 先读一遍命令行，双引号里的 `&`、`|` 才不分隔命令，所以
-/// 双引号写成两个（C 运行库在引号里把它读成一个），紧挨着它的反斜杠照 `windows_quote` 加倍；`%` 后面插一段
+/// 双引号写成两个（C 运行库在引号里把它读成一个），紧挨着它的反斜杠按 C 运行库的规矩加倍；`%` 后面插一段
 /// 展开为空的 `%cd:~,%`，cmd 就不把 `%名字%` 换成环境变量。cmd 读到换行就不往下读了，换行换成空格。
 pub(super) fn batch_quote(arg: &str) -> String {
     let mut quoted = String::with_capacity(arg.len() + 2);

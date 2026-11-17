@@ -515,7 +515,7 @@ fn oversized_grids_are_refused() {
 }
 
 /// 程序用 CSI 8 t 要求改窗口尺寸：宿主不改会话尺寸，跟在含这条序列的那块输出后面转一条 `ResizeWindow`。
-/// 同一块里先后几次的合并见 `merge_window_resize` 的测试：PTY 不保证两次写进同一块，这里只发一次。
+/// PTY 不保证两次写进同一块，所以这里只发一次，不测同一块里先后几次的合并。
 #[cfg(unix)]
 #[test]
 fn a_window_resize_request_follows_its_output() {

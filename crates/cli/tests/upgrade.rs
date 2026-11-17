@@ -110,7 +110,19 @@ fn input_cut_off_by_an_upgrade_may_have_been_delivered() {
 #[test]
 fn a_sent_command_cut_off_while_waiting_is_not_run_again() {
     let at_prompt = SessionMeta { foreground_is_shell: true, prompt_cwd: Some("/tmp".into()), ..meta("zsh", None) };
-    let fake = host("sendcmdup", at_prompt, vec![handoff()], Some(""));
+    let info = at_prompt.clone();
+    let fake = FakeHost::start_with_input("sendcmdup", move |received| match received {
+        Received::Control(ClientMsg::ListSessions) => {
+            vec![HostMsg::SessionList { sessions: vec![session(id(S), info.clone())] }]
+        }
+        Received::Control(ClientMsg::Attach { id, .. }) => vec![attached(*id, at_prompt.clone())],
+        Received::Control(ClientMsg::ReadScreen { id, .. }) => {
+            vec![HostMsg::ScreenText { req: None, id: *id, text: String::new(), truncated: false }]
+        }
+        // 按下回车、命令跑起来以后才升级。
+        Received::Input(_, data) if data == b"\r" => vec![handoff()],
+        _ => vec![],
+    });
     let (code, _, err) = run("send 5e55 git push --enter --wait --timeout 5", &fake.env);
     assert_eq!(code, exit::FAILED, "{err}");
     assert!(err.contains("--for command"), "it waited for the command: {err}");

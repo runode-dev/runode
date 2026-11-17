@@ -41,7 +41,7 @@ use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMod
 use notify::Notifier;
 use reader::Reader;
 
-use super::{PtySink, PtyWriter, WriterMsg, pty_size, set_current_thread_interactive};
+use super::{PtySink, PtyWriter, WriterMsg, discard_queued, pty_size, set_current_thread_interactive};
 use crate::shell_integration;
 
 /// 写线程写不进去（程序不读输入）时，隔这么久看一眼是不是要交接了。
@@ -132,7 +132,7 @@ impl PtyWriter {
     fn close(&self, thread: WriterThread) {
         let (done, _) = mpsc::channel();
         let _ = self.0.send(WriterMsg::Finish(done));
-        // 和 `finish` 一样先排上 `Finish` 再置标记。
+        // 先排上 `Finish` 再置标记：写线程看到标记后收队列，一定收得到它。
         thread.stop.store(true, Ordering::Release);
     }
 
@@ -167,6 +167,7 @@ fn write_loop(master: &OwnedFd, rx: &mpsc::Receiver<WriterMsg>, stop: &AtomicBoo
                     }
                     Written::Failed(err) => {
                         tracing::warn!("pty write failed: {err}");
+                        discard_queued(rx, queued);
                         return;
                     }
                 }
@@ -1092,6 +1093,34 @@ mod tests {
         assert_eq!(writer.1.load(Ordering::Relaxed), queued + 5);
 
         gate.set(GateState::Abandoned);
+        drop(writer);
+        thread.handle.join().unwrap();
+    }
+
+    /// 写出错时写线程结束，排在后面没写的从计数里减掉，不再算积压；之后写的丢掉，也不计数。
+    #[test]
+    fn a_failed_write_clears_the_queued_count() {
+        // 只读打开的描述符写不进去。
+        let read_only: OwnedFd = std::fs::File::open("/dev/null").unwrap().into();
+        let gate = Gate::closed();
+        let (writer, thread) = PtyWriter::start(Arc::new(read_only), Some(gate.clone())).unwrap();
+        for chunk in [&b"one"[..], b"two", b"three"] {
+            writer.write(chunk);
+        }
+        let queued = writer.queued();
+        assert_eq!(queued.bytes(), 11);
+        gate.set(GateState::Open);
+        let settled = |queued: &super::super::Queued| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while queued.bytes() != 0 && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            queued.bytes()
+        };
+        assert_eq!(settled(&queued), 0);
+        // 出错以后才排进来的也减掉，计数不会一直高着。
+        writer.write(b"late");
+        assert_eq!(settled(&queued), 0);
         drop(writer);
         thread.handle.join().unwrap();
     }

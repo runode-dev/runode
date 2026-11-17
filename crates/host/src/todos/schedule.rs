@@ -8,7 +8,10 @@
 //! 回绝，但不记到点的时刻。
 
 use std::{
-    sync::{Arc, Weak},
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -25,11 +28,17 @@ pub(super) const MAX_SLEEP: Duration = Duration::from_secs(30);
 const START_RETRY_AFTER: [Duration; 2] = [Duration::from_secs(60), Duration::from_secs(5 * 60)];
 
 /// 定时的线程：标完成做完了的自动完成任务，停下卡住的任务，清完成了的任务的工作树，到点的定时开任务，开始排着队的
-/// 任务，再睡到下一次该看的时候、最多 `MAX_SLEEP`，看板变了时提前醒。宿主没了就结束。
+/// 任务，再睡到下一次该看的时候、最多 `MAX_SLEEP`，看板变了时提前醒。每次醒来先看库有没有被别的进程改过，
+/// 改过就当看板变了。宿主没了就结束。
 pub(super) fn run(todos: &Arc<Todos>, shared: &Weak<Shared>) {
     loop {
-        let seen = todos.generation();
         let Some(strong) = shared.upgrade() else { return };
+        let changed =
+            todos.unreadable.board.check(todos.changed_elsewhere(), "cannot tell whether the todo board changed");
+        if changed == Some(true) {
+            strong.todos_changed();
+        }
+        let seen = todos.generation();
         let settle = strong.finish_idle_todos();
         strong.fail_stuck_todos();
         strong.sweep_worktrees();
@@ -56,12 +65,9 @@ impl Shared {
         if self.todos_writable().is_err() {
             return (None, None);
         }
-        let schedules = match self.todos.with_db(|db| db.list_schedules()) {
-            Ok(schedules) => schedules,
-            Err(err) => {
-                tracing::warn!("cannot read the schedules: {err}");
-                return (None, None);
-            }
+        let read = self.todos.with_db(|db| db.list_schedules());
+        let Some(schedules) = self.todos.unreadable.schedules.check(read, "cannot read the schedules") else {
+            return (None, None);
         };
         let now = unix_now();
         let mut soonest: Option<u64> = None;
@@ -87,12 +93,9 @@ impl Shared {
             return (None, None);
         }
         let now = unix_now();
-        let (todos, limit) = match self.todos.with_db(|db| Ok((db.list_todos(now)?, db.max_running()?))) {
-            Ok(read) => read,
-            Err(err) => {
-                tracing::warn!("cannot read the todos: {err}");
-                return (None, None);
-            }
+        let read = self.todos.with_db(|db| Ok((db.list_todos(now)?, db.max_running()?)));
+        let Some((todos, limit)) = self.todos.unreadable.todos.check(read, "cannot read the todos") else {
+            return (None, None);
         };
         let waiting: Vec<&Todo> =
             todos.iter().filter(|todo| todo.queued && todo.started.is_none() && todo.done_at.is_none()).collect();
@@ -203,6 +206,10 @@ impl Shared {
     /// 要让路（`held_back`）时跳过，读不了库时下一轮再看。
     fn fire(&self, schedule: &Schedule, now: u64) {
         let _firing = self.todos.firing();
+        // 拿着 `firing` 时已不能改看板的不消费定时：放开 `firing` 以后不再有消费了定时的命令起来。
+        if self.todos_writable().is_err() {
+            return;
+        }
         match self.held_back(&schedule.id, now) {
             Ok(None) => {}
             Ok(Some(held)) => {
@@ -273,9 +280,10 @@ impl Shared {
     }
 
     /// 手动立即触发定时 `id` 一次（`Store::fire_schedule_now`）：没有 `run` 的加一张排着队的任务，由定时的线程
-    /// 照常开始；有的另起线程跑命令。要让路（`held_back`）、读不了库、定时不存在时出错。
+    /// 照常开始；有的另起线程跑命令。已不能改看板、要让路（`held_back`）、读不了库、定时不存在时出错。
     pub(super) fn fire_now(&self, id: &str) -> Result<(), String> {
         let _firing = self.todos.firing();
+        self.todos_writable()?;
         let now = unix_now();
         match self.held_back(id, now)? {
             None => {}
@@ -301,10 +309,99 @@ impl Shared {
     }
 }
 
+/// 定时的线程每轮都要读的几处库：库读不到时每处连着读不到只记一次，读到过一次以后再读不到再记。
+#[derive(Default)]
+pub(super) struct Unreadable {
+    /// `Todos::changed_elsewhere`。
+    board: WarnOnce,
+    /// `Shared::fire_due` 读定时。
+    schedules: WarnOnce,
+    /// `Shared::start_queued` 读任务。
+    todos: WarnOnce,
+}
+
+/// 一处读库上次读失败了。
+#[derive(Default)]
+struct WarnOnce(AtomicBool);
+
+impl WarnOnce {
+    /// 读成功时返回读到的；失败时为空，上次没失败的话记一笔：`what` 加上错误。
+    fn check<T>(&self, read: Result<T, String>, what: &str) -> Option<T> {
+        match read {
+            Ok(read) => {
+                self.0.store(false, Ordering::Relaxed);
+                Some(read)
+            }
+            Err(err) => {
+                if !self.0.swap(true, Ordering::Relaxed) {
+                    tracing::warn!("{what}: {err}");
+                }
+                None
+            }
+        }
+    }
+}
+
 /// 定时这次要让路的原因。
 enum HeldBack {
     /// 上次的命令还在跑。
     Running,
     /// 上次开出的这张任务还挡着。
     Todo(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use runode_protocol::{
+        BuildId,
+        todo::{TodoSpec, When},
+    };
+
+    use super::*;
+    use crate::{Host, Stopped, server::Phase};
+
+    /// 连着读失败只在第一次记下，读成功一次后复位。
+    #[test]
+    fn a_failing_read_is_warned_once_until_it_succeeds() {
+        let warned = WarnOnce::default();
+        let failed = || Err::<u8, _>("locked".to_owned());
+        assert_eq!(warned.check(failed(), "read"), None);
+        assert!(warned.0.load(Ordering::Relaxed));
+        assert_eq!(warned.check(failed(), "read"), None);
+        assert_eq!(warned.check(Ok(7), "read"), Some(7));
+        assert!(!warned.0.load(Ordering::Relaxed));
+    }
+
+    /// 不能改看板（交出了会话、要退出了）时到点的定时不触发，留着不动；能改时照常触发。
+    #[test]
+    fn a_due_schedule_does_not_fire_while_the_board_is_not_writable() {
+        let dir = std::env::temp_dir().join(format!("rnh-{}-fire-unwritable", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host = Host::new(BuildId("test".into()));
+        let shared = &host.shared;
+        // 不经 `Host::serve_todos`，不起定时的线程，到点的定时只由这里触发。
+        shared.todos.lock().path = Some(dir.join("todos.db"));
+        let spec = TodoSpec { title: "t".into(), dir: dir.clone(), agent: "true".into(), ..TodoSpec::default() };
+        let when = When::Every { minutes: 60 };
+        let id = shared.todos.with_db(|db| db.add_schedule(&spec, &when, None, None, 1)).unwrap();
+        let current = || {
+            let schedules = shared.todos.with_db(|db| db.list_schedules()).unwrap();
+            schedules.into_iter().find(|schedule| schedule.id == id).unwrap()
+        };
+        let todos = || shared.todos.with_db(|db| db.list_todos(unix_now())).unwrap().len();
+        let before = current();
+        let now = unix_now();
+        for stopped in [Stopped::Handoff, Stopped::Shutdown, Stopped::Idle] {
+            shared.peers().phase = Phase::Stopping(stopped);
+            shared.fire(&current(), now);
+            assert_eq!(current().last_fired, before.last_fired, "fired while {stopped:?}");
+            assert_eq!(todos(), 0, "added a todo while {stopped:?}");
+        }
+        shared.peers().phase = Phase::Serving;
+        shared.fire(&current(), now);
+        assert_eq!(current().last_fired, now);
+        assert_eq!(todos(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

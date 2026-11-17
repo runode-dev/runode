@@ -1,6 +1,6 @@
 //! 拉起单独一个进程的宿主（`runode --host`）：和拉起它的 app 脱开，app 退出后照样跑着。升级时
-//! 拉起的接手旧宿主的新宿主（`runode --host --take-over`）见 `launch_successor`。macOS 上经 launchd
-//! 拉起，宿主不留在 app 的 coalition 里，见 `launchd`；用不了 launchd 时和别的 Unix 一样直接
+//! 也拉起接手旧宿主的新宿主（`runode --host --take-over`，`launch_successor`）。macOS 上经 launchd
+//! 拉起，宿主不留在 app 的 coalition 里；用不了 launchd 时和别的 Unix 一样直接
 //! `posix_spawn`（`detach`）。Windows 上不接 app 的控制台、自成一个进程组地拉起。
 
 #[cfg(target_os = "macos")]
@@ -60,7 +60,7 @@ fn environ() -> *const *mut c_char {
 
 /// 用 `exe --host` 拉起宿主进程，返回它的 pid，不等它连上 socket。
 ///
-/// 子进程和拉起它的 app 脱开：不在 app 的会话和进程组里，不继承 app 的描述符，见 `detach` 和 `launchd`。
+/// 子进程和拉起它的 app 脱开：不在 app 的会话和进程组里，不继承 app 的描述符。
 ///
 /// 连上它（每隔几毫秒试一次 socket，撞上它正因空闲退出时重来）是调用方的事。
 pub fn launch(exe: &Path) -> io::Result<u32> {
@@ -114,7 +114,7 @@ fn launch_with(exe: &Path, arg: &CStr) -> io::Result<u32> {
     Ok(child.id())
 }
 
-/// 新宿主在这个描述符上报告接手的结果，见 `launch_successor`。
+/// 新宿主在这个描述符上报告接手的结果。
 #[cfg(unix)]
 pub const STATUS_FD: libc::c_int = 3;
 
@@ -129,7 +129,7 @@ pub struct Successor {
 
 /// 升级时用 `exe --host --take-over` 拉起新宿主，让它接手 socket 上旧宿主的会话，不等它接完。
 ///
-/// 和 `launch` 一样与 app 脱开，只多继承下面这一个描述符；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
+/// 子进程和 app 脱开：不在 app 的会话和进程组里，app 的描述符只继承下面这一个；另外开一根管道（macOS 上经 launchd 拉起时是 FIFO），写端接到新进程的 `STATUS_FD` 上，读端
 /// 交给调用方读结果。这边不留写端，新宿主一退出调用方就读到结尾。
 #[cfg(unix)]
 pub fn launch_successor(exe: &Path) -> io::Result<Successor> {
@@ -190,11 +190,12 @@ pub unsafe fn disclaim_responsibility() -> io::Result<()> {
         // SAFETY: 调用方保证还没有别的线程。
         unsafe { std::env::set_var(MARK, "1") };
         let mut pid: libc::pid_t = 0;
-        // SAFETY: 同 `detach`；成功时这个进程换成新的映像，不再回到这里。
+        // SAFETY: 路径和参数都是以 NUL 结尾的字符串，参数表以空指针结尾，在调用期间都活着；环境表是进程
+        // 自己的 `environ`，posix_spawn 只读它。成功时这个进程换成新的映像，不再回到这里。
         let failed = check(unsafe {
             libc::posix_spawn(&mut pid, program.as_ptr(), ptr::null(), attr.as_ptr(), argv.as_ptr(), environ())
         });
-        // SAFETY: 同上。
+        // SAFETY: 调用方保证还没有别的线程。
         unsafe { std::env::remove_var(MARK) };
         failed
     }
@@ -328,7 +329,7 @@ struct SpawnAttr(libc::posix_spawnattr_t);
 #[cfg(unix)]
 impl SpawnAttr {
     fn new() -> io::Result<Self> {
-        // SAFETY: 同 `FileActions::new`。
+        // SAFETY: 不论是指针（macOS）还是结构体（Linux），全零都是合法的待初始化值。
         let mut attr: libc::posix_spawnattr_t = unsafe { std::mem::zeroed() };
         // SAFETY: 输出参数指向本地变量。
         check(unsafe { libc::posix_spawnattr_init(&mut attr) })?;

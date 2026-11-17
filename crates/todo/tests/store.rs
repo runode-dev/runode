@@ -310,6 +310,30 @@ fn firing_a_schedule_run_marks_it_fired() {
     assert!(store.list_todos(1_000).unwrap().is_empty());
 }
 
+/// 到点交出的一次性定时放回库里以后照样到了点，再到点时又交出来；已经在库里的不再放一份。
+#[test]
+fn a_fired_once_schedule_can_be_put_back() {
+    let mut store = Store::open(&temp_db("restore")).unwrap();
+    let once = store.add_schedule(&spec("deploy"), &When::Once { at: 200 }, Some("check"), Some(5), 100).unwrap();
+    let fired = store.fire_schedule_run(&once, 250).unwrap().unwrap();
+    assert!(store.list_schedules().unwrap().is_empty());
+
+    assert!(store.restore_schedule(&fired).unwrap());
+    let restored = store.list_schedules().unwrap();
+    assert_eq!(restored.len(), 1);
+    let restored = &restored[0];
+    assert_eq!(
+        (restored.id.as_str(), restored.run.as_deref(), restored.run_timeout),
+        (once.as_str(), Some("check"), Some(5))
+    );
+    assert_eq!((restored.last_fired, restored.paused), (100, false));
+    assert_eq!(runode_todo::next_fire(&restored.when, restored.last_fired), Some(200));
+    assert!(restored.last_run.is_none());
+    assert!(!store.restore_schedule(&fired).unwrap());
+
+    assert!(store.fire_schedule_run(&once, 300).unwrap().is_some());
+}
+
 /// 跑完的结果记在定时上，要开任务时加一张排着队的；跑的时候定时被删掉或停了就不开，一次性的照样开。
 #[test]
 fn finishing_a_schedule_run_records_it_and_queues_a_todo() {
@@ -777,4 +801,22 @@ fn done_sessions_lists_every_finished_todo_session() {
     let mut sessions = store.done_sessions().unwrap();
     sessions.sort_by_key(|session| session.0);
     assert_eq!(sessions, [SessionId(2), SessionId(3)]);
+}
+
+/// 数据版本只在别的连接提交了改动以后变，自己的提交不改它。
+#[test]
+fn data_version_changes_only_for_other_connections_writes() {
+    let path = temp_db("data-version");
+    let mut ours = Store::open(&path).unwrap();
+    let mut theirs = Store::open(&path).unwrap();
+    let (our_start, their_start) = (ours.data_version().unwrap(), theirs.data_version().unwrap());
+
+    ours.add_todo(&spec("ours"), 100, None).unwrap();
+    assert_eq!(ours.data_version().unwrap(), our_start);
+    let their_seen = theirs.data_version().unwrap();
+    assert_ne!(their_seen, their_start);
+
+    theirs.add_todo(&spec("theirs"), 101, None).unwrap();
+    assert_eq!(theirs.data_version().unwrap(), their_seen);
+    assert_ne!(ours.data_version().unwrap(), our_start);
 }

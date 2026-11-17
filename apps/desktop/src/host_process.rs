@@ -1,11 +1,11 @@
-//! `runode --host`：终端宿主单独一个进程跑，由 app 拉起（见 `runode_host::launch`），app 退出后
+//! `runode --host`：终端宿主单独一个进程跑，由 app 拉起，app 退出后
 //! 会话照常跑着。只开宿主的 socket 等前端连上来，没有会话也没有连接、持续 `IDLE_EXIT` 后自己退出，
 //! 收到 `Shutdown` 时结束所有会话后退出。`runode --host --stay` 是登录自启的服务（`runode_autostart`）
 //! 拉起的宿主，不因空闲退出：服务管理器不会把正常退出的它拉回来，手机和命令行随时要连它。
-//! Unix 上收到 SIGTERM、SIGINT 时和收到 `Shutdown` 一样结束所有会话后退出；SIGHUP 不理，从 ssh 里
+//! Unix 上收到 SIGTERM、SIGINT 时结束所有会话后退出；SIGHUP 不理，从 ssh 里
 //! 放到后台跑的宿主断开连接后照常跑着。不碰 GPUI、提前拉起 shell 和通知：主题、剪贴板的规矩
-//! 由连上来的桌面告诉它。配置只读远程访问的两项，自己跟着配置文件开关监听（见
-//! `remote_access::follow_config`），app 关着时手机也连得上；开着远程访问、又有手机可能连上来
+//! 由连上来的桌面告诉它。配置只读远程访问的两项，自己跟着配置文件开关监听，
+//! app 关着时手机也连得上；开着远程访问、又有手机可能连上来
 //! （配对过的设备，或者正在配对）时不因空闲退出。
 //!
 //! `runode --host --take-over`（`take_over`，只在 Unix 上）是升级时新版本的 app 或 `runode --host --upgrade`
@@ -42,7 +42,7 @@ pub fn run(stay: bool) -> i32 {
     let disclaimed = unsafe { runode_host::disclaim_responsibility() };
     // 服务管理器给主进程的通知 socket 不传给会话里的 shell：服务的 `NotifyAccess=all` 让 cgroup 里谁都能报告，
     // shell 里的程序照它报 `MAINPID=`、`STOPPING=1` 时，服务管理器会连宿主带会话一起结束。
-    // SAFETY: 同上，还没开别的线程。
+    // SAFETY: `main` 直接交到这里，还没开别的线程。
     #[cfg(unix)]
     unsafe {
         std::env::remove_var("NOTIFY_SOCKET");
@@ -51,6 +51,10 @@ pub fn run(stay: bool) -> i32 {
     crate::logging::init_file(dirs.host_log_file());
     warn_if_not_disclaimed(disclaimed);
     let host = prepare(&dirs);
+    // 先于监听：一连上就可能有界面来要布局。
+    if let Some(file) = dirs.host_layout_file() {
+        host.keep_layout(file);
+    }
     match crate::host_client::listen(&host, &dirs) {
         Ok(socket) => tracing::info!("host {} listening on {}", std::process::id(), socket.display()),
         Err(err) => {
@@ -72,6 +76,8 @@ fn serve(host: &Host, idle: Duration) {
     #[cfg(unix)]
     if stopped == Stopped::Handoff {
         tracing::info!("host {} handed off; waiting for its shells to exit", std::process::id());
+        // 定时的命令的 shell 也是这个进程的子进程，`wait_for_children` 不能先收走它们：先等它们记完结果。
+        host.wait_for_schedule_runs();
         wait_for_children();
     }
     tracing::info!("host {} exits: {stopped:?}", std::process::id());
@@ -94,8 +100,8 @@ fn wait_for_children() {
     }
 }
 
-/// `runode --host --take-over`：接手 socket 上旧宿主的会话（见 `Host::take_over`），把结果写成一行
-/// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就照 `run` 跑下去；没成时会话
+/// `runode --host --take-over`：接手 socket 上旧宿主的会话，把结果写成一行
+/// `HandoffStatus` 交给拉起它的 app（状态管道，`STATUS_FD`），成了就接着当宿主跑下去；没成时会话
 /// 还在旧宿主手里，退出。要回 `HandoffReady` 之前先写一行 `HandoffStatus::ready`，从启动起过了
 /// `READY_BY` 就不再回。返回进程的退出码。
 #[cfg(unix)]
@@ -103,7 +109,7 @@ pub fn take_over() -> i32 {
     // 先于认领状态管道：认领后它带着 close-on-exec，重新执行就丢了。
     // SAFETY: `main` 直接交到这里，还没开别的线程。
     let disclaimed = unsafe { runode_host::disclaim_responsibility() };
-    // SAFETY: 同上，还没开别的线程。
+    // SAFETY: `main` 直接交到这里，还没开别的线程。
     let service = unsafe { systemd::Notifier::take() }.map(Arc::new);
     let ready_by = Instant::now() + READY_BY;
     // 先于打开任何文件：没有状态管道时 `STATUS_FD` 这个号会被日志文件这类占去。
@@ -158,10 +164,13 @@ pub fn take_over() -> i32 {
             if let Some(db) = dirs.todos_db() {
                 host.serve_todos(db);
             }
+            if let Some(file) = dirs.host_layout_file() {
+                host.keep_layout(file);
+            }
             status.report(&HandoffStatus::took_over(report.sessions, report.replayed));
             // 关掉管道，app 不必等这个进程退出。
             drop(status);
-            // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试，见 `runode_remote::Service`。
+            // 旧宿主退出前还占着远程访问的端口和锁，这边开不了时隔一会儿再试。
             // 服务里的宿主、旧宿主不因空闲退出时不因空闲退出；旧宿主没说时看装没装宿主的登录自启。
             let stay = service.is_some()
                 || report.stay.unwrap_or_else(|| runode_autostart::is_installed(runode_autostart::Kind::Host, &dirs));
@@ -452,7 +461,7 @@ mod signals {
                 libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
             }
         }
-        // SAFETY: 同上。
+        // SAFETY: 只改刚建的写端的标志，让它不阻塞。
         unsafe { libc::fcntl(write, libc::F_SETFL, libc::fcntl(write, libc::F_GETFL) | libc::O_NONBLOCK) };
         PIPE.store(write, Ordering::Relaxed);
         install(libc::SIGTERM, on_stop)?;

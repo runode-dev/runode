@@ -28,8 +28,7 @@ use std::{
 pub(crate) use give::{Asked, give};
 use runode_protocol::{HandoffRefusal, SessionId};
 
-/// 交出会话时默认给新宿主多久收下会话、回 `HandoffReady`（从开始发会话算起，发送本身也在内），
-/// 见 `Host::set_handoff_deadline`。期限之和见 `GIVE_READY_WINDOW`。
+/// 交出会话时默认给新宿主多久收下会话、回 `HandoffReady`（从开始发会话算起，发送本身也在内）。
 pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(20);
 
 /// 旧宿主（默认期限下）从收到新宿主的 `ClientMsg::Handoff` 到不再接受 `HandoffReady`、回滚，最多
@@ -101,7 +100,7 @@ pub struct TakeOverReport {
 /// 交接没成。旧宿主照旧跑着、会话都在它手里，这边的 `Host` 也没留下任何状态。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TakeOverError {
-    /// 旧宿主不交，见 `HandoffRefusal`。
+    /// 旧宿主不交。
     Refused(HandoffRefusal),
     /// 连不上、对面说的不对、接手某个会话失败、旧宿主没提交就走了等等，说明在里面。
     Failed(String),
@@ -122,7 +121,7 @@ impl std::error::Error for TakeOverError {}
 /// 对面那个 socket 的进程：连的一方读时，对方要已经 accept 过这条连接才准，之前读到的是最早建
 /// 监听 socket 的进程，监听的 socket 交接过以后那就不是现在的宿主了。Linux 上（`SO_PEERCRED`）
 /// 连的一方读到的总是调 `listen` 的进程，同样不跟着交接走。所以新宿主认旧宿主时以 `Welcome`
-/// 里自报的为准，见 `take::old_host_pid`；接受连接的一方读到的是连上来的进程，一直准。
+/// 里自报的为准；接受连接的一方读到的是连上来的进程，一直准。
 #[cfg(target_os = "macos")]
 pub fn peer_pid(stream: &UnixStream) -> Option<libc::pid_t> {
     let mut pid: libc::pid_t = 0;

@@ -1,14 +1,14 @@
-//! 看板（见 `runode_protocol::todo`）：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
+//! 看板：任务和定时存在宿主自己的 SQLite 库里（`runode_todo::Store`），
 //! 前端经 `ClientMsg::ListTodos` 这几条消息要。app 在宿主拿到会话和监听的 socket 以后调
 //! `Host::serve_todos` 告诉它库在哪、起定时的线程（`schedule`）；没调时这些消息都回 `Error`。
 //!
 //! 开始任务时在任务的目录（要工作树时先在仓库的 `.worktrees/` 下新开一个，分支 `runode/<名字>`）里开
-//! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来，见
-//! `agent_command`）：提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在看板上打开它时再接进窗口。
+//! 一个会话，等 shell 的提示符出来再打 `<agent> "$RUNODE_TODO_PROMPT"`（写法照 shell 来）：
+//! 提示词经环境变量交给 shell，不用照各家 shell 的规矩转义。任务会话不进宿主手里的布局，桌面在看板上打开它时再接进窗口。
 //!
 //! 只有拿着会话的宿主改看板：开始交出会话或者要退出（`Peers::phase` 不是 `Phase::Serving`）以后不改库、
-//! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。两边的库是同一个文件，SQLite 自己管得住两个
-//! 进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
+//! 不开任务，定时也不触发；接手的新宿主提交后自己接着办。例外是 `once_fired` 里的运行。
+//! 接手的宿主的定时线程醒来时发现库被别的进程改过，就告诉看着看板的连接。两边的库是同一个文件，SQLite 自己管得住两个进程同时开着。锁的先后：拿着 `Todos::state` 可以再拿 `peers` 和 `registry`，反过来不行。
 //!
 //! 开任务的会话从开出来到记进库都算在 `Peers::launching` 里（`Shared::begin_launch`）。
 
@@ -44,14 +44,16 @@ use command::{
 };
 use worktree::{add_worktree, clean_worktree, in_worktree};
 
-use crate::{Host, Shared, SpawnOptions, session::Inbox};
+use crate::{Host, Shared, SpawnOptions, Stopped, server::Phase, session::Inbox};
 
 /// 看板：库和定时的线程要的状态。
 #[derive(Default)]
 pub(crate) struct Todos {
     state: Mutex<State>,
-    /// 看板变了时通知定时的线程，见 `State::generation`。
+    /// 看板变了时通知定时的线程。
     changed: Condvar,
+    /// `State::running_runs` 少了一项时通知，配 `state`。
+    runs_done: Condvar,
     /// 任务用的会话，看板一变就重读。会话线程拿它判断要不要报状态变了、记下自动完成要的 agent 状态；单独
     /// 一把锁，会话线程不等库。
     sessions: Mutex<Watched>,
@@ -60,6 +62,8 @@ pub(crate) struct Todos {
     /// 触发定时（到点的和手动的）从判断要不要让路到加上任务、占住命令都拿着它，同一个定时不会被两处同时
     /// 触发、各开一张。拿着它时只拿别的锁、不等命令跑完；别处拿着别的锁时不拿它。
     firing: Mutex<()>,
+    /// 定时的线程读库失败了的几处。
+    unreadable: schedule::Unreadable,
     /// 测试拿住它时，开任务停在开好会话之后、记进库之前。
     #[cfg(test)]
     launch_gate: Mutex<()>,
@@ -113,12 +117,15 @@ struct State {
     path: Option<PathBuf>,
     /// 打开着的库；打不开时为空，下次用时再试，用户修好文件后自己恢复。
     db: Option<Store>,
+    /// `db` 上次读到的数据版本（`Store::data_version`），换了连接时重读；读不到时为空。
+    data_version: Option<i64>,
     /// 看板变一次加一，定时的线程据此知道要重新看。
     generation: u64,
-    /// 正在开始、或者正在清工作树的任务，见 `Todos::claim`。
+    /// 正在开始、或者正在清工作树的任务。
     busy: HashSet<String>,
-    /// 到点先跑的命令（`Schedule::run`）还没跑完的定时：在里面的定时到点时跳过，不再跑一份。
-    running_runs: HashSet<String>,
+    /// 到点先跑的命令（`Schedule::run`）还没跑完的定时：在里面的定时到点时跳过，不再跑一份。值是这个宿主停下
+    /// 前还没记下结果时要放回库里的定时，只有到点触发（不是手动）的 `When::Once` 才有，记下结果或放回库里后清空。
+    running_runs: HashMap<String, Option<runode_protocol::todo::Schedule>>,
 }
 
 /// `Todos::claim` 占住的任务，丢掉时放开。
@@ -196,22 +203,38 @@ impl Todos {
         self.with_db(|db| db.todo_by_id(id)).unwrap().unwrap().started
     }
 
-    /// 在库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
-    fn with_db<T>(&self, f: impl FnOnce(&mut Store) -> runode_todo::Result<T>) -> Result<T, String> {
+    /// 库从上次看过以后被别的连接（别的进程）改过，这个宿主自己的改动不算。读不到库时报错。
+    fn changed_elsewhere(&self) -> Result<bool, String> {
         let mut state = self.lock();
-        let Some(path) = state.path.clone() else {
-            return Err("this host does not keep a todo board".into());
-        };
-        let db = match &mut state.db {
-            Some(db) => db,
-            empty => empty.insert(Store::open(&path)?),
-        };
-        let result = f(db);
-        if result.is_err() {
-            state.db = None;
-        }
-        result
+        let now = db_in(&mut state, |db| db.data_version())?;
+        Ok(state.data_version.replace(now).is_some_and(|seen| seen != now))
     }
+
+    /// 拿着 `state` 在库上做 `f`（`db_in`）。
+    fn with_db<T>(&self, f: impl FnOnce(&mut Store) -> runode_todo::Result<T>) -> Result<T, String> {
+        db_in(&mut self.lock(), f)
+    }
+}
+
+/// 在 `state` 的库上做 `f`。看板没开、库打不开时报错；`f` 出错时关掉库，下次重新打开。
+fn db_in<T>(state: &mut State, f: impl FnOnce(&mut Store) -> runode_todo::Result<T>) -> Result<T, String> {
+    let Some(path) = state.path.clone() else {
+        return Err("this host does not keep a todo board".into());
+    };
+    let db = match &mut state.db {
+        Some(db) => db,
+        empty => {
+            let db = empty.insert(Store::open(&path)?);
+            // 打开时就记下，这之后别的进程的改动才都比得出来。
+            state.data_version = db.data_version().ok();
+            db
+        }
+    };
+    let result = f(db);
+    if result.is_err() {
+        state.db = None;
+    }
+    result
 }
 
 /// 现在的 Unix 时间，秒。
@@ -240,10 +263,42 @@ impl Host {
             tracing::error!("cannot start the schedule thread: {err}");
         }
     }
+
+    /// 等定时到点先跑的命令（`Schedule::run`）都跑完、记完结果。交出会话的宿主在用 `waitpid(-1)` 收子进程之前
+    /// 调：命令的 shell 是这个进程的子进程，被它先收走的话跑命令的线程拿不到结果。等的是所有在跑的命令，不设
+    /// 上限：每条最多跑到它的 `Schedule::run_timeout`，过了连同子孙一起杀掉。
+    pub fn wait_for_schedule_runs(&self) {
+        let todos = &self.shared.todos;
+        // 触发定时从消费定时到占住命令一直拿着 `firing`：拿到它以后，已经触发的命令都在 `running_runs` 里了。
+        drop(todos.firing());
+        let state = todos.lock();
+        drop(
+            todos
+                .runs_done
+                .wait_while(state, |state| !state.running_runs.is_empty())
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+    }
+
+    /// 宿主不交出会话地退出前调：`Peers::phase` 还是 `Phase::Serving` 时置成 `Stopping(Stopped::Shutdown)`，之后
+    /// 不再开会话、不改看板、不触发定时；再调 `Shared::put_back_unfinished_runs`，不等命令跑完。正在交出或已经
+    /// 交出会话时什么都不做，定时归接手的宿主办。
+    pub fn stop_schedules(&self) {
+        {
+            let mut peers = self.shared.peers();
+            match peers.phase {
+                Phase::Serving => peers.phase = Phase::Stopping(Stopped::Shutdown),
+                Phase::Stopping(Stopped::Idle | Stopped::Shutdown) => {}
+                Phase::HandingOver | Phase::Stopping(Stopped::Handoff) => return,
+            }
+        }
+        self.shared.peers_changed.notify_all();
+        self.shared.put_back_unfinished_runs();
+    }
 }
 
 impl Shared {
-    /// 能不能改看板：正在交出会话或者要退出了的宿主不改，见模块文档。
+    /// 能不能改看板：正在交出会话或者要退出了的宿主不改。
     fn todos_writable(&self) -> Result<(), String> {
         crate::refusal(&self.peers()).map_or(Ok(()), |why| Err(why.into()))
     }
@@ -271,17 +326,17 @@ impl Shared {
         self.peers().todos_changed();
     }
 
-    /// 看板第 `generation` 次变了以后重读任务用的会话，见 `Todos::sessions`。读不到库时照旧，下次变了
+    /// 看板第 `generation` 次变了以后重读任务用的会话。读不到库时照旧，下次变了
     /// 再读。
     fn watch_todo_sessions(&self, generation: u64) {
         match self.todos.with_db(|db| db.list_todos(unix_now())) {
             Ok(todos) => self.remember_todo_sessions(generation, &todos),
-            // 前端收到这次的 `TodosChanged` 会来问 `ListTodos`，那时读到了就补上，见 `list_todos`。
+            // 前端收到这次的 `TodosChanged` 会来问 `ListTodos`，那时读到了就补上。
             Err(err) => tracing::debug!("cannot list the todos to watch their sessions: {err}"),
         }
     }
 
-    /// 记下看板第 `generation` 次变了以后读到的 `todos` 用的会话，见 `Todos::sessions`。
+    /// 记下看板第 `generation` 次变了以后读到的 `todos` 用的会话。
     fn remember_todo_sessions(&self, generation: u64, todos: &[Todo]) {
         let mut watched = self.todos.watched();
         // 两个线程一起改看板时，先读的库可能后写回来：只留变得最晚的那次之后读到的。
@@ -362,7 +417,7 @@ impl Shared {
         self.peers().todos_changed();
     }
 
-    /// 有没有在用的定时或者排着队的任务：有时单独跑的宿主不因空闲退出，见 `Host::run_until_idle`。
+    /// 有没有在用的定时或者排着队的任务：有时单独跑的宿主不因空闲退出。
     fn set_scheduled(&self, scheduled: bool) {
         let mut peers = self.peers();
         if peers.scheduled != scheduled {
@@ -533,7 +588,7 @@ impl Shared {
         Ok(HostMsg::Done { req })
     }
 
-    /// 回 `ClientMsg::RemoveTodo`：它的会话已经不在时，顺带清掉工作树和分支，见 `clean_worktree`。
+    /// 回 `ClientMsg::RemoveTodo`：它的会话已经不在时，顺带清掉工作树和分支。
     pub(crate) fn remove_todo(&self, req: u32, id: &str) -> Result<HostMsg, String> {
         self.todos_writable()?;
         let id = &self.resolve_todo(id)?;
@@ -550,7 +605,7 @@ impl Shared {
         Ok(HostMsg::Done { req })
     }
 
-    /// 任务的会话还在跑，见 `running`。查过以后这个宿主已经在交出会话了也算：交出去的会话不在 `registry`
+    /// 任务的会话还在跑。查过以后这个宿主已经在交出会话了也算：交出去的会话不在 `registry`
     /// 里，看着和结束了一样，其实在新宿主那边接着跑。所以要先查会话再查这个，反过来的话中间交出去的会被
     /// 当成结束了。
     fn in_use(&self, todo: &Todo) -> bool {
@@ -586,7 +641,7 @@ impl Shared {
     }
 
     /// 收掉完成了的任务的、shell 已经退出的会话：没完成时留着给人看 agent 最后的输出，完成了就没用了。
-    /// 定时的线程每一轮都做，见 `sweep_worktrees`。
+    /// 定时的线程每一轮都做。
     fn end_finished_sessions(&self) {
         if self.todos_writable().is_err() {
             return;
@@ -609,7 +664,7 @@ impl Shared {
         }
     }
 
-    /// 清掉完成了的任务的工作树和分支（见 `clean_worktree`），每张只试一次；会话还在的等它结束后再清。
+    /// 清掉完成了的任务的工作树和分支，每张只试一次；会话还在的等它结束后再清。
     /// 定时的线程每一轮都做，看板一变就有一轮，所以标完成后很快就清。
     fn sweep_worktrees(&self) {
         if self.todos_writable().is_err() {
@@ -653,12 +708,12 @@ impl Shared {
         Ok(HostMsg::Todo { req, todo })
     }
 
-    /// 占住任务 `id`（见 `Todos::claim`），占不住时回一句让前端再试。
+    /// 占住任务 `id`，占不住时回一句让前端再试。
     fn claim_todo(&self, id: &str) -> Result<Claim<'_>, String> {
         self.todos.claim(id).ok_or_else(|| format!("todo {id} is starting or being cleaned up; try again"))
     }
 
-    /// 前端写的任务（标识，或者 `5`、`#5` 这样的编号，见 `ClientMsg::GetTodo`）的标识。
+    /// 前端写的任务（标识，或者 `5`、`#5` 这样的编号）的标识。
     fn resolve_todo(&self, text: &str) -> Result<String, String> {
         self.todos.with_db(|db| db.resolve_todo(text))?.ok_or_else(|| no_todo(text))
     }
@@ -770,7 +825,7 @@ impl Shared {
             return Ok(old);
         }
         self.end_if_exited(old);
-        // 库可以不经宿主直接写（见 `start_todo`），打进 shell 之前再查一遍命令是不是一行。
+        // 库可以不经宿主直接写，打进 shell 之前再查一遍命令是不是一行。
         check_text(&todo.spec)?;
         let resume =
             runode_agent::models::resume_command(&agent_with_options(&todo.spec), &agent_session(&todo.id, started));
@@ -884,331 +939,4 @@ fn clip_result(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use runode_protocol::todo::{BLOCKED_GIVE_UP, holds_schedule};
-
-    use super::*;
-
-    #[test]
-    fn a_todo_is_claimed_by_one_at_a_time() {
-        let todos = Todos::default();
-        let claim = todos.claim("a").unwrap();
-        assert!(todos.claim("a").is_none());
-        assert!(todos.claim("b").is_some());
-        drop(claim);
-        assert!(todos.claim("a").is_some());
-    }
-
-    /// 正在开的任务会话丢掉守卫时减回去；交接开始以后不再记上。
-    #[cfg(unix)]
-    #[test]
-    fn launches_are_counted_only_while_serving() {
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        let shared = &host.shared;
-        let launching = shared.begin_launch().unwrap();
-        assert_eq!(shared.peers().launching, 1);
-        drop(launching);
-        assert_eq!(shared.peers().launching, 0);
-        shared.peers().phase = crate::server::Phase::HandingOver;
-        assert!(shared.begin_launch().is_err());
-        assert_eq!(shared.peers().launching, 0);
-    }
-
-    /// 标完成、取消完成也要占住任务：清工作树的、正在开始的占着时回一句让前端再试，不改库。
-    #[test]
-    fn marking_done_waits_for_a_claimed_todo() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-claim", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.serve_todos(dir.join("todos.db"));
-        let spec = TodoSpec {
-            title: "t".into(),
-            prompt: String::new(),
-            dir,
-            agent: "claude".into(),
-            worktree: false,
-            ..TodoSpec::default()
-        };
-        let shared = &host.shared;
-        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
-        let done = |shared: &Shared| shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap().done_at;
-
-        let claim = shared.todos.claim(&id).unwrap();
-        assert!(shared.update_todo(2, &id, None, Some(true)).is_err());
-        assert_eq!(done(shared), None);
-        drop(claim);
-        assert_eq!(shared.update_todo(3, &id, None, Some(true)), Ok(HostMsg::Done { req: 3 }));
-        assert!(done(shared).is_some());
-    }
-
-    /// 标完成后叫醒定时线程时任务已经放开了：它马上来清就占得住，不跳过、等下一轮。不起定时线程，只看
-    /// 看板变了的那一刻任务还占没占着。
-    #[test]
-    fn a_todo_marked_done_is_free_when_the_scheduler_wakes() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-wake", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let spec = TodoSpec {
-            title: "t".into(),
-            prompt: String::new(),
-            dir,
-            agent: "claude".into(),
-            worktree: false,
-            ..TodoSpec::default()
-        };
-        let shared = &host.shared;
-        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
-
-        let todos = shared.todos.clone();
-        let seen = todos.generation();
-        let watched = id.clone();
-        let busy_on_wake = std::thread::spawn(move || {
-            let state = todos.lock();
-            let (state, _) = todos
-                .changed
-                .wait_timeout_while(state, Duration::from_secs(10), |state| state.generation == seen)
-                .unwrap();
-            assert_ne!(state.generation, seen, "the board never changed");
-            state.busy.contains(&watched)
-        });
-        // 让它先等上。
-        std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(shared.update_todo(2, &id, None, Some(true)), Ok(HostMsg::Done { req: 2 }));
-        assert!(!busy_on_wake.join().unwrap(), "the todo was still claimed when the scheduler woke up");
-    }
-
-    /// 自动完成只认干过活以后的空闲：开始后直接空闲不记，干活以后空闲才记下时刻；标完成、取消完成以后
-    /// 要再干一轮活。
-    #[test]
-    fn auto_done_waits_for_the_agent_to_have_worked() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-auto-done", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let spec = TodoSpec { title: "t".into(), dir, agent: "claude".into(), auto_done: true, ..TodoSpec::default() };
-        let shared = &host.shared;
-        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
-        let session = SessionId(41);
-        shared.todos.with_db(|db| db.set_started(&id, unix_now(), session, None, true)).unwrap();
-        shared.todos_changed();
-        let since = |shared: &Shared| shared.todos.watched().worked.get(&session).copied();
-        // 新读到的会话等定时的线程去问一次；问不到（没有这个会话）就算了。
-        assert!(shared.todos.watched().unchecked.contains(&session));
-        assert_eq!(shared.finish_idle_todos(), None);
-        assert!(shared.todos.watched().unchecked.is_empty());
-        assert_eq!(since(shared), None);
-
-        shared.todo_session_changed(session, false, Some(AgentState::Idle));
-        assert_eq!(since(shared), None);
-        shared.todo_session_changed(session, false, Some(AgentState::Working));
-        assert_eq!(since(shared), Some(None));
-        shared.todo_session_changed(session, false, Some(AgentState::Idle));
-        assert!(matches!(since(shared), Some(Some(_))));
-        shared.todo_session_changed(session, false, Some(AgentState::Blocked));
-        assert_eq!(since(shared), Some(None));
-
-        shared.todo_session_changed(session, false, Some(AgentState::Working));
-        assert_eq!(shared.update_todo(2, &id, None, Some(true)), Ok(HostMsg::Done { req: 2 }));
-        assert_eq!(shared.update_todo(3, &id, None, Some(false)), Ok(HostMsg::Done { req: 3 }));
-        assert_eq!(since(shared), None);
-        shared.todo_session_changed(session, false, Some(AgentState::Idle));
-        assert_eq!(since(shared), None);
-        // 认不出 agent 了（报完结局退回 shell）也从这时算起。
-        shared.todo_session_changed(session, false, Some(AgentState::Working));
-        shared.todo_session_changed(session, false, None);
-        assert!(matches!(since(shared), Some(Some(_))));
-    }
-
-    /// 报结局：记下结局和截过的结果，按编号也认；读不懂的结局不收。报了没做成的任务不再自动完成。
-    #[test]
-    fn a_report_records_the_outcome_and_a_failure_stops_auto_done() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-report", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let spec = TodoSpec { title: "t".into(), dir, agent: "claude".into(), auto_done: true, ..TodoSpec::default() };
-        let shared = &host.shared;
-        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("expected the new todo") };
-        let read = |shared: &Shared| shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap();
-
-        let long = format!("  {}  ", "x".repeat(RESULT_LIMIT + 10));
-        assert_eq!(shared.report_todo(2, "#1", Outcome::Ok, &long), Ok(HostMsg::Done { req: 2 }));
-        let todo = read(shared);
-        assert_eq!(todo.outcome, Some(Outcome::Ok));
-        assert_eq!(todo.result.map(|result| result.chars().count()), Some(RESULT_LIMIT));
-        assert!(shared.report_todo(3, &id, Outcome::Unknown, "").is_err());
-        assert!(shared.report_todo(3, "nothere", Outcome::Ok, "").is_err());
-
-        let session = SessionId(42);
-        shared.todos.with_db(|db| db.set_started(&id, unix_now(), session, None, true)).unwrap();
-        assert_eq!(shared.report_todo(4, &id, Outcome::Failed, "tests fail").unwrap(), HostMsg::Done { req: 4 });
-        // 再报一次不带话：上一次的话不留着冒充这一次的结果。
-        assert_eq!(shared.report_todo(5, &id, Outcome::Failed, "  ").unwrap(), HostMsg::Done { req: 5 });
-        let todo = read(shared);
-        assert_eq!((todo.outcome, todo.result), (Some(Outcome::Failed), None));
-        // 干过活、空闲稳定以后，报了没做成的不标完成，也不再看它。
-        shared.todo_session_changed(session, false, Some(AgentState::Working));
-        if let Some(since) = shared.todos.watched().worked.get_mut(&session) {
-            *since = Some(Instant::now() - Duration::from_secs(60));
-        }
-        shared.finish_idle_todos();
-        assert_eq!(read(shared).done_at, None);
-        assert!(!shared.todos.watched().worked.contains_key(&session));
-    }
-
-    /// 跑过时限还在干活的、停在询问上太久的任务记成没做成，结果写上原因，没人在看的终端结束掉；没到时限的、
-    /// 做完了停在 shell 上等人看的不动。
-    #[test]
-    fn stuck_todos_are_failed_and_their_terminals_ended() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-stuck", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let shared = &host.shared;
-        let add = |title: &str, time_limit, auto_done| {
-            let spec = TodoSpec {
-                title: title.into(),
-                dir: dir.clone(),
-                agent: "claude".into(),
-                auto_done,
-                time_limit,
-                ..TodoSpec::default()
-            };
-            let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("no todo") };
-            (id, shared.spawn(SpawnOptions::headless(Some(dir.clone()))).unwrap())
-        };
-        let (late, late_session) = add("late", Some(1), false);
-        let (asking, asking_session) = add("asking", None, true);
-        let (fine, fine_session) = add("fine", Some(60), false);
-        let (idle, idle_session) = add("idle", Some(1), false);
-        let start = |id: &str, session, ago: u64| {
-            shared.todos.with_db(|db| db.set_started(id, unix_now() - ago, session, None, true)).unwrap();
-        };
-        start(&late, late_session, 120);
-        start(&asking, asking_session, 120);
-        start(&fine, fine_session, 120);
-        start(&idle, idle_session, 120);
-        shared.todos_changed();
-        {
-            let mut watched = shared.todos.watched();
-            // 会话是这次开始时开的，不是接回的。
-            for session in [late_session, idle_session] {
-                watched.begun.insert(session, unix_now() - 120);
-            }
-        }
-        // 前台是认不出的程序，当它是 agent 在干活。
-        shared.deliver(late_session, Inbox::TypeAtPrompt(b"cat\r".to_vec()));
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while shared
-            .session_info(late_session)
-            .is_none_or(|info| info.meta.foreground_is_shell || info.meta.foreground.as_deref() != Some("cat"))
-        {
-            assert!(Instant::now() < deadline, "cat never came to the front");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        // 等完再记：shell 起来时报的状态会把它清掉。
-        shared.todos.watched().blocked.insert(asking_session, Instant::now() - Duration::from_secs(BLOCKED_GIVE_UP));
-
-        shared.fail_stuck_todos();
-        let read = |id: &str| shared.todos.with_db(|db| db.todo_by_id(id)).unwrap().unwrap();
-        for (id, session, why) in [(&late, late_session, "time limit"), (&asking, asking_session, "an answer")] {
-            let todo = read(id);
-            assert_eq!(todo.outcome, Some(Outcome::Failed), "{}: {:?}", todo.spec.title, shared.session_info(session));
-            assert!(todo.result.as_deref().is_some_and(|result| result.contains(why)), "{:?}", todo.result);
-            assert!(!shared.running(session));
-        }
-        assert!(!shared.todos.watched().blocked.contains_key(&asking_session));
-        for (id, session) in [(&fine, fine_session), (&idle, idle_session)] {
-            assert_eq!(read(id).outcome, None);
-            assert!(shared.running(session));
-            shared.kill(session);
-        }
-    }
-
-    /// 排着队的任务按先后、在并发上限内开始；等的任务没做完时等着，没做成时一起记成没做成。
-    #[test]
-    fn queued_todos_start_within_the_limit_after_their_dependencies() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-queue", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let shared = &host.shared;
-        let add = |title: &str| {
-            let spec = TodoSpec { title: title.into(), dir: dir.clone(), agent: "true".into(), ..TodoSpec::default() };
-            let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("no todo") };
-            id
-        };
-        let (first, second, third) = (add("first"), add("second"), add("third"));
-        let read = |id: &str| shared.todos.with_db(|db| db.todo_by_id(id)).unwrap().unwrap();
-        assert_eq!(shared.set_max_running(2, 1), Ok(HostMsg::Done { req: 2 }));
-        assert_eq!(shared.queue_todo(3, &first, true, None), Ok(HostMsg::Done { req: 3 }));
-        assert_eq!(shared.queue_todo(4, "#2", true, Some("#1")), Ok(HostMsg::Done { req: 4 }));
-        assert_eq!(shared.queue_todo(5, &third, true, None), Ok(HostMsg::Done { req: 5 }));
-        assert!(shared.queue_todo(6, &first, true, Some(&third)).is_ok());
-        assert!(shared.queue_todo(6, &third, true, Some(&first)).is_err(), "a cycle");
-        assert!(shared.queue_todo(6, &first, true, None).is_ok());
-
-        assert_eq!(shared.start_queued().0, Some(true));
-        // 刚开始的在宽限期里算进行中，占满了上限：等着的第二张不开，排在后面的第三张也等着。
-        let started = read(&first);
-        assert!(started.started.is_some() && !started.queued);
-        assert!(read(&second).started.is_none() && read(&third).started.is_none());
-
-        shared.todos.with_db(|db| db.set_outcome(&first, Some(Outcome::Failed), Some("broke"))).unwrap();
-        shared.set_max_running(7, 0).unwrap();
-        assert_eq!(shared.start_queued().0, Some(true));
-        let failed = read(&second);
-        assert_eq!((failed.outcome, failed.queued, failed.started), (Some(Outcome::Failed), false, None));
-        assert!(failed.result.is_some_and(|result| result.contains("#1 failed")));
-        assert!(read(&third).started.is_some());
-        assert_eq!(shared.start_queued(), (Some(false), None));
-        for id in [&first, &third] {
-            shared.kill(read(id).session.unwrap());
-        }
-    }
-
-    /// 排着队没开始成的任务留在队里，隔一阵再试，试满次数记成没做成、不再挡着定时；不再排队的不再试。
-    #[test]
-    fn failed_starts_are_retried_then_failed() {
-        let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-retry", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let work = dir.join("work");
-        std::fs::create_dir_all(&work).unwrap();
-        let host = Host::new(runode_protocol::BuildId("test".into()));
-        host.shared.todos.lock().path = Some(dir.join("todos.db"));
-        let shared = &host.shared;
-        let spec = TodoSpec { title: "t".into(), dir: work.clone(), agent: "claude".into(), ..TodoSpec::default() };
-        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("no todo") };
-        let HostMsg::TodoAdded { id: started, .. } = shared.add_todo(2, &spec).unwrap() else { panic!("no todo") };
-        shared.todos.with_db(|db| db.set_started(&started, unix_now(), SessionId(43), None, true)).unwrap();
-        shared.queue_todo(3, &id, true, None).unwrap();
-        // 目录没了，开始不了。
-        std::fs::remove_dir_all(&work).unwrap();
-        let past = Instant::now() - Duration::from_secs(1);
-        shared.todos.watched().retries.insert(started.clone(), (1, past));
-
-        let (queued, next) = shared.start_queued();
-        assert_eq!(queued, Some(true));
-        assert!(next.expect("a retry is pending") > Instant::now());
-        assert_eq!(shared.todos.watched().retries.get(&id).map(|&(tries, _)| tries), Some(1));
-        assert!(shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap().queued);
-        assert!(!shared.todos.watched().retries.contains_key(&started));
-        // 没到时候不试。
-        assert_eq!(shared.start_queued().1, next);
-
-        shared.todos.watched().retries.insert(id.clone(), (2, past));
-        shared.start_queued();
-        assert_eq!(shared.start_queued(), (Some(false), None));
-        let todo = shared.todos.with_db(|db| db.todo_by_id(&id)).unwrap().unwrap();
-        assert_eq!(todo.outcome, Some(Outcome::Failed));
-        assert!(todo.result.as_deref().is_some_and(|result| result.starts_with("Runode could not start it")));
-        assert!(!holds_schedule(&todo, None, unix_now()));
-    }
-}
+mod tests;

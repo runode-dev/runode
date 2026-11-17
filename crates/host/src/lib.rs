@@ -1,12 +1,11 @@
 //! 管终端会话的宿主：每个会话的 PTY 和权威的那份 VT（`HostSession`）都在这里，一个会话一个
 //! 线程。前端（桌面的界面、命令行）连上来，收 PTY 输出和状态，发输入和请求。
 //!
-//! 前端一律经一条连接按 `runode_protocol` 的帧和消息说话，见 `server`：别的进程连 `Host::listen`
+//! 前端一律经一条连接按 `runode_protocol` 的帧和消息说话：别的进程连 `Host::listen`
 //! 开的 Unix socket，同一个进程里的桌面用 `Host::connect_pair` 拿到的一对 socket 的一端，两条路
-//! 走的是同一套代码。宿主可以跑在 app 进程里，也可以单独一个进程（`runode --host`，见
-//! `Host::run_until_idle` 和 `launch`）。单独跑的宿主升级时，新版本的宿主经同一个 socket 接过
-//! 所有会话和 socket 本身，shell 不中断（`Host::take_over`，见 `handoff`）；Windows 上的 ConPTY
-//! 交不出去，升级时会话跟着重启。
+//! 走的是同一套代码。宿主可以跑在 app 进程里，也可以单独一个进程（`runode --host`）。
+//! 单独跑的宿主升级时，新版本的宿主经同一个 socket 接过所有会话和 socket 本身，shell 不中断
+//! （`Host::take_over`）；Windows 上的 ConPTY 交不出去，升级时会话跟着重启。
 //!
 //! 每个会话的线程按到达的先后处理 PTY 输出和前端的请求：输出先转给连着的前端，再喂宿主的
 //! VT；改 VT 状态的请求（改尺寸、换主题、清屏）在输出流里插一条标记（`HostMsg::Resized`、
@@ -15,17 +14,15 @@
 //! 宿主不管窗口：要界面办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`MovePane`、`SwapPanes`、
 //! `Layout`）包成 `HostMsg::UiRequest` 转给
 //! 登记为界面的那条连接（`Hello` 里说自己是 `ClientKind::Desktop` 的），界面用 `ClientMsg::UiReply`
-//! 回话，宿主再原样转回发请求的一方。没有界面连着时，除 `Reveal` 和挪分屏外宿主照界面上次报来的布局自己办，
-//! 见 `workspaces`。会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回
-//! 会话线程，见 `session` 的 `clipboard`。
+//! 回话，宿主再原样转回发请求的一方。没有界面连着时，除 `Reveal` 和挪分屏外宿主照界面上次报来的布局自己办。
+//! 会话里的程序读写剪贴板（OSC 52）也这样请界面办，回话交回会话线程。
 //!
-//! 前端也能请宿主在某个会话所在的仓库里读写 git（`ClientMsg::Git`），手机靠它管电脑上的仓库，
-//! 见 `git`。手机新建工作区时一级级浏览电脑上的目录，也由宿主列出来（`ClientMsg::ListDirs`），
-//! 见 `browse`；会话卡片上列的 Makefile 目标和 package.json 的 scripts 也是（`ClientMsg::ListTasks`），
-//! 见 `runode_tasks`。
+//! 前端也能请宿主在某个会话所在的仓库里读写 git（`ClientMsg::Git`），手机靠它管电脑上的仓库。
+//! 手机新建工作区时一级级浏览电脑上的目录，也由宿主列出来（`ClientMsg::ListDirs`）；会话卡片上列的
+//! Makefile 目标和 package.json 的 scripts 也是（`ClientMsg::ListTasks`）。
 //!
 //! 看板（派给 agent 的任务和定时）也由宿主持有：存在它自己的库里（`runode_todo`），到点开任务、开会话
-//! 跑 agent，见 `todos`。
+//! 跑 agent。
 
 mod browse;
 mod git;
@@ -100,42 +97,44 @@ pub struct Host {
 }
 
 struct Shared {
-    /// 自己的弱引用，交给会话线程请界面办事用，见 `server::UiPort`。
+    /// 自己的弱引用，交给会话线程请界面办事用。
     me: Weak<Shared>,
-    /// 这次构建的标识，前端的一样时才给快照，见 `AttachMode`。
+    /// 这次构建的标识，前端的一样时才给快照。
     build: BuildId,
-    /// 这个构建编的快照的格式版本，见 `HostMsg::Welcome`。
+    /// 这个构建编的快照的格式版本。
     snapshot_format: u16,
     registry: Mutex<Registry>,
     next_connection: AtomicU64,
-    /// 之后启动的 shell 另外设的环境变量，见 `Host::set_env`。
+    /// 之后启动的 shell 另外设的环境变量。
     env: Mutex<Vec<(String, OsString)>>,
-    /// 连着的前端、转给界面的请求，以及监听和退出的状态，见 `server::Peers`。锁的先后：拿着它时
+    /// 连着的前端、转给界面的请求，以及监听和退出的状态。锁的先后：拿着它时
     /// 可以再拿 `registry`，反过来不行。
     peers: Mutex<server::Peers>,
     /// 有连接断开、或者要退出时通知，`Host::run_until_idle` 等在它上面。
     peers_changed: Condvar,
-    /// 交出会话时给新宿主多久收下会话、回 `HandoffReady`，见 `Host::set_handoff_deadline`。
+    /// 记宿主自己改了、界面还没接过去的布局的文件（`Host::keep_layout`），为空时不记。写和删这个文件都
+    /// 拿着这把锁，一次一个。锁的先后：拿着它可以再拿 `peers`，反过来不行。
+    layout_file: Mutex<Option<PathBuf>>,
+    /// 交出会话时给新宿主多久收下会话、回 `HandoffReady`。
     #[cfg(unix)]
     handoff_deadline: Mutex<Duration>,
-    /// 读剪贴板最多等界面多久，见 `Host::set_clipboard_read_patience`。
+    /// 读剪贴板最多等界面多久。
     clipboard_patience: Mutex<Duration>,
-    /// 看板，见 `todos`；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
+    /// 看板；定时的线程也拿着一份。锁的先后：拿着它可以再拿 `peers` 和 `registry`。
     todos: Arc<todos::Todos>,
-    /// 还没结束的会话线程，要退出时等它们杀掉 shell，见 `session::Threads`。
+    /// 还没结束的会话线程，要退出时等它们杀掉 shell。
     session_threads: Arc<session::Threads>,
 }
 
-/// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过，见
-/// `Shared::spawn`。
+/// 会话、主题和剪贴板的规矩放在同一把锁下：新会话加进来和换主题、改规矩不会互相错过。
 #[derive(Default)]
 struct Registry {
     sessions: HashMap<SessionId, session::Handle>,
-    /// 新会话套的主题，见 `ClientMsg::SetTheme`。
+    /// 新会话套的主题。
     settings: Arc<TermSettings>,
     /// 收到过几次 `SetTheme`。
     theme_generation: u64,
-    /// 会话里的程序读写剪贴板的规矩，见 `ClientMsg::SetOptions`。改了就发给每个会话
+    /// 会话里的程序读写剪贴板的规矩。改了就发给每个会话
     /// （`Inbox::Clipboard`），会话线程自己记着一份，不必每块输出都来拿锁。
     clipboard: ClipboardAccess,
 }
@@ -152,6 +151,14 @@ impl Shared {
     /// 往会话线程发消息；没有这个会话、或者它的线程已经结束时返回 false。
     fn deliver(&self, id: SessionId, message: session::Inbox) -> bool {
         self.registry().sessions.get(&id).is_some_and(|handle| handle.send(message))
+    }
+
+    /// 往会话线程发一条输入（`Inbox::Input`、`Keys`、`Paste`、`PastePath`），收下时先调 `admitted`；没有这个
+    /// 会话时是 `Gone`。
+    fn deliver_input(&self, id: SessionId, message: session::Inbox, admitted: impl FnOnce()) -> session::Delivery {
+        // 放开锁再发：`admitted` 会经 `deliver` 再拿它。
+        let handle = self.registry().sessions.get(&id).cloned();
+        handle.map_or(session::Delivery::Gone, |handle| handle.send_input(message, admitted))
     }
 
     /// 会话 `id` 现在的状态；没有这个会话、或者它没及时回话时为空。
@@ -183,7 +190,7 @@ impl Shared {
         self.spawn_with(options, &[])
     }
 
-    /// 同 `spawn`，这个会话的 shell 另外设上 `env` 里的环境变量。
+    /// 开一个会话，它的 shell 另外设上 `env` 里的环境变量。
     fn spawn_with(&self, options: SpawnOptions, env: &[(&str, &str)]) -> Result<SessionId> {
         // 已经不开了的当场拒绝，不白起 shell；还开的在同一把锁里记上一个会话线程，开完（登记好、或者被拒绝
         // 后叫它结束）前一直算着：`Host::run_until_idle` 置上 `Phase::Stopping` 后等会话线程都结束，置上之前开始开的
@@ -233,7 +240,7 @@ impl Shared {
         Ok(id)
     }
 
-    /// 会话 `id` 的设置：主题是 `settings`；启动 shell 时设宿主的环境变量（见 `Host::set_env`），
+    /// 会话 `id` 的设置：主题是 `settings`；启动 shell 时设宿主的环境变量，
     /// 再加上 `runode_protocol::ENV_SESSION`。
     fn setup(&self, id: SessionId, settings: TermSettings) -> session::Setup {
         let mut env = self.env.lock().unwrap_or_else(PoisonError::into_inner).clone();
@@ -258,7 +265,7 @@ impl Shared {
         }
     }
 
-    /// 结束会话：先从登记表里拿掉，再叫它的线程结束，见 `Runner::answer_pending`。没有这个会话
+    /// 结束会话：先从登记表里拿掉，再叫它的线程结束。没有这个会话
     /// 时返回 false。
     fn kill(&self, id: SessionId) -> bool {
         let handle = self.registry().sessions.remove(&id);
@@ -287,7 +294,7 @@ impl Shared {
     }
 }
 
-/// 现在还开不开新会话，不开时为什么，见 `Shared::spawn`。
+/// 现在还开不开新会话，不开时为什么。
 fn refusal(peers: &server::Peers) -> Option<&'static str> {
     match peers.phase {
         server::Phase::HandingOver | server::Phase::Stopping(Stopped::Handoff) => {
@@ -300,7 +307,7 @@ fn refusal(peers: &server::Peers) -> Option<&'static str> {
 
 impl Host {
     /// 一个还没有会话的宿主：主题是默认的。`build` 是这次构建的标识，连上来的前端
-    /// 的构建一样时才给快照，见 `AttachMode`；快照的格式版本也在这里算好。
+    /// 的构建一样时才给快照；快照的格式版本也在这里算好。
     pub fn new(build: BuildId) -> Self {
         let snapshot_format = runode_terminal::host_session::snapshot_format().unwrap_or_else(|err| {
             tracing::warn!("cannot tell the snapshot format: {err}");
@@ -315,6 +322,7 @@ impl Host {
             env: Mutex::default(),
             peers: Mutex::default(),
             peers_changed: Condvar::new(),
+            layout_file: Mutex::new(None),
             #[cfg(unix)]
             handoff_deadline: Mutex::new(handoff::DEFAULT_DEADLINE),
             clipboard_patience: Mutex::new(session::CLIPBOARD_READ_PATIENCE),
@@ -324,7 +332,7 @@ impl Host {
         Self { shared: Arc::new_cyclic(shared) }
     }
 
-    /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认见 `DEFAULT_DEADLINE`，
+    /// 交出会话时给接手的新宿主多久收下会话（发送也算在内）、回 `HandoffReady`，默认 `DEFAULT_DEADLINE`，
     /// 到期就杀掉它、回滚。改了它，`GIVE_READY_WINDOW` 就不准了；测试用来缩短。
     #[cfg(unix)]
     pub fn set_handoff_deadline(&self, deadline: Duration) {
@@ -332,7 +340,7 @@ impl Host {
     }
 
     /// 之后开的会话里的程序读剪贴板时最多等界面多久（多半在等用户点询问框），过了就回程序一个空的
-    /// 剪贴板，默认见 `CLIPBOARD_READ_PATIENCE`；已经开着的会话不受影响。测试用来缩短。
+    /// 剪贴板，默认 `CLIPBOARD_READ_PATIENCE`；已经开着的会话不受影响。测试用来缩短。
     pub fn set_clipboard_read_patience(&self, patience: Duration) {
         *self.shared.clipboard_patience.lock().unwrap_or_else(PoisonError::into_inner) = patience;
     }

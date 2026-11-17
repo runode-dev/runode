@@ -20,7 +20,7 @@ use runode_terminal::{
     pty::{self, Pty, PtyHandoff},
 };
 
-use super::{CloseOnDrop, Credits, Handle, Inbox, Runner, Setup, pty_sink};
+use super::{CloseOnDrop, Credits, Handle, Inbox, PendingInput, Runner, Setup, pty_sink};
 
 /// 交接时 VT 停在一条编不进快照的序列中间（`SnapshotError::Unfinished`），最多这么久里让程序
 /// 接着输出、再试；还不行就只交重放。
@@ -84,8 +84,8 @@ pub(crate) struct Adopted {
 }
 
 /// 接手交接过来的会话：PTY 停在闸门上（`Pty::adopt_paused`，不读不写），在会话线程里用快照
-/// 重建 `HostSession`，快照没有或者解不开时用重放。不等重建完就返回，几个会话一起重建，见
-/// `Adopting::finish`。闸门等 `Inbox::Open` 打开，不接手了发 `Inbox::Release`。
+/// 重建 `HostSession`，快照没有或者解不开时用重放。不等重建完就返回，几个会话一起重建。
+/// 闸门等 `Inbox::Open` 打开，不接手了发 `Inbox::Release`。
 ///
 /// 失败时 PTY 已经原样交回、关掉了这边的描述符，shell 不受影响（交出方还拿着自己那份）。
 /// PTY 在会话线程起好之后才经 channel 交过去：起不了线程时它还在这里，用 `Pty::release` 明着交回。
@@ -99,6 +99,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
     let sink = pty_sink(&inbox, &credits);
     // 失败时交来的描述符随 `AdoptError` 丢掉，只关这边这份。
     let mut pty = Pty::adopt_paused(handoff, sink).map_err(|err| anyhow!("{err}"))?;
+    let input = PendingInput::new(pty.writer.queued());
     let (give, take) = mpsc::channel::<Pty>();
     let (ready, created) = mpsc::channel();
     let killed = Arc::new(AtomicBool::new(false));
@@ -136,7 +137,7 @@ pub(crate) fn adopt(setup: Setup, adopted: Adopted) -> Result<Adopting> {
         release(&mut pty);
         return Err(anyhow!("the session thread ended while starting"));
     }
-    Ok(Adopting { handle: Handle { inbox, killed, driven, desktop }, created })
+    Ok(Adopting { handle: Handle { inbox, killed, driven, desktop, input: Some(input) }, created })
 }
 
 /// 正在重建的接手来的会话。
@@ -366,7 +367,7 @@ impl Runner {
         };
         let mut at_prompt = self.type_ahead.take().map(|(data, _)| data).unwrap_or_default();
         for message in held {
-            let bytes = match message {
+            let bytes = match message.uncounted() {
                 Inbox::Input { data, .. } => Ok(data),
                 Inbox::TypeAtPrompt(data) => {
                     at_prompt = data;

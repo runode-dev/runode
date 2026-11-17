@@ -1,7 +1,7 @@
 //! 退出应用、关掉窗口时宿主里的会话怎么办，以及要结束正在干活的 agent 之前先问一句。
 //!
-//! 会话留下还是结束由宿主怎么跑（`host_client::Mode`）、配置项 `terminal-host`（见
-//! `host_client::quit_keeps_sessions`）和用户做了什么（`QuitAction`）决定，决策在 `quit_plan`。
+//! 会话留下还是结束由宿主怎么跑（`host_client::Mode`）、配置项 `terminal-host`
+//! 和用户做了什么（`QuitAction`）决定，决策在 `quit_plan`。
 //! 要结束会话、又有 agent 在跑时才弹框确认；结束会话之前先冻结存档（`persist::freeze`），视图随后
 //! 关掉分屏时才不会把存档清空。
 //!
@@ -53,7 +53,7 @@ pub(super) enum Ending {
     /// 先让单独跑的宿主连会话一起退出（`ClientMsg::Shutdown`），再退出。
     ShutdownHost,
     /// 单独跑的宿主还连着别的桌面：只结束这个 app 窗口里的会话（`ClientMsg::Kill`），宿主和别的会话
-    /// 留给那个桌面，见 `host_client::other_desktops`。
+    /// 留给那个桌面。
     EndOwn,
 }
 
@@ -91,8 +91,8 @@ fn ends_all(action: QuitAction) -> bool {
     }
 }
 
-/// `action` 让 app 退出时会话怎么办；`keeping` 是配置项 `terminal-host` 开着，见
-/// `host_client::quit_keeps_sessions`；`shared` 是宿主还连着别的桌面，见 `host_client::other_desktops`。
+/// `action` 让 app 退出时会话怎么办；`keeping` 是配置项 `terminal-host` 开着；
+/// `shared` 是宿主还连着别的桌面。
 /// `ends_all` 的那些照样让宿主连所有会话一起退出。
 pub(super) fn ending(mode: Mode, keeping: bool, action: QuitAction, shared: bool) -> Ending {
     let keep = match action {
@@ -130,7 +130,7 @@ pub(super) fn offers_end_sessions(mode: Mode, keeping: bool) -> bool {
     ending(mode, keeping, QuitAction::Quit, false) == Ending::Keep
 }
 
-/// 菜单里要不要放「退出并结束所有会话」，见 `offers_end_sessions`。
+/// 菜单里要不要放「退出并结束所有会话」。
 pub fn end_sessions_in_menu() -> bool {
     offers_end_sessions(host_client::mode(), host_client::quit_keeps_sessions())
 }
@@ -155,7 +155,7 @@ fn prompting(cx: &App) -> bool {
 }
 
 /// 这次退出经过了 `run`，会话怎么办已经办了：系统发起的退出的收尾（`install`）不再做一遍。经过了
-/// `run` 却没退成（重启以更新拉不起新进程）时复位，见 `quit_to_update`。
+/// `run` 却没退成（重启以更新拉不起新进程）时复位。
 #[derive(Default)]
 struct Settled(bool);
 
@@ -166,12 +166,13 @@ fn needs_ending(settled: Option<&Settled>) -> bool {
     !settled.is_some_and(|settled| settled.0)
 }
 
-/// 装上系统发起的退出（从 Dock 退出、注销、关机）的收尾，见模块说明。要在打开窗口之前调用。
+/// 装上系统发起的退出（从 Dock 退出、注销、关机）的收尾。要在打开窗口之前调用。
 pub(super) fn install(cx: &mut App) {
     cx.on_app_quit(|cx| {
         if needs_ending(cx.try_global::<Settled>()) {
             end_unprompted(cx);
         }
+        host_client::stop_in_app_host();
         async {}
     })
     .detach();
@@ -189,7 +190,7 @@ fn end_unprompted(cx: &mut App) {
         return;
     };
     tracing::info!("quitting without going through the quit menu: {ending:?}");
-    // 同 `run`：会话结束之前定下存档。
+    // 会话结束之前定下存档。
     persist::freeze(cx);
     match ending {
         Ending::EndOwn => end_own(cx),
@@ -207,7 +208,7 @@ fn unprompted(mode: Mode, keeping: bool, shared: bool) -> Option<Ending> {
     }
 }
 
-/// 退出应用，会话怎么办见 `quit_plan`。
+/// 退出应用。
 pub fn quit(cx: &mut App) {
     cx.defer(|cx| {
         let window = super::front_any_window(cx);
@@ -369,7 +370,7 @@ fn discard_unsaved(
     .detach();
 }
 
-/// 按 `quit_plan` 结束会话、做 `then`，见 `run`。
+/// 按 `quit_plan` 结束会话、做 `then`。
 fn end_sessions_then(
     action: QuitAction,
     window: Option<AnyWindowHandle>,
@@ -425,7 +426,7 @@ fn end_sessions_then(
                     then(cx);
                 }
                 (Answer::End, Ending::EndOwn) => {
-                    // 同上：会话结束之前定下存档。
+                    // 会话结束之前定下存档。
                     persist::freeze(cx);
                     end_own(cx);
                     then(cx);
@@ -455,7 +456,7 @@ fn shutdown_host() {
     }
 }
 
-/// 结束这个 app 窗口里的会话，等宿主读完（最多 `SHUTDOWN_FLUSH`），见 `Ending::EndOwn`。
+/// 结束这个 app 窗口里的会话，等宿主读完（最多 `SHUTDOWN_FLUSH`）。
 fn end_own(cx: &App) {
     let link = host_client::link();
     for id in held_sessions(cx) {

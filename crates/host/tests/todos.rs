@@ -586,6 +586,64 @@ fn schedules_keep_a_standalone_host_up() {
     assert_eq!(stopped.join().unwrap(), Stopped::Idle);
 }
 
+/// 单独跑的宿主退出时，到点触发、命令还没跑完的一次性定时放回库里，下次启动再到点；命令之后才跑完的结果不记。
+#[cfg(unix)]
+#[test]
+fn a_once_schedule_running_at_shutdown_is_put_back() {
+    let (host, dir, peer) = board("todo-put-back");
+    host.mark_standalone();
+    put_back_while_stopping(&host, &dir, peer, || {
+        host.shut_down();
+        assert_eq!(host.run_until_idle(Duration::from_secs(1)), Stopped::Shutdown);
+    });
+}
+
+/// 跑在 app 里的宿主随 app 退出停下（`Host::stop_schedules`）时，到点触发、命令还没跑完的一次性定时放回库里；
+/// 命令之后才跑完的结果不记。
+#[cfg(unix)]
+#[test]
+fn a_once_schedule_running_when_an_app_host_stops_is_put_back() {
+    let (host, dir, peer) = board("todo-app-put-back");
+    put_back_while_stopping(&host, &dir, peer, || host.stop_schedules());
+}
+
+/// 在 `host` 的看板上加一个马上到点的一次性定时，命令开跑以后 `stop` 让宿主停下：定时放回了库里；再让命令
+/// 跑完，结果不记，定时还在。
+#[cfg(unix)]
+fn put_back_while_stopping(host: &Host, dir: &Path, mut peer: Peer, stop: impl FnOnce()) {
+    let (started, go) = (dir.join("started"), dir.join("go"));
+    let run =
+        format!("touch '{}'; while [ ! -e '{}' ]; do sleep 0.05; done; printf task", started.display(), go.display());
+    let at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 2;
+    let added = ask(
+        &mut peer,
+        &ClientMsg::AddSchedule {
+            req: 1,
+            spec: spec("Deploy", dir, "true"),
+            when: When::Once { at },
+            run: Some(run),
+            // 下面等命令跑完，出错时最多等这么久。
+            run_timeout: Some(1),
+        },
+    );
+    let HostMsg::TodoAdded { req: 1, id } = added else { panic!("expected the schedule, got {added:?}") };
+    drop(peer);
+    wait_until("the command of the schedule starting", || started.exists());
+
+    stop();
+    let db = runode_todo::Store::open(&dir.join("todos.db")).unwrap();
+    let schedules = db.list_schedules().unwrap();
+    let restored = schedules.iter().find(|schedule| schedule.id == id).expect("the schedule was not put back");
+    assert_eq!(restored.when, When::Once { at });
+
+    std::fs::write(&go, "").unwrap();
+    host.wait_for_schedule_runs();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let todos = db.list_todos(now).unwrap();
+    assert!(!todos.iter().any(|todo| todo.schedule.as_deref() == Some(id.as_str())), "the result was recorded");
+    assert!(db.list_schedules().unwrap().iter().any(|schedule| schedule.id == id));
+}
+
 /// 别的程序直接写进库里的任务，开始时宿主照样检查：agent 里带换行的不打进 shell。
 #[test]
 fn a_bad_todo_written_straight_into_the_database_does_not_start() {

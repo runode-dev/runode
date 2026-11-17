@@ -1,17 +1,17 @@
-//! 桌面这一侧连终端宿主的客户端：宿主管着每个会话的 PTY 和权威的那份 VT（见 `runode_host`），
+//! 桌面这一侧连终端宿主的客户端：宿主管着每个会话的 PTY 和权威的那份 VT，
 //! 桌面经一条连接（`Link`）按 `runode_protocol` 和它说话。宿主平常单独一个进程跑（`runode --host`），
 //! 连不上也拉不起来、或者 socket 被别的宿主占着时才跑在 app 进程里（`Host::connect_pair` 的一对
-//! socket），见 `launch::choose_mode`。单独跑的宿主是别的构建时（app 升级了），先让这个构建的新宿主
-//! 接手它的会话，见 `handoff`；Windows 上的 ConPTY 交不出去，旧宿主连同会话结束，会话跟着重启。
+//! socket）。单独跑的宿主是别的构建时（app 升级了），先让这个构建的新宿主
+//! 接手它的会话；Windows 上的 ConPTY 交不出去，旧宿主连同会话结束，会话跟着重启。
 //! 配置项 `terminal-host` 只管退出时会话留不留下（`quit_keeps_sessions`）。
 //!
 //! 跑在 app 里的宿主不把会话交出去：shell 是 app 的子进程、算在 app 名下（macOS 的责任进程），app
 //! 一退出，交出去的终端就连不上局域网（No route to host）。单独跑的宿主交出会话后等它的 shell 都
-//! 结束了才退出，见 `host_process`。
+//! 结束了才退出。
 //!
 //! 启动时 `start` 在后台线程里读配置、定模式、连上宿主，主线程第一次用 `link` 时等它连好，读到的
 //! 配置交给主线程当第一份生效的配置（`take_config`）。
-//! 主题和剪贴板的规矩跟着配置走，见 `configure`；别的进程经宿主请界面办的事见 `serve_ui`；
+//! 主题和剪贴板的规矩跟着配置走；别的进程经宿主请界面办的事由 `serve_ui` 办；
 //! 连接断了以后用 `reconnect` 重新连上。
 
 pub(crate) mod bridge;
@@ -57,7 +57,7 @@ pub(crate) use uds_windows::UnixStream;
 /// 宿主现在怎么跑。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// 跑在 app 进程里，app 退出时会话跟着结束，见模块文档。
+    /// 跑在 app 进程里，app 退出时会话跟着结束。
     InProcess,
     /// 单独一个进程（`runode --host`），app 退出后会话还在。配置项 `terminal-host` 关着时退出时让它
     /// 连会话一起退出（发 `Shutdown { kill_sessions: true }`）。
@@ -98,13 +98,13 @@ static READY_CHANGED: Condvar = Condvar::new();
 static MODE: Mutex<Mode> = Mutex::new(Mode::InProcess);
 /// 跑在 app 里的宿主，用到时才建。
 static IN_PROCESS: OnceLock<Host> = OnceLock::new();
-/// 配置项 `terminal-host`：退出后保留会话，跟着配置走，见 `quit_keeps_sessions`。
+/// 配置项 `terminal-host`：退出后保留会话，跟着配置走。
 static KEEP_SESSIONS: AtomicBool = AtomicBool::new(false);
-/// 跑在 app 里的宿主的远程访问，第一次要开时才建，见 `configure`。
+/// 跑在 app 里的宿主的远程访问，第一次要开时才建。
 static REMOTE: Mutex<Option<runode_remote::Service>> = Mutex::new(None);
-/// `start` 的后台线程读到的配置，和读之前取的配置文件的修改时间，见 `take_config`。
+/// `start` 的后台线程读到的配置，和读之前取的配置文件的修改时间。
 static LOADED_CONFIG: Mutex<Option<(Config, crate::config::Stamps)>> = Mutex::new(None);
-/// 要在界面上告诉用户的事（比如旧版本的宿主还活着），按发生的先后，见 `take_notice`。
+/// 要在界面上告诉用户的事（比如旧版本的宿主还活着），按发生的先后。
 static NOTICE: Mutex<Vec<Notice>> = Mutex::new(Vec::new());
 
 /// 要在界面上告诉用户的宿主的事。
@@ -126,7 +126,7 @@ pub enum Notice {
     #[cfg_attr(not(unix), expect(dead_code, reason = "Windows 上不交接"))]
     HandoffDegraded { count: usize },
     /// 旧版本的 app 还开着：旧宿主上连着桌面、不交（`HandoffRefusal::DesktopConnected`），这个 app 又
-    /// 连不上旧宿主，或者用户要结束的旧宿主其实跑在它的进程里（见 `launch::Ended::NotAHost`）。这次跑在
+    /// 连不上旧宿主，或者用户要结束的旧宿主其实跑在它的进程里。这次跑在
     /// app 里、不开 socket，请用户先退出旧版本。
     OldAppRunning,
     /// 用户要结束旧宿主，socket 上却已经是这个构建的宿主了（交接其实成了，或者另一个同版本的
@@ -150,8 +150,8 @@ fn notify(notice: Notice) {
 pub fn start(then: impl FnOnce(&Config) + Send + 'static) {
     let spawned = thread::Builder::new().name("host-connect".into()).spawn(move || {
         let ready = MarkReady;
-        // 还不知道系统外观，先按深色读；主线程拿到时外观不一样、主题又跟着外观走就重读，见
-        // `Config::fits_appearance`。配置有问题时在这里报告。
+        // 还不知道系统外观，先按深色读；主线程拿到时外观不一样、主题又跟着外观走就重读。
+        // 配置有问题时在这里报告。
         let before = crate::config::watch_stamp(&Config::default());
         let config = Config::load(true);
         KEEP_SESSIONS.store(config.terminal_host, Ordering::Relaxed);
@@ -199,14 +199,14 @@ pub fn link() -> &'static Link {
     &LINK
 }
 
-/// 宿主现在怎么跑；`start` 还没定下时等它，同 `link`。
+/// 宿主现在怎么跑；`start` 还没定下时等它。
 pub fn mode() -> Mode {
     link();
     *MODE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 退出时要不要把会话留下：配置项 `terminal-host`，设置里改了马上算数，不用重启。宿主跑在 app 里时
-/// 留不下，见模块文档。
+/// 留不下。
 pub fn quit_keeps_sessions() -> bool {
     KEEP_SESSIONS.load(Ordering::Relaxed)
 }
@@ -219,8 +219,7 @@ pub fn take_notice() -> Vec<Notice> {
 /// 把配置里宿主关心的部分告诉它：主题（各个会话在输出流里标出换主题的位置，视图到那里再换）、
 /// 不把命令记进历史文件，以及终端里的程序读写剪贴板的规矩。重连后 `Link` 自己补发。
 ///
-/// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置，
-/// 见 `remote_access`。
+/// 宿主跑在 app 里时，远程访问的监听也开在 app 里，在这里按配置开关；单独跑的宿主自己读配置。
 pub fn configure(config: &Config) {
     let messages = vec![
         ClientMsg::SetTheme { settings: config.term_settings() },
@@ -251,7 +250,7 @@ pub fn configure(config: &Config) {
     }
 }
 
-/// 看板变了、或者换了一条连接要重新问看板，见 `Link::todos_changed`。只能取一次。
+/// 看板变了、或者换了一条连接要重新问看板。只能取一次。
 pub fn todos_changed() -> Option<UnboundedReceiver<()>> {
     link().todos_changed()
 }
@@ -291,7 +290,7 @@ pub fn reconnect() -> Result<()> {
     if link.connected() { Ok(()) } else { Err(anyhow!("could not reconnect to the host")) }
 }
 
-/// `reconnect` 连着几次连上了 socket 却握不了手，见那里。
+/// `reconnect` 连着几次连上了 socket 却握不了手。
 static STUCK: AtomicU32 = AtomicU32::new(0);
 const STUCK_TRIES: u32 = 3;
 
@@ -321,19 +320,18 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     link().list_sessions(LIST_TIMEOUT)
 }
 
-/// 宿主手里的布局，见 `Link::held_layout`。
+/// 宿主手里的布局。
 pub fn held_layout() -> Result<Vec<WindowLayout>> {
     link().held_layout(LIST_TIMEOUT)
 }
 
-/// 宿主在 `dir` 里列出的命令，见 `ClientMsg::ListTasks`。会等宿主回话，别在主线程上调。
+/// 宿主在 `dir` 里列出的命令。会等宿主回话，别在主线程上调。
 pub fn list_tasks(dir: PathBuf) -> Result<Vec<TaskSource>> {
     link().list_tasks(dir, LIST_TIMEOUT)
 }
 
-/// 发一条看板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错，见
-/// `Link::host_knows_todos`。开始任务要建工作树，大仓库上要一会儿，所以等得久些。会等宿主回话，别在
-/// 主线程上调。
+/// 发一条看板的请求（`ClientMsg::ListTodos` 等），等宿主回话；宿主不认得这些消息时直接报错。
+/// 开始任务要建工作树，大仓库上要一会儿，所以等得久些。会等宿主回话，别在主线程上调。
 pub fn ask_todos(make: impl FnOnce(u32) -> ClientMsg) -> Result<runode_protocol::HostMsg> {
     let link = link();
     if !link.host_knows_todos() {
@@ -369,7 +367,7 @@ fn socket_path() -> Option<PathBuf> {
     }
 }
 
-/// 定下宿主怎么跑、连上它，见 `launch::choose_mode`。
+/// 定下宿主怎么跑、连上它。
 fn establish() {
     let build = build();
     let socket = socket_path();
@@ -470,7 +468,7 @@ fn hand_over(socket: &Path, sessions: Option<usize>, _desktops: usize) -> Option
     })
 }
 
-/// 让这个构建的新宿主接手 `socket` 上旧宿主的会话（见 `handoff::hand_over`），成了就连上它。
+/// 让这个构建的新宿主接手 `socket` 上旧宿主的会话，成了就连上它。
 /// `sessions` 是旧宿主有几个会话，协议对不上时不知道。另一个新 app 正在交接时返回 `None`，由
 /// 调用方过一会儿重新探。
 ///
@@ -574,7 +572,7 @@ fn share_old_host(socket: &Path) -> Mode {
     }
 }
 
-/// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它（见 `launch::end_old_host`），
+/// 用户在弹框里选了结束旧宿主（连同它的会话）：在后台线程里结束它，
 /// 之后这个 app 里的宿主开 socket，让命令行连得上。对面不是单独的宿主进程时不结束它，改请用户先
 /// 退出那个 app（`Notice::OldAppRunning`）。
 ///
@@ -642,7 +640,7 @@ fn end_old_host(cx: &mut App) {
     .detach();
 }
 
-/// 连上 socket 上单独一个进程的宿主，没有就拉起一个，见 `launch::connect_or_launch`。
+/// 连上 socket 上单独一个进程的宿主，没有就拉起一个。
 fn launch_host(socket: &Path) -> Result<(), ConnectError> {
     runode_paths::runode_exe().map_err(ConnectError::Io).and_then(|exe| launch::connect_or_launch(&LINK, socket, &exe))
 }
@@ -742,6 +740,13 @@ fn in_process(listen: bool) -> Mode {
     Mode::InProcess
 }
 
+/// app 要退出了：跑在 app 里的宿主随之停下（`Host::stop_schedules`）。没有跑在 app 里的宿主时什么都不做。
+pub fn stop_in_app_host() {
+    if let Some(host) = IN_PROCESS.get() {
+        host.stop_schedules();
+    }
+}
+
 /// 在 runode 自己的 `run/` 目录里开宿主的 socket，让命令行这类别的进程连上来。刚让留下的宿主
 /// 退出时，它放开锁要一会儿，最多等 `LISTEN_RETRY`。开不了时记一笔日志，app 照常用。
 fn listen_in_app(host: &Host) {
@@ -751,6 +756,10 @@ fn listen_in_app(host: &Host) {
         match listen(host, &dirs) {
             Ok(socket) => {
                 tracing::info!("host listening on {}", socket.display());
+                // 拿到锁才说明这台机器上没有别的宿主管着这份文件；要在桌面连上来之前读进来。
+                if let Some(file) = dirs.host_layout_file() {
+                    host.keep_layout(file);
+                }
                 return;
             }
             Err(err) if Instant::now() >= deadline => {
@@ -775,7 +784,7 @@ pub fn listen(host: &Host, dirs: &runode_paths::Dirs) -> Result<PathBuf> {
     Ok(socket)
 }
 
-/// 有要告诉用户的宿主的事（见 `Notice`）时，在最前面的窗口上弹框说一声；交接没成时弹框问用户
+/// 有要告诉用户的宿主的事时，在最前面的窗口上弹框说一声；交接没成时弹框问用户
 /// 留着旧宿主（默认）还是结束它。回滚历史没带过来这种不用做决定的事发系统通知，不弹框。同一次
 /// 启动里攒了几件要弹框的事时只弹最后那件，系统通知照发。
 pub fn show_notice(cx: &mut App) {

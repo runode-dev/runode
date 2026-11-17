@@ -23,7 +23,7 @@ pub enum Stopped {
     Idle,
     /// 前端发来 `ClientMsg::Shutdown`：会话都结束了，各条连接收到了 `Goodbye`。
     Shutdown,
-    /// 会话和监听的 socket 都交给了接手的新版本宿主（见 `Host::take_over`），各条连接收到了
+    /// 会话和监听的 socket 都交给了接手的新版本宿主，各条连接收到了
     /// `Goodbye`。socket 文件留着，新宿主接着在上面监听；进程照常退出。
     Handoff,
 }
@@ -102,6 +102,7 @@ impl Host {
         }
         // 正在开的会话开好时要拿 `peers` 看 `Peers::phase`，等会话线程时不能拿着它。
         drop(peers);
+        self.stop_schedules();
         let left = shared.session_threads.wait_until(Instant::now() + SESSIONS_END_TIMEOUT);
         if left > 0 {
             tracing::warn!("{left} session threads still running on exit");

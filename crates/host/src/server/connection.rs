@@ -2,7 +2,7 @@
 //! 连接断开时撤掉登记。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::BufReader,
     net::Shutdown,
     sync::{
@@ -37,18 +37,23 @@ use super::{
 use crate::{
     Shared, SpawnOptions, Stopped, browse,
     git::{GitWorker, Job},
-    session::{Drive, Inbox, Screen, Subscribe},
+    session::{Delivery, Drive, Inbox, Screen, Subscribe},
 };
 
 /// 快照分成这么大的帧发，不必一帧装下整份。
 const SNAPSHOT_CHUNK: usize = 1 << 20;
 /// 一条连接上最多同时有这么多列会话、读屏幕的请求在等回话，读写 git 的请求、列目录和列命令的
-/// 请求各另有这么多。
+/// 请求、转给界面的请求各另有这么多。
 pub(super) const MAX_WAITING: usize = 16;
 /// 等回话的请求已经有 `MAX_WAITING` 条时回的错误。
 const ERROR_TOO_MANY_WAITING: &str = "too many requests are waiting for an answer";
 /// 转给界面的请求还没回话、界面的连接就断了时回的错误。
 const ERROR_WINDOW_GONE: &str = "the Runode window went away before answering";
+/// 界面跟不上、转给它的请求没交出去时回的错误；不以 `ERROR_BACKED_UP` 开头，前端不因此重连。
+const ERROR_WINDOW_BUSY: &str = "the Runode window is not keeping up; try again later";
+/// 会话积压的输入到了 `MAX_PENDING_INPUT`、这次的输入没收时回的错误；不以 `ERROR_BACKED_UP` 开头，前端不因此
+/// 重连。
+pub(super) const ERROR_INPUT_FULL: &str = "the program is not reading its input; try again later";
 /// 前端给的终端行列数最多这么大，再大的开会话、连上、改尺寸都回 `Error`：几万见方的网格会让
 /// 会话线程卡住、内存涨到 GB 级。
 const MAX_GRID: u16 = 2000;
@@ -151,11 +156,13 @@ fn serve(shared: &Arc<Shared>, id: u64, stream: UnixStream, check_peer: bool) {
         snapshots: false,
         shell_report: false,
         channels: HashMap::new(),
+        input_refused: HashSet::new(),
         next_channel: 1,
         waiting: Waiting::default(),
         git_waiting: Waiting::default(),
         files_waiting: Waiting::default(),
         spawn_waiting: Waiting::default(),
+        ui_waiting: Waiting::default(),
         git: None,
         closing: false,
     };
@@ -245,6 +252,8 @@ struct Connection {
     shell_report: bool,
     /// 连着的会话，按通道。
     channels: HashMap<u32, SessionId>,
+    /// 输入帧因为积压到了上限被丢掉、还没恢复的会话：每次积压只记一条日志，收下一帧后恢复。
+    input_refused: HashSet<SessionId>,
     next_channel: u32,
     /// 在等回话的列会话、读屏幕的请求。
     waiting: Waiting,
@@ -254,6 +263,8 @@ struct Connection {
     files_waiting: Waiting,
     /// 在另起的线程里开的会话，和 `files_waiting` 同理另算。
     spawn_waiting: Waiting,
+    /// 转给界面、界面还没回话的请求，也另算：界面卡住时不占列会话、读屏幕的名额。
+    ui_waiting: Waiting,
     /// 办 git 请求的工作线程，第一次要时才起。
     git: Option<GitWorker>,
     /// 这条连接发来的 `Shutdown` 让宿主退出了：之后的请求都不办，读的线程结束。
@@ -350,10 +361,24 @@ impl Connection {
                 FrameKind::Input => match self.channels.get(&frame.channel) {
                     // 会话已经没了（比如别的前端结束了它）：通道跟着作废。
                     Some(&id) => {
-                        self.drive(id, DriveAction::Input);
                         let input = Inbox::Input { connection: self.id, data: frame.payload };
-                        if !self.shared.deliver(id, input) {
-                            self.channels.remove(&frame.channel);
+                        match self.shared.deliver_input(id, input, || self.drive(id, DriveAction::Input)) {
+                            Delivery::Sent => {
+                                self.input_refused.remove(&id);
+                            }
+                            // 输入帧没有回话，丢掉；通道照旧，程序读了以后的输入照常转发。
+                            Delivery::Full => {
+                                if self.input_refused.insert(id) {
+                                    tracing::warn!(
+                                        "session {id} is not reading its input; dropping input from connection {}",
+                                        self.id
+                                    );
+                                }
+                            }
+                            Delivery::Gone => {
+                                self.channels.remove(&frame.channel);
+                                self.input_refused.remove(&id);
+                            }
                         }
                     }
                     None => tracing::debug!("input for unknown channel {}", frame.channel),
@@ -474,7 +499,7 @@ impl Connection {
             }
             ClientMsg::SetTheme { settings } => self.shared.set_theme(settings),
             // 读写剪贴板的规矩是用户在 app 里的设置，只认说自己是界面的连接。种类是自报的，这只防
-            // 命令行之类误发，不防同一个用户的程序冒充界面，见模块文档。
+            // 命令行之类误发，不防同一个用户的程序冒充界面。
             ClientMsg::SetOptions { clipboard, .. } => {
                 if self.kind == ClientKind::Desktop {
                     self.shared.set_clipboard(clipboard);
@@ -516,10 +541,17 @@ impl Connection {
             ClientMsg::LayoutChanged { windows } => {
                 if self.kind == ClientKind::Desktop {
                     let mut peers = self.shared.peers();
+                    // 记着没接过去的改动时文件才在，界面接过去了要删掉它。
+                    let mut adopted = false;
                     if let Some(windows) = windows {
                         peers.layout = windows;
+                        adopted = std::mem::take(&mut peers.layout_unadopted);
                     }
                     peers.layout_changed();
+                    drop(peers);
+                    if adopted {
+                        self.shared.store_layout();
+                    }
                 } else {
                     self.error(None, None, "only the runode app reports its layout".into());
                 }
@@ -655,13 +687,27 @@ impl Connection {
 
     /// 把要界面办的请求转给界面：这条连接在 `Hello` 里报了所在的会话时，交给看着那个会话的桌面
     /// （`session::Handle::desktop`），几台电脑上的桌面连着同一个宿主时，命令行开的终端才落在它所在的
-    /// 窗口里；挑不出来时交给最近连上的 `ClientKind::Desktop` 连接。没有界面连接时宿主自己办。
+    /// 窗口里；挑不出来时交给最近连上的 `ClientKind::Desktop` 连接。没有界面连接时宿主自己办。这条连接上
+    /// 已经有 `MAX_WAITING` 条在等界面回话、或者界面跟不上时当场回 `Error`。
     fn to_ui(&self, req: u32, request: ClientMsg) {
-        let asker = Asker::Client { from: self.id, origin: self.out.clone(), req };
+        let Some(slot) = self.ui_waiting.enter() else {
+            self.error(Some(req), None, ERROR_TOO_MANY_WAITING.into());
+            return;
+        };
+        let asker = Asker::Client { from: self.id, origin: self.out.clone(), req, _slot: slot };
         let preferred = self.by.and_then(|by| self.shared.registry().sessions.get(&by)?.desktop());
         match self.shared.send_to_ui(preferred, asker, request) {
             ToUi::Sent(_) => {}
             ToUi::NoDesktop(request) => self.headless(req, *request),
+            ToUi::Busy(Asker::Client { origin, req, .. }) => {
+                origin.control(&HostMsg::Error {
+                    req: Some(req),
+                    id: None,
+                    message: ERROR_WINDOW_BUSY.into(),
+                    reason: None,
+                });
+            }
+            ToUi::Busy(_) => {}
             ToUi::Gone(Some(Asker::Client { origin, req, .. })) => {
                 origin.control(&HostMsg::Error {
                     req: Some(req),
@@ -674,8 +720,8 @@ impl Connection {
         }
     }
 
-    /// 没有界面连着时办要界面办的请求：布局、开终端、新建工作区、改名照宿主手里的布局办，见
-    /// `workspaces`；切到终端、挪分屏没有窗口可办，回一句没办成。开终端要等会话线程、stat 目录，和读文件系统的
+    /// 没有界面连着时办要界面办的请求：布局、开终端、新建工作区、改名照宿主手里的布局办；
+    /// 切到终端、挪分屏没有窗口可办，回一句没办成。开终端要等会话线程、stat 目录，和读文件系统的
     /// 请求一样另起线程办。
     fn headless(&self, req: u32, request: ClientMsg) {
         let shared = self.shared.clone();
@@ -903,14 +949,15 @@ impl Connection {
         self.shared.deliver(id, Inbox::Driven(drive));
     }
 
-    /// 把一件只回 `Done` 的事（发控制键、粘贴）交给会话，先记下谁在操作它。会话线程按到达的先后
+    /// 把一件只回 `Done` 的事（发控制键、粘贴）交给会话，收下了才先记下谁在操作它。会话线程按到达的先后
     /// 处理，在这之后发来的输入不会抢到前面。
     fn deliver_done(&self, req: u32, id: SessionId, action: DriveAction, message: Inbox) {
-        self.drive(id, action);
-        if self.shared.deliver(id, message) {
-            self.out.control(&HostMsg::Done { req });
-        } else {
-            self.error(Some(req), Some(id), format!("{ERROR_NO_SESSION} {id}"));
+        match self.shared.deliver_input(id, message, || self.drive(id, action)) {
+            Delivery::Sent => {
+                self.out.control(&HostMsg::Done { req });
+            }
+            Delivery::Full => self.error(Some(req), Some(id), ERROR_INPUT_FULL.into()),
+            Delivery::Gone => self.error(Some(req), Some(id), format!("{ERROR_NO_SESSION} {id}")),
         }
     }
 

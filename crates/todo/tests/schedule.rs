@@ -11,7 +11,7 @@ fn local(at: u64) -> (i32, i32, u32) {
     // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
     #[cfg(unix)]
     assert!(!unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null());
-    // SAFETY: 同上。
+    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
     #[cfg(windows)]
     assert_eq!(unsafe { libc::localtime_s(&raw mut tm, &raw const at) }, 0);
     (tm.tm_hour, tm.tm_min, u32::try_from(tm.tm_wday).unwrap())
@@ -55,12 +55,12 @@ fn once_every_and_unknown() {
 /// `at` 是本地的几号。
 fn local_day(at: u64) -> i32 {
     let at = libc::time_t::try_from(at).unwrap();
-    // SAFETY: 同 `local`。
+    // SAFETY: `tm` 是纯数据，全零是合法的值；`localtime_r` 和 `localtime_s` 只写它。
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: 同 `local`。
+    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
     #[cfg(unix)]
     assert!(!unsafe { libc::localtime_r(&raw const at, &raw mut tm) }.is_null());
-    // SAFETY: 同 `local`。
+    // SAFETY: 两个指针都指向这里的局部变量，调用期间有效。
     #[cfg(windows)]
     assert_eq!(unsafe { libc::localtime_s(&raw mut tm, &raw const at) }, 0);
     tm.tm_mday

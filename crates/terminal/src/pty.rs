@@ -67,7 +67,7 @@ const MAX_QUEUED_FOR_REPLY: usize = 1 << 20;
 /// 读线程交给 `PtySink` 的事件。
 pub enum PtyEvent {
     Output(Arc<[u8]>),
-    /// PTY 读到 EOF 或出错：子进程已经退出。接手来的会话里 shell 退出也算，见 `Pty::adopt`。
+    /// PTY 读到 EOF 或出错：子进程已经退出。接手来的会话里 shell 退出也算。
     Exited,
 }
 
@@ -78,7 +78,7 @@ pub type PtySink = Box<dyn FnMut(PtyEvent) -> bool + Send>;
 /// 写队列里的一项。
 enum WriterMsg {
     Data(Vec<u8>),
-    /// 交接：能写的写完，写不进去的连同后面排着的交回来，然后写线程结束，见 `Pty::release`。
+    /// 交接：能写的写完，写不进去的连同后面排着的交回来，然后写线程结束。
     Finish(mpsc::Sender<Vec<u8>>),
 }
 
@@ -86,14 +86,44 @@ enum WriterMsg {
 #[derive(Clone)]
 pub struct PtyWriter(mpsc::Sender<WriterMsg>, Arc<AtomicUsize>);
 
+/// `PtyWriter` 的写队列里还没写出的字节数，只能读：写线程写完一项才减掉它。
+#[derive(Clone)]
+pub struct Queued(Arc<AtomicUsize>);
+
+impl Queued {
+    pub fn bytes(&self) -> usize {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// 写线程出错后接着收、不再写：收到的都从计数里减掉，一直到所有 `PtyWriter` 都丢掉；叫交接时什么都不交回，
+/// 随即结束。
+fn discard_queued(rx: &mpsc::Receiver<WriterMsg>, queued: &AtomicUsize) {
+    for message in rx.iter() {
+        match message {
+            WriterMsg::Data(data) => {
+                queued.fetch_sub(data.len(), Ordering::Relaxed);
+            }
+            WriterMsg::Finish(done) => {
+                let _ = done.send(Vec::new());
+                return;
+            }
+        }
+    }
+}
+
 impl PtyWriter {
+    pub fn queued(&self) -> Queued {
+        Queued(self.1.clone())
+    }
+
     pub fn write(&self, data: &[u8]) {
         if !data.is_empty() {
             self.send(data.to_vec());
         }
     }
 
-    /// 同 `write`，数据已经在自己的缓冲里时不必再复制一份。
+    /// 把 `data` 交给写线程，拿走这份缓冲、不再复制一份。
     pub fn send(&self, data: Vec<u8>) {
         if data.is_empty() {
             return;
@@ -107,7 +137,7 @@ impl PtyWriter {
         }
     }
 
-    /// 同 `write_reply`，用来写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
+    /// 写终端查询的回复：队列里积压超过 `MAX_QUEUED_FOR_REPLY` 时丢掉。用户的
     /// 按键和粘贴不受这个限制。
     pub fn reply(&self, data: &[u8]) {
         if self.1.load(Ordering::Relaxed) > MAX_QUEUED_FOR_REPLY {
@@ -117,7 +147,7 @@ impl PtyWriter {
         self.write_reply(data);
     }
 
-    /// 同 `write`，写的是终端给程序的回话（查询应答、剪贴板读请求的回话），不受积压上限。
+    /// 写终端给程序的回话（查询应答、剪贴板读请求的回话），不受积压上限。
     pub fn write_reply(&self, data: &[u8]) {
         #[cfg(windows)]
         let encoded = conpty::encode_reply(data);

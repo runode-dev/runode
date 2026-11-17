@@ -1,4 +1,4 @@
-//! 交出会话的一方（旧宿主），见 `handoff` 的模块文档。在新宿主那条连接的读线程里跑：
+//! 交出会话的一方（旧宿主）。在新宿主那条连接的读线程里跑：
 //! 检查、清场、让会话停下来交出状态（`Inbox::Prepare`）、发出、等新宿主回话，然后提交或者回滚。
 
 use std::{
@@ -49,7 +49,7 @@ pub(crate) struct Asked {
     pub(crate) build: BuildId,
 }
 
-/// 新宿主要接手，见 `Asked`。`connection` 是这条连接的编号，`out` 是它的写队列，`reader` 读它。
+/// 新宿主要接手。`connection` 是这条连接的编号，`out` 是它的写队列，`reader` 读它。
 /// 回滚时会话和监听都照旧，这条连接随后断开。
 pub(crate) fn give(
     shared: &Arc<Shared>,
@@ -91,34 +91,37 @@ pub(crate) fn give(
         return;
     }
     let stream = *reader.get_ref();
-    // 接受连接的一方读到的对端进程号一直准，见 `peer_pid`；提交后它没确认时要靠它确认它不在了。
+    // 接受连接的一方读到的对端进程号一直准；提交后它没确认时要靠它确认它不在了。
     let successor = peer_pid(stream);
-    // 发出会话和等 `HandoffReady` 合起来最多 `deadline`：新宿主卡住不读时发送也会卡住，到期时
-    // 看门狗杀掉它、断开连接，发送随之失败。
+    // 发出会话和收下 `HandoffReady` 合起来最多 `deadline`：新宿主卡住不读时发送会卡住，回话慢慢到时
+    // 每次读都不超时，所以由看门狗管整段，到期时杀掉它、断开连接，发送或者读随之失败。
     let deadline = *shared.handoff_deadline.lock().unwrap_or_else(PoisonError::into_inner);
     let until = Instant::now() + deadline;
-    let sent = match Watchdog::arm(stream, until) {
-        Ok(watchdog) => {
-            let sent = send_parts(shared, stream, &giving, handed.iter());
-            if watchdog.disarm() {
-                Err(io::Error::new(io::ErrorKind::TimedOut, format!("the new host took more than {deadline:?}")))
-            } else {
-                sent
-            }
+    let watchdog = match Watchdog::arm(stream, until) {
+        Ok(watchdog) => watchdog,
+        Err(err) => {
+            giving.roll_back(shared, started, &format!("failed to send the sessions: {err}"));
+            return;
         }
-        Err(err) => Err(err),
     };
-    if let Err(err) = sent {
-        giving.roll_back(shared, started, &format!("failed to send the sessions: {err}"));
+    if let Err(err) = send_parts(shared, stream, &giving, handed.iter()) {
+        let why = if watchdog.disarm() { format!("the new host took more than {deadline:?}") } else { err.to_string() };
+        giving.roll_back(shared, started, &format!("failed to send the sessions: {why}"));
         return;
     }
     // 复制的 master 都发出去了，这边的那份留到新宿主确认接手（`HandoffDone`）：提交时会话交出自己
-    // 那份，新宿主这时死掉的话只剩它握着 PTY，见 `reclaim`。
+    // 那份，新宿主这时死掉的话只剩它握着 PTY。
     let kept = handed;
     let handed: Vec<SessionId> = kept.iter().map(|(id, _)| *id).collect();
     let sent_at = Instant::now();
 
-    match wait_for_ready(stream, reader, until) {
+    let reply = wait_for_ready(stream, reader, until);
+    // 看门狗动过手的话读到什么都不算：新宿主已经被杀了。
+    if watchdog.disarm() {
+        giving.roll_back(shared, started, &format!("the new host did not get ready within {deadline:?}"));
+        return;
+    }
+    match reply {
         Reply::Ready => {}
         Reply::Abort(reason) => {
             giving.roll_back(shared, started, &format!("the new host gave up: {reason}"));
@@ -219,7 +222,7 @@ impl Giving {
 }
 
 /// 检查能不能交，能交就清场：记下正在交接、停下接受连接、给别的连接发 `Goodbye`，定下要交的
-/// 会话。都在同一把锁里，之后新开的会话（见 `Shared::spawn`）和新连上的连接（见 `serve`）都
+/// 会话。都在同一把锁里，之后新开的会话和新连上的连接都
 /// 看得到正在交接。检查之前先等 `Peers::launching` 归零，交出去的任务会话在库里才一定记成了开始，接手的宿主
 /// 不会把任务再开一次；等过 `LAUNCH_WAIT` 还没归零就回 `HandoffRefusal::Busy`。
 fn begin(shared: &Shared, connection: u64, asked: &Asked) -> Result<Giving, HandoffRefusal> {
@@ -302,7 +305,7 @@ fn prepare(handles: &[(SessionId, Handle)]) -> Result<Ready, String> {
     Ok(ready)
 }
 
-/// 发 `HandoffPart::Host` 和各个会话的 `HandoffPart::Session`。交出的东西都留着，见 `reclaim`。
+/// 发 `HandoffPart::Host` 和各个会话的 `HandoffPart::Session`。交出的东西都留着。
 fn send_parts<'a>(
     shared: &Shared,
     stream: &UnixStream,
@@ -402,32 +405,33 @@ enum Reply {
     TimedOut,
 }
 
-/// 等新宿主回 `HandoffReady` 或者 `HandoffAbort`，最多等到 `until`。
+/// 读新宿主的一条回话，`HandoffReady` 或者 `HandoffAbort`。按 `until` 设的 `SO_RCVTIMEO` 只管每一次读，
+/// 保证不了整条回话在 `until` 前收完；读超时了就当没等到，读了一半的帧不再接着读。
 fn wait_for_ready(stream: &UnixStream, reader: &mut BufReader<&UnixStream>, until: Instant) -> Reply {
-    loop {
-        let left = until.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Reply::TimedOut;
+    let left = until.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Reply::TimedOut;
+    }
+    if let Err(err) = stream.set_read_timeout(Some(left)) {
+        return Reply::Closed(format!("cannot wait for it: {err}"));
+    }
+    match read_frame(reader) {
+        Ok(Some(frame)) if frame.kind == FrameKind::Control => match frame.message::<ClientMsg>() {
+            Ok(ClientMsg::HandoffReady) => Reply::Ready,
+            Ok(ClientMsg::HandoffAbort { reason }) => Reply::Abort(reason),
+            Ok(other) => Reply::Closed(format!("unexpected {other:?}")),
+            Err(err) => Reply::Closed(format!("unreadable message: {err}")),
+        },
+        Ok(Some(frame)) => Reply::Closed(format!("unexpected {:?} frame", frame.kind)),
+        Ok(None) => Reply::Closed("the connection closed".into()),
+        Err(FrameError::Io(err)) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+            Reply::TimedOut
         }
-        if let Err(err) = stream.set_read_timeout(Some(left)) {
-            return Reply::Closed(format!("cannot wait for it: {err}"));
-        }
-        match read_frame(reader) {
-            Ok(Some(frame)) if frame.kind == FrameKind::Control => match frame.message::<ClientMsg>() {
-                Ok(ClientMsg::HandoffReady) => return Reply::Ready,
-                Ok(ClientMsg::HandoffAbort { reason }) => return Reply::Abort(reason),
-                Ok(other) => return Reply::Closed(format!("unexpected {other:?}")),
-                Err(err) => return Reply::Closed(format!("unreadable message: {err}")),
-            },
-            Ok(Some(frame)) => return Reply::Closed(format!("unexpected {:?} frame", frame.kind)),
-            Ok(None) => return Reply::Closed("the connection closed".into()),
-            Err(FrameError::Io(err)) if matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {}
-            Err(err) => return Reply::Closed(err.to_string()),
-        }
+        Err(err) => Reply::Closed(err.to_string()),
     }
 }
 
-/// 发会话时的看门狗：到期还没撤掉就杀掉新宿主、断开连接，卡在发送上的那边随之失败。
+/// 看门狗：到 `until` 还没撤掉就杀掉连接对面的新宿主、断开连接，卡在这条连接上发或者读的那边随之失败。
 struct Watchdog {
     disarm: mpsc::Sender<()>,
     thread: thread::JoinHandle<bool>,
@@ -465,7 +469,7 @@ struct Released {
     /// 交出了 PTY 的会话没写进 PTY 的输入，只列有的。
     pending: Vec<(SessionId, Unwritten)>,
     /// 没按时交出 PTY 的会话和等它回话的一端（线程已经结束了的不算没交：它的 PTY 随线程关掉了）。原来的
-    /// 线程可能还握着 PTY，回滚时要先等它交出来，见 `settle`。
+    /// 线程可能还握着 PTY，回滚时要先等它交出来。
     late: Vec<(SessionId, ReleaseReply)>,
 }
 
@@ -496,27 +500,32 @@ fn release(handles: &[(SessionId, Handle)], handed: &[SessionId], within: Durati
     released
 }
 
-/// 提交后等新宿主回 `HandoffDone`，最多等 `DONE_TIMEOUT`。等到了返回 true；没回就断开（新宿主
-/// 总是先回 `HandoffDone` 再断开，见 `Host::take_over`）、超时或者说了别的都是 false。
+/// 提交后等新宿主回 `HandoffDone`，整条收下来最多 `DONE_TIMEOUT`。等到了返回 true；没回就断开（新宿主
+/// 总是先回 `HandoffDone` 再断开）、超时或者说了别的都是 false。回话分几次慢慢到时
+/// `SO_RCVTIMEO` 每次都不超时，所以整段由看门狗管；它动过手的话收到了也是 false：新宿主已经被杀了，会话要
+/// 接回来。起不了看门狗时只靠 `SO_RCVTIMEO`：`Commit` 已经发出，不为这个杀掉可能好好的新宿主。
 fn wait_for_done(stream: &UnixStream, reader: &mut BufReader<&UnixStream>) -> bool {
-    if stream.set_read_timeout(Some(DONE_TIMEOUT)).is_err() {
-        return false;
-    }
-    match read_frame(reader) {
-        Ok(Some(frame)) if frame.kind == FrameKind::Control => {
-            matches!(frame.message::<ClientMsg>(), Ok(ClientMsg::HandoffDone))
-        }
-        Ok(_) | Err(_) => false,
-    }
+    let watchdog = Watchdog::arm(stream, Instant::now() + DONE_TIMEOUT)
+        .inspect_err(|err| tracing::warn!("cannot watch the wait for the new host's confirmation: {err}"))
+        .ok();
+    let done = stream.set_read_timeout(Some(DONE_TIMEOUT)).is_ok()
+        && match read_frame(reader) {
+            Ok(Some(frame)) if frame.kind == FrameKind::Control => {
+                matches!(frame.message::<ClientMsg>(), Ok(ClientMsg::HandoffDone))
+            }
+            Ok(_) | Err(_) => false,
+        };
+    let fired = watchdog.is_some_and(Watchdog::disarm);
+    done && !fired
 }
 
-/// 提交以后新宿主没确认接手时 `reclaim` 要的，各项见 `give`。
+/// 提交以后新宿主没确认接手时 `reclaim` 要的。
 struct Unconfirmed {
     /// 交出去的会话的状态和这边留着的那份 master。
     kept: Vec<(SessionId, Box<Exported>)>,
     /// 按时交出了 PTY 的会话没写进 PTY 的输入。
     pending: Vec<(SessionId, Unwritten)>,
-    /// 没按时交出 PTY 的会话，见 `Released::late`。
+    /// 没按时交出 PTY 的会话。
     late: Vec<(SessionId, ReleaseReply)>,
     /// 新宿主的进程号。
     successor: Option<libc::pid_t>,
@@ -524,7 +533,7 @@ struct Unconfirmed {
     commit_sent: bool,
 }
 
-/// 提交以后新宿主没确认接手（见 `wait_for_done`）：PTY 只剩这边留着的那份 master（`kept`）。先杀掉
+/// 提交以后新宿主没确认接手：PTY 只剩这边留着的那份 master（`kept`）。先杀掉
 /// 新宿主（`successor`）、等它不在了，再用 `kept` 和交出去的状态把会话接回来（`session::adopt`），返回
 /// true。认不出、杀不掉新宿主时不接回、返回 false：两个宿主读写同一个 PTY 不行。没按时交出 PTY 的会话
 /// （`late`）等它交出来（`settle`）才接回，还是不交的不接回。
@@ -574,7 +583,7 @@ fn reclaim(shared: &Shared, unconfirmed: Unconfirmed) -> bool {
 }
 
 /// 等没按时交出 PTY 的会话（`late`）交出来，最多等到 `until`：交出时没写进 PTY 的输入放进 `pending`（这些
-/// 会话本来不在里面），返回到时还没交的。线程没交就结束了的不算没交，同 `release`。
+/// 会话本来不在里面），返回到时还没交的。线程没交就结束了的不算没交。
 fn settle(
     late: Vec<(SessionId, ReleaseReply)>,
     pending: &mut HashMap<SessionId, Unwritten>,

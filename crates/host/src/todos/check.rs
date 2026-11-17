@@ -12,7 +12,7 @@ const MAX_TITLE: usize = 1024;
 /// 定时到点先跑的命令最长这么多字节：列看板时每个定时都带着它。
 const MAX_RUN: usize = 4 * 1024;
 
-/// 前端给的任务内容能不能用：本机任何进程和配对的手机都能发这些消息，见模块文档。
+/// 前端给的任务内容能不能用：本机任何进程和配对的手机都能发这些消息。
 pub(super) fn check_spec(spec: &TodoSpec) -> Result<(), String> {
     check_text(spec)?;
     if !spec.dir.is_absolute() || !spec.dir.is_dir() {

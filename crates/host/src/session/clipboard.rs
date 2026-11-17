@@ -1,11 +1,11 @@
 //! 会话里的程序读写系统剪贴板（OSC 52）：宿主那份 VT 认出的请求（`ClipboardRequest`）按配置
-//! （`ClipboardAccess`，见 `ClientMsg::SetOptions`）办。宿主不碰剪贴板，写和读都包成
+//! （`ClipboardAccess`）办。宿主不碰剪贴板，写和读都包成
 //! `ClientMsg::WriteClipboard`、`ClientMsg::ReadClipboard` 请桌面办（`UiPort::ask`），交给最近和这个
 //! 会话交互过的桌面：尺寸归属里最近交互的那个前端多半就是用户眼前的那台 Mac。连着的桌面都没交互
-//! 过时交给最近连上的桌面；一个桌面都没连着（只有命令行、手机）时写的丢掉，读的回空。
+//! 过时交给最近连上的桌面；一个桌面都没连着（只有命令行、手机）、或者桌面跟不上时写的丢掉，读的回空。
 //!
-//! 读的结果回来以前程序在等，回话一律经 `HostSession::answer_clipboard`：不让读、没有桌面、桌面没
-//! 回话就断开、等太久，都回一个空的剪贴板，不让等着的程序（比如粘贴时等剪贴板的编辑器）干等到它
+//! 读的结果回来以前程序在等，回话一律经 `HostSession::answer_clipboard`：不让读、没有桌面、桌面跟不上、
+//! 桌面没回话就断开、等太久，都回一个空的剪贴板，不让等着的程序（比如粘贴时等剪贴板的编辑器）干等到它
 //! 自己超时。日志里只记长度，不记剪贴板的内容。
 
 use std::time::{Duration, Instant};
@@ -16,19 +16,19 @@ use runode_types::clipboard::{ClipboardAccess, ClipboardRead, ClipboardWrite};
 
 use super::Runner;
 
-/// 读剪贴板默认最多等桌面这么久（多半是在等用户点询问框），见 `Host::set_clipboard_read_patience`。
+/// 读剪贴板默认最多等桌面这么久（多半是在等用户点询问框）。
 /// 过了就回程序一个空的剪贴板，用户之后再点允许也不再读：程序多半早就不等了。
 pub(crate) const CLIPBOARD_READ_PATIENCE: Duration = Duration::from_secs(30);
 
 /// 已经交给桌面、还在等它回话的读剪贴板请求。
 pub(super) struct PendingRead {
-    /// 请求的编号，见 `HostMsg::UiRequest::ui`。
+    /// 请求的编号。
     ui: u64,
     query: ClipboardQuery,
     deadline: Instant,
-    /// 请求时的前台程序（进程号和名字），见 `HostSession::foreground_program`。
+    /// 请求时的前台程序（进程号和名字）。
     program: Option<(u32, Option<String>)>,
-    /// 等它期间又来的读请求，见 `Runner::read_clipboard`；它回完话后一个个回空的。
+    /// 等它期间又来的读请求；它回完话后一个个回空的。
     later: Vec<ClipboardQuery>,
 }
 
@@ -37,7 +37,7 @@ pub(super) struct PendingRead {
 const MAX_LATER_READS: usize = 16;
 
 impl Runner {
-    /// 办宿主那份 VT 认出的一个剪贴板请求，见模块文档。
+    /// 办宿主那份 VT 认出的一个剪贴板请求。
     pub(super) fn clipboard(&mut self, request: ClipboardRequest) {
         let access = self.clipboard;
         match request {
@@ -51,10 +51,16 @@ impl Runner {
                     );
                     return;
                 }
+                // 桌面还没回上一条写请求：撤掉它的登记，只等这条最新的，程序连着写也只占着界面一个名额，
+                // 不把别的请求挤成界面跟不上。已经交出去的那条桌面照样办，剪贴板里留下的仍是最新的。
+                if let Some(ui) = self.clipboard_write.take() {
+                    self.ui.withdraw(ui);
+                }
                 let request = ClientMsg::WriteClipboard { id: self.id, text: text.into() };
-                if self.ui.ask(self.id, self.ui_connection(), request).is_none() {
+                self.clipboard_write = self.ui.ask(self.id, self.ui_connection(), request);
+                if self.clipboard_write.is_none() {
                     tracing::info!(
-                        "session {} dropped a clipboard write of {len} bytes: no runode window is connected",
+                        "session {} dropped a clipboard write of {len} bytes: the runode window did not take it",
                         self.id
                     );
                 }
@@ -91,7 +97,7 @@ impl Runner {
             }
             None => {
                 tracing::info!(
-                    "session {} answered a clipboard read with nothing: no runode window is connected",
+                    "session {} answered a clipboard read with nothing: the runode window did not take it",
                     self.id
                 );
                 self.session.answer_clipboard(query, None);
@@ -99,7 +105,7 @@ impl Runner {
         }
     }
 
-    /// 改读写剪贴板的规矩：自己记一份，写的开关交给 VT（见 `HostSession::set_clipboard_writes`）。改成不让读
+    /// 改读写剪贴板的规矩：自己记一份，写的开关交给 VT。改成不让读
     /// 时，在等桌面回话的读请求当场回空的：桌面之后再回的文字按迟到的丢掉，不交给程序。
     pub(super) fn set_clipboard(&mut self, clipboard: ClipboardAccess) {
         self.clipboard = clipboard;
@@ -148,6 +154,9 @@ impl Runner {
             self.finish_read(read, text.as_deref());
             return;
         }
+        if self.clipboard_write == Some(ui) {
+            self.clipboard_write = None;
+        }
         match reply {
             HostMsg::Done { .. } => {}
             HostMsg::Error { message, .. } => {
@@ -159,7 +168,7 @@ impl Runner {
         }
     }
 
-    /// 等着的读请求什么时候算等太久，见 `Runner::deadline`。
+    /// 等着的读请求什么时候算等太久。
     pub(super) fn clipboard_deadline(&self) -> Option<Instant> {
         self.clipboard_read.as_ref().map(|read| read.deadline)
     }
@@ -175,8 +184,9 @@ impl Runner {
         }
     }
 
-    /// 回等着的读请求 `read`（`text` 见 `HostSession::answer_clipboard`），再给它后面排着的回空的。
+    /// 回等着的读请求 `read`，再给它后面排着的回空的。
     pub(super) fn finish_read(&mut self, read: PendingRead, text: Option<&str>) {
+        self.ui.withdraw(read.ui);
         self.session.answer_clipboard(read.query, text);
         for query in read.later {
             self.session.answer_clipboard(query, None);

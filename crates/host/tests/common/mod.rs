@@ -75,7 +75,7 @@ pub fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 pub struct Peer {
     pub stream: UnixStream,
     frames: mpsc::Receiver<Frame>,
-    /// 读快照时先收下的别的帧（别的会话的输出和消息），按先后排在之后读到的前面，见 `screen`。
+    /// 读快照时先收下的别的帧（别的会话的输出和消息），按先后排在之后读到的前面。
     held: Mutex<VecDeque<Frame>>,
     next_req: u32,
 }
@@ -279,7 +279,7 @@ impl Peer {
         self.spawn_in(shell, SIZE, start, cwd, None)
     }
 
-    /// 同 `spawn_with`，当场启动，`cwd` 不是目录时从 `fallback` 开。
+    /// 开一个会话，当场启动；`cwd` 不是目录时从 `fallback` 开。
     pub fn spawn_falling_back(&mut self, shell: &str, cwd: PathBuf, fallback: PathBuf) -> SessionId {
         self.spawn_in(shell, SIZE, true, Some(cwd), Some(fallback))
     }

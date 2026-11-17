@@ -61,6 +61,34 @@ fn writes_go_to_the_desktop() {
     desktop.send(&ClientMsg::Kill { id });
 }
 
+/// 等到会话 `id` 写 `text` 的请求转给界面，跳过这之前的请求。
+fn wait_for_write(peer: &Peer, id: SessionId, text: &str) {
+    let wanted = ClientMsg::WriteClipboard { id, text: text.into() };
+    while ui_request(peer).1 != wanted {}
+}
+
+/// 桌面一直不回话时，会话连着写剪贴板也只占着界面一个名额：每条都转给桌面，最新的一条不因前面的没回话被丢掉，
+/// 别的会话的写也照样转。
+#[test]
+fn unanswered_writes_keep_one_place_per_session() {
+    // 比界面没回话的请求的上限（`MAX_UI_PENDING`）多。
+    const WRITES: usize = 300;
+    let host = host();
+    let mut desktop = Peer::pair(&host);
+    let dir = temp_dir("clip-flood");
+    let id = desktop.spawn(&script(&dir, "writer", WRITER));
+    let (channel, _) = desktop.attach(id, AttachMode::VtReplay);
+    let other = desktop.spawn(&script(&dir, "other", WRITER));
+    let (other_channel, _) = desktop.attach(other, AttachMode::VtReplay);
+    desktop.input(channel, "aGk=\r".repeat(WRITES).as_bytes());
+    desktop.input(channel, b"Ynll\r");
+    wait_for_write(&desktop, id, "bye");
+    desktop.input(other_channel, b"aGVsbG8=\r");
+    wait_for_write(&desktop, other, "hello");
+    desktop.send(&ClientMsg::Kill { id });
+    desktop.send(&ClientMsg::Kill { id: other });
+}
+
 /// `clipboard-write = deny` 时写请求不出宿主；规矩改在会话开出来之后也照样生效。
 #[test]
 fn denied_writes_are_dropped() {

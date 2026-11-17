@@ -2,16 +2,47 @@
 //! `Peers::layout`。没有界面连着时（app 没开，宿主单独跑着），手机、命令行要的布局（`Layout`）照它回，
 //! 在工作区里开终端（`Open`）、新建工作区（`OpenWorkspace`）、给工作区改名（`RenameWorkspace`）也由
 //! 宿主自己办：改这份布局，新开的会话放进去。界面再连上时，恢复窗口前要回这份布局（界面的连接发
-//! `Layout`，宿主自己回），把多出来的会话和改过的名字接进自己的存档。
+//! `Layout`，宿主自己回），把多出来的会话和改过的名字接进自己的存档。单独跑的宿主把界面还没接过去
+//! 的改动记进文件（`Host::keep_layout`），重启后照样在。
 //!
 //! 没有窗口可显示：开终端一律开成工作区里排在最后的新标签（要分屏的也是），不切过去；切到终端
-//! （`Reveal`）回 `Error`。已经不在宿主里的会话每次用这份布局前去掉，见 `tidy`。
+//! （`Reveal`）回 `Error`。已经不在宿主里的会话每次用这份布局前去掉。
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::PoisonError};
 
 use runode_protocol::{HostMsg, PaneLayout, PaneRect, SessionId, TabLayout, WindowLayout, WorkspaceLayout};
 
-use crate::{Shared, SpawnOptions};
+use crate::{Host, Shared, SpawnOptions};
+
+impl Host {
+    /// 宿主自己改了布局、界面还没报来新布局接过去时，把整份布局记进 `file`，界面报来布局时删掉它，宿主
+    /// 重启后照它恢复。文件里只能有界面没接过去的改动：界面恢复窗口时宿主的工作区名字盖过它的存档。
+    /// 手里还没有布局（不是交接来的）时先读回 `file`，读不了、解不出时当没有。同一份文件只能由一个在跑的
+    /// 宿主管，要在界面连上来之前调。
+    pub fn keep_layout(&self, file: PathBuf) {
+        let mut kept = self.shared.layout_file.lock().unwrap_or_else(PoisonError::into_inner);
+        let saved = match std::fs::read(&file) {
+            Ok(json) => Some(serde_json::from_slice::<Vec<WindowLayout>>(&json).unwrap_or_else(|err| {
+                tracing::warn!("ignoring the layout in {}: {err}", file.display());
+                Vec::new()
+            })),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => {
+                tracing::warn!("failed to read {}: {err}", file.display());
+                Some(Vec::new())
+            }
+        };
+        // 文件在就说明有界面没接过去的改动：交接来的布局里也带着它们，界面报来布局之前文件留着。
+        if let Some(saved) = saved {
+            let mut peers = self.shared.peers();
+            if peers.layout.is_empty() {
+                peers.layout = saved;
+            }
+            peers.layout_unadopted = true;
+        }
+        *kept = Some(file);
+    }
+}
 
 impl Shared {
     /// 宿主手里的布局，去掉了已经不在的会话。
@@ -79,6 +110,9 @@ impl Shared {
         }
         self.tidy(&mut peers.layout);
         peers.layout_changed();
+        peers.layout_unadopted = true;
+        drop(peers);
+        self.store_layout();
         Ok(HostMsg::Opened { req, id })
     }
 
@@ -107,6 +141,9 @@ impl Shared {
             target.tabs.push(tab(id));
             self.tidy(&mut peers.layout);
             peers.layout_changed();
+            peers.layout_unadopted = true;
+            drop(peers);
+            self.store_layout();
         }
         Ok(HostMsg::Opened { req, id })
     }
@@ -132,10 +169,36 @@ impl Shared {
         };
         found.name = Some(name.to_owned());
         peers.layout_changed();
+        peers.layout_unadopted = true;
+        drop(peers);
+        self.store_layout();
         Ok(HostMsg::Done { req })
     }
 
-    /// 按宿主里现在的会话整理 `layout`，见 `tidy`。锁的先后：调用方拿着 `peers`，这里再拿 `registry`。
+    /// 把宿主自己改了、界面还没接过去的布局（`Peers::layout_unadopted`）写进 `Host::keep_layout` 给的
+    /// 文件，界面已经接过去时删掉它；没给文件时什么都不做。调用方不能拿着 `peers`。
+    pub(crate) fn store_layout(&self) {
+        let file = self.layout_file.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(path) = file.as_ref() else { return };
+        let unadopted = {
+            let peers = self.peers();
+            peers.layout_unadopted.then(|| peers.layout.clone())
+        };
+        let result = match unadopted {
+            Some(layout) => serde_json::to_vec(&layout)
+                .map_err(std::io::Error::from)
+                .and_then(|json| runode_paths::replace_file(path, &json)),
+            None => match std::fs::remove_file(path) {
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                result => result,
+            },
+        };
+        if let Err(err) = result {
+            tracing::warn!("failed to update {}: {err}", path.display());
+        }
+    }
+
+    /// 按宿主里现在的会话整理 `layout`。锁的先后：调用方拿着 `peers`，这里再拿 `registry`。
     fn tidy(&self, layout: &mut Vec<WindowLayout>) {
         let registry = self.registry();
         tidy(layout, |id| registry.sessions.contains_key(&id));

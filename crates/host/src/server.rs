@@ -6,7 +6,7 @@
 //! 消息和输入帧转给宿主。写的线程按到达的先后把帧写出去：连上的会话在自己的线程里把事件交给
 //! 这条连接的 `Outbox`，一个会话的帧在连接上的先后就是它发生的先后。前端读得太慢、积压超过
 //! `OUTBOX_LIMIT` 时，那个会话不再往这条连接发输出，改发 `Resync`，前端重新 `Attach`；连上会话时
-//! 排进去的屏幕不算会话输出的积压。转给连接的输出里，shell 集成的报告抹掉了内容（见 `ReportRedactor`），报告带的口令不出宿主。
+//! 排进去的屏幕不算会话输出的积压。转给连接的输出里，shell 集成的报告抹掉了内容，报告带的口令不出宿主。
 //!
 //! 读的线程不等会话线程回话：列会话、读屏幕先在读的线程里把请求按先后送到会话线程，再起一个
 //! 短命的线程等回话、交给 `Outbox`，同一条连接上之后的输入照常转发。这类等回话的请求按 `Waiting`
@@ -56,32 +56,37 @@ pub use windows::{peer_pid, same_user, socket_pair};
 /// 等会话线程回话（列会话、读屏幕）的最长时间。
 pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// 转给一条界面连接、它还没回话的请求最多这么多，再来的不交出去：界面卡住时宿主不跟着无限积压。
+pub(crate) const MAX_UI_PENDING: usize = 256;
+
 /// 连着的前端、转给界面还没回话的请求，以及监听和退出的状态。
 pub(crate) struct Peers {
     /// 连着的连接，按编号；`out` 在连接的写线程起好之前为 `None`。
     connections: HashMap<u64, Peer>,
     /// 说自己是 `ClientKind::Desktop` 的连接，按 `Hello` 的先后；请求没指明交给哪个界面、或者指明的那个
-    /// 已经断开时交给最后一个。种类是自报的，见模块文档。
+    /// 已经断开时交给最后一个。种类是自报的。
     desktops: Vec<u64>,
     /// 转给界面、还没回话的请求，按 `HostMsg::UiRequest::ui`。
     pending: HashMap<u64, Pending>,
     next_ui: u64,
-    /// 宿主手里的布局：界面上次报来的，没有界面连着时宿主自己办的请求也改它，见 `workspaces`。
+    /// 宿主手里的布局：界面上次报来的，没有界面连着时宿主自己办的请求也改它。
     pub(crate) layout: Vec<WindowLayout>,
+    /// `layout` 里有宿主自己改了、界面还没报来新布局接过去的改动，要记进 `Host::keep_layout` 给的文件。
+    pub(crate) layout_unadopted: bool,
     /// 还接新连接；退出时在判断要退出的同一把锁里置为 false。
     pub(crate) accepting: bool,
     /// `Host::listen` 开的 socket 和拿着的锁。
     pub(crate) listening: Option<Listening>,
-    /// 宿主单独一个进程在跑，见 `Host::run_until_idle`：收到 `Shutdown` 时连宿主一起退出。
+    /// 宿主单独一个进程在跑：收到 `Shutdown` 时连宿主一起退出。
     /// `HostMsg::Welcome::standalone` 报的就是它。
     pub(crate) standalone: bool,
     /// 照常办事、正在把会话交给新宿主，还是要退出了。
     pub(crate) phase: Phase,
     /// 最近一次有连接连上或者断开的时刻，空闲从这时起算。
     pub(crate) activity_at: Instant,
-    /// 没有会话也没有连接时也不算空闲，见 `Host::set_stay_up`。
+    /// 没有会话也没有连接时也不算空闲。
     pub(crate) stay_up: bool,
-    /// 看板上有定时：到点要开任务，没有会话也没有连接时也不算空闲，见 `todos`。
+    /// 看板上有定时：到点要开任务，没有会话也没有连接时也不算空闲。
     pub(crate) scheduled: bool,
     /// `run_until_idle` 不因空闲返回（给的时限是 `Duration::MAX`），交接时告诉新宿主。
     #[cfg(unix)]
@@ -111,6 +116,7 @@ impl Default for Peers {
             pending: HashMap::new(),
             next_ui: 1,
             layout: Vec::new(),
+            layout_unadopted: false,
             accepting: true,
             listening: None,
             standalone: false,
@@ -158,7 +164,7 @@ impl Peers {
     }
 
     /// 给 `except` 以外的连接都发 `Goodbye`，写完后断开。
-    /// 写线程还没起好的连接起好时自己发，见 `serve`。
+    /// 写线程还没起好的连接起好时自己发。
     pub(crate) fn say_goodbye(&self, except: Option<u64>, reason: &GoodbyeReason) {
         for (&id, peer) in &self.connections {
             if Some(id) != except
@@ -173,9 +179,9 @@ impl Peers {
 
 struct Peer {
     out: Option<Outbox>,
-    /// 问过 `Layout`：界面说布局变了时告诉它，见 `HostMsg::LayoutChanged`。
+    /// 问过 `Layout`：界面说布局变了时告诉它。
     watches_layout: bool,
-    /// 问过 `ListTodos`：看板变了时告诉它，见 `HostMsg::TodosChanged`。
+    /// 问过 `ListTodos`：看板变了时告诉它。
     watches_todos: bool,
 }
 
@@ -196,6 +202,8 @@ enum Asker {
         /// 发请求的那条连接，回话交给它。
         origin: Outbox,
         req: u32,
+        /// 占着发请求的连接转给界面的名额，登记撤掉、请求没交出去时放开。
+        _slot: WaitSlot,
     },
     /// 会话自己的请求（读写剪贴板），回话交给会话线程（`Inbox::UiAnswer`）。
     Session(SessionId),
@@ -207,11 +215,13 @@ enum ToUi {
     Sent(u64),
     /// 没有界面连着，请求交回来。
     NoDesktop(Box<ClientMsg>),
+    /// 界面跟不上（还没回话的请求到了 `MAX_UI_PENDING`，或者积压过了上限），请求没交出去，登记交回来。
+    Busy(Asker),
     /// 界面的连接刚断开，撤掉的登记；读线程已经撤掉、替它回过话时为空。
     Gone(Option<Asker>),
 }
 
-/// 会话线程请界面办事、报状态变了的一头，见 `Shared::ask_ui`、`Shared::todo_session_changed`。拿着宿主的弱引用：
+/// 会话线程请界面办事、报状态变了的一头。拿着宿主的弱引用：
 /// 会话线程不该让宿主留着不放，宿主没了时什么都办不成。
 #[derive(Clone, Default)]
 pub(crate) struct UiPort(Weak<Shared>);
@@ -221,7 +231,7 @@ impl UiPort {
         Self(shared)
     }
 
-    /// 见 `Shared::todo_session_changed`。
+    /// 会话 `session` 的 agent 状态、前台是不是 shell 变了，或者会话结束了（`ended`）；宿主没了时不办。
     pub(crate) fn todo_session_changed(
         &self,
         session: SessionId,
@@ -233,9 +243,16 @@ impl UiPort {
         }
     }
 
-    /// 见 `Shared::ask_ui`。
+    /// 请界面办 `request`，返回这条请求的编号；宿主没了或者没有界面接得了时为 `None`。
     pub(crate) fn ask(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
         self.0.upgrade()?.ask_ui(session, preferred, request)
+    }
+
+    /// 会话不再等 `ui` 这条请求的回话：撤掉它的登记；宿主已经没了时不做事。
+    pub(crate) fn withdraw(&self, ui: u64) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.withdraw_ui(ui);
+        }
     }
 
     /// 会话线程 `id` 出了事退出时把它从登记表里摘掉；这个 id 已经换成别的线程（接手、收回）时不动。
@@ -277,17 +294,25 @@ impl Shared {
 
     /// 会话 `session` 请界面办一件事（`request`），返回这条请求的编号，界面的回话经
     /// `Inbox::UiAnswer` 带着它交回会话线程。交给 `preferred` 这条界面的连接，它不是（或者不再是）
-    /// 界面时交给最近连上的界面；没有界面连着、或者刚断开时返回 `None`。
+    /// 界面时交给最近连上的界面；没有界面连着、界面跟不上、或者刚断开时返回 `None`。
     fn ask_ui(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
         match self.send_to_ui(preferred, Asker::Session(session), request) {
             ToUi::Sent(ui) => Some(ui),
-            ToUi::NoDesktop(_) | ToUi::Gone(_) => None,
+            ToUi::NoDesktop(_) | ToUi::Busy(_) | ToUi::Gone(_) => None,
+        }
+    }
+
+    /// 会话不再等 `ask_ui` 给的 `ui` 这条请求的回话：撤掉登记，不占着界面的名额。只撤会话自己的请求。
+    fn withdraw_ui(&self, ui: u64) {
+        let mut peers = self.peers();
+        if peers.pending.get(&ui).is_some_and(|pending| matches!(pending.asker, Asker::Session(_))) {
+            peers.pending.remove(&ui);
         }
     }
 
     /// 把 `request` 登记成 `asker` 请界面办的事，交给 `preferred` 这条界面的连接，没给、或者它不是（或者不再是）
-    /// 界面时交给最近连上的界面。界面的连接刚断开时撤掉登记：它的读线程撤掉登记时已经替还在等的请求回过话的话，
-    /// `ToUi::Gone` 里是空的。
+    /// 界面时交给最近连上的界面。界面跟不上时不交出去（`ToUi::Busy`）。界面的连接刚断开时撤掉登记：它的读线程
+    /// 撤掉登记时已经替还在等的请求回过话的话，`ToUi::Gone` 里是空的。
     fn send_to_ui(&self, preferred: Option<u64>, asker: Asker, request: ClientMsg) -> ToUi {
         let mut peers = self.peers();
         let desktop =
@@ -297,6 +322,11 @@ impl Shared {
         else {
             return ToUi::NoDesktop(Box::new(request));
         };
+        if out.streaming_backed_up()
+            || peers.pending.values().filter(|pending| pending.desktop == desktop).count() >= MAX_UI_PENDING
+        {
+            return ToUi::Busy(asker);
+        }
         let ui = peers.next_ui;
         peers.next_ui += 1;
         peers.pending.insert(ui, Pending { desktop, asker });
