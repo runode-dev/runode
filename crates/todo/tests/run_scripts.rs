@@ -14,7 +14,7 @@ struct Sandbox {
 }
 
 /// 假 gh：每次把参数追加到 `FAKE_GH_LOG`；按前两个参数（第三个不以 `-` 开头时也算上，第四个是 `--comments` 时再
-/// 接 `-comments`）挑 `FAKE_GH_DIR` 里的样例打印，样例不在或设了 `FAKE_GH_FAIL` 时退出 1。
+/// 接 `-comments`，`/` 换成 `_`）挑 `FAKE_GH_DIR` 里的样例打印，样例不在或设了 `FAKE_GH_FAIL` 时退出 1。
 #[cfg(unix)]
 const FAKE_GH: (&str, &str) = (
     "gh",
@@ -25,6 +25,7 @@ printf '\n' >>"$FAKE_GH_LOG"
 name="$1-$2"
 case ${3:-} in ''|-*) ;; *) name="$name-$3" ;; esac
 if [ "${4:-}" = --comments ]; then name="$name-comments"; fi
+name=$(printf '%s' "$name" | tr / _)
 [ -f "$FAKE_GH_DIR/$name.txt" ] || exit 1
 cat "$FAKE_GH_DIR/$name.txt"
 "#,
@@ -43,6 +44,7 @@ const FAKE_GH: (&str, &str) = (
      set \"NAME=%NAME%-%THIRD%\"\r\n\
      :print\r\n\
      if \"%~4\"==\"--comments\" set \"NAME=%NAME%-comments\"\r\n\
+     set \"NAME=%NAME:/=_%\"\r\n\
      if not exist \"%FAKE_GH_DIR%\\%NAME%.txt\" exit /b 1\r\n\
      type \"%FAKE_GH_DIR%\\%NAME%.txt\"\r\n\
      exit /b 0\r\n",
@@ -218,7 +220,7 @@ fn watch_ci_skips_cancelled_runs_to_the_last_conclusion() {
     assert!(out.contains("broken"), "{out}");
 }
 
-/// 最新的一次还在跑（前面几次被它取消了）时不派更早的失败，pending 照旧；跑完失败了才派。
+/// 最新的一次还在跑（前面几次被它取消了）、还没有 job 失败时不派更早的失败，pending 照旧；跑完失败了才派。
 #[test]
 fn watch_ci_waits_for_a_run_in_progress() {
     let sandbox = Sandbox::new("ci-in-progress");
@@ -232,13 +234,67 @@ fn watch_ci_waits_for_a_run_in_progress() {
         ),
     );
     sandbox.fixture("run-view-90", &failed_log("stale"));
+    sandbox.fixture("run-view-93", "701\ttest\t\n702\tcheck\tsuccess\n");
     assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
     assert_eq!(sandbox.state("pending"), "Lint\n");
+    assert!(!sandbox.gh_log().contains("92"), "a pending workflow is not probed: {}", sandbox.gh_log());
 
     sandbox.fixture("run-list", &format!("93\tCI\t{SHA}\tcompleted\tfailure\n91\tCI\t{SHA}\tcompleted\tcancelled\n"));
     sandbox.fixture("run-view-93", &failed_log("fresh"));
     let out = fire(&sandbox, "watch-ci", &["main"]);
     assert!(out.contains("## CI (run 93, ") && out.contains("fresh"), "{out}");
+}
+
+fn job_log_fixture(job: u32) -> String {
+    format!("api-repos_{{owner}}_{{repo}}_actions_jobs_{job}_logs")
+}
+
+/// 还在跑的运行里已经有 job 失败了就派，日志取自失败的 job；派过之后它跑完失败了也不再派。
+#[test]
+fn watch_ci_fires_for_a_failed_job_while_the_run_goes_on() {
+    let sandbox = Sandbox::new("ci-failed-job");
+    sandbox.fixture("run-list", &format!("96\tCI\t{SHA}\tin_progress\t\n95\tCI\t{SHA}\tcompleted\tsuccess\n"));
+    sandbox.fixture("run-view-96", "801\ttest\tfailure\n802\tcheck-windows\t\n803\tlint\ttimed_out\n804\tcheck\tsuccess\n");
+    sandbox.fixture(
+        &job_log_fixture(801),
+        "\u{feff}2024-05-01T10:00:00.1Z running tests\n2024-05-01T10:00:01.2Z test boom ... FAILED\n\
+         2024-05-01T10:00:02.3Z Post job cleanup.\n2024-05-01T10:00:03.4Z git version\n",
+    );
+    sandbox.fixture(&job_log_fixture(803), "2024-05-01T10:00:00.1Z lint took too long\n");
+    let out = fire(&sandbox, "watch-ci", &["main"]);
+    assert!(out.contains("gh api repos/{owner}/{repo}/actions/jobs/<job id>/logs"), "{out}");
+    assert!(
+        out.ends_with(
+            "## CI (run 96, commit 012345678, failed in test (job 801), lint (job 803) while the run is still going)\n\
+             running tests\ntest boom ... FAILED\nlint took too long\n"
+        ),
+        "{out}"
+    );
+    assert!(!sandbox.gh_log().contains("/802/"), "{}", sandbox.gh_log());
+    assert_eq!(sandbox.state("pending"), "CI\n");
+
+    assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
+    sandbox.fixture("run-list", &format!("96\tCI\t{SHA}\tcompleted\tfailure\n95\tCI\t{SHA}\tcompleted\tsuccess\n"));
+    sandbox.fixture("run-view-96", &failed_log("boom"));
+    assert_eq!(fire(&sandbox, "watch-ci", &["main"]), "");
+    assert_eq!(sandbox.state("pending"), "CI\n");
+}
+
+/// 失败的 job 取不到日志时照样派，提示去 GitHub 上看。
+#[test]
+fn watch_ci_fires_for_a_failed_job_without_its_log() {
+    let sandbox = Sandbox::new("ci-failed-job-no-log");
+    sandbox.fixture("run-list", &format!("97\tCI\t{SHA}\tqueued\t\n"));
+    sandbox.fixture("run-view-97", "901\ttest\tfailure\n");
+    let out = fire(&sandbox, "watch-ci", &["main"]);
+    assert!(
+        out.ends_with(
+            "## CI (run 97, commit 012345678, failed in test (job 901) while the run is still going)\n\
+             (cannot fetch the job logs; look at the run on GitHub)\n"
+        ),
+        "{out}"
+    );
+    assert_eq!(sandbox.state("pending"), "CI\n");
 }
 
 /// 等人批准的运行（waiting、action_required）不挡住更早的失败。
