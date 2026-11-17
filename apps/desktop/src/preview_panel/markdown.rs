@@ -847,6 +847,9 @@ struct Paint {
     selection: Option<(MdPos, MdPos)>,
     hover: Option<(TextKey, usize)>,
     texts: Texts,
+    view: WeakEntity<PreviewPanel>,
+    /// 这一帧辅助工具在读（`Window::is_a11y_active`）：链接节点只在这时画。
+    a11y: bool,
 }
 
 impl Paint {
@@ -872,7 +875,8 @@ impl Paint {
         let styled = StyledText::new(rich.text.clone())
             .with_highlights(rich_highlights(rich, self.colors, hover))
             .with_font_family_overrides(mono);
-        self.text(styled, rich.text.len(), key).boxes(boxes)
+        let links = if self.a11y { link_nodes(rich, &self.view) } else { Vec::new() };
+        self.text(styled, rich.text.len(), key).boxes(boxes).links(links)
     }
 
     fn text(&self, styled: StyledText, len: usize, key: TextKey) -> MdText {
@@ -881,24 +885,25 @@ impl Paint {
     }
 }
 
-/// `rich` 里的链接报给辅助工具：链接画在文字里，不是单独的元素，这里每个链接另放一个不占地方的
-/// 节点，以链接的文字为名，按下时和点击一样打开它。
-fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<AnyElement> {
+/// `rich` 里的链接报给辅助工具：链接画在文字里，不是单独的元素，这里每个链接另给一个节点，连同它在
+/// 文字里的范围交给 `MdText` 摆到链接的字上；以链接的文字为名，按下时和点击一样打开它。
+fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<(Range<usize>, AnyElement)> {
     rich.links
         .iter()
         .zip(link_keys(rich))
         .map(|((range, url), key)| {
             let (view, url) = (view.clone(), url.clone());
-            div()
+            let node = div()
                 .id(("md-link", key))
-                .absolute()
+                .size_full()
                 .role(Role::Link)
                 .aria_label(rich.text.get(range.clone()).unwrap_or_default().to_owned())
                 .aria_description(url.clone())
                 .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
                     view.update(cx, |this, cx| this.open_markdown_link(&url, cx)).ok();
                 })
-                .into_any_element()
+                .into_any_element();
+            (range.clone(), node)
         })
         .collect()
 }
@@ -1023,6 +1028,8 @@ impl PreviewPanel {
             selection: view.selection.map(select::ordered),
             hover: view.hover,
             texts: view.texts.clone(),
+            view: cx.entity().downgrade(),
+            a11y: window.is_a11y_active(),
         };
         // 间距按正文字号算；脚注的字小一号。
         let em = font_size;
@@ -1046,18 +1053,12 @@ impl PreviewPanel {
             .pb(px(bottom))
             .text_size(px(size))
             .line_height(px(line_height));
-        let weak = cx.entity().downgrade();
-        let mut links = Vec::new();
         // 这一行报给辅助工具的样子：标题、段落、提示块标题和代码块报成整段文字；表格、图片在下面各自报。
         element = match &row.leaf {
             Leaf::Heading(level, rich) => {
-                links = link_nodes(rich, &weak);
                 element.role(Role::Heading).aria_level(usize::from(*level)).aria_label(rich.text.clone())
             }
-            Leaf::Paragraph(rich) => {
-                links = link_nodes(rich, &weak);
-                element.role(Role::Paragraph).aria_label(rich.text.clone())
-            }
+            Leaf::Paragraph(rich) => element.role(Role::Paragraph).aria_label(rich.text.clone()),
             Leaf::AlertTitle(_, title) => element.aria_static_text(title.clone()),
             Leaf::Code { source, .. } => element.role(Role::Code).aria_label(source.clone()),
             Leaf::Table { .. } | Leaf::Rule | Leaf::Images(_) => element,
@@ -1239,7 +1240,6 @@ impl PreviewPanel {
                             .aria_label(cell.text.clone())
                             .aria_row_index(row_ix)
                             .aria_column_index(column)
-                            .children(link_nodes(cell, &weak))
                             .w(px(cell_w))
                             .flex_none()
                             .h(px(line_height + 12. + border))
@@ -1277,12 +1277,19 @@ impl PreviewPanel {
                 if below > 0. {
                     table_rows.push(div().h(px(below)).into_any_element());
                 }
-                let table = div().flex().flex_col().flex_none().whitespace_nowrap().children(table_rows);
-                div()
+                // 表格的角色挂在画出来的这层上，辅助工具读到的框和表一样大；外面那层是铺满栏宽的滚动区。
+                let table = div()
                     .id("md-table")
                     .role(Role::Table)
                     .aria_row_count(rows.len() + 1)
                     .aria_column_count(columns)
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .whitespace_nowrap()
+                    .children(table_rows);
+                div()
+                    .id("md-table-scroll")
                     .w_full()
                     .flex()
                     .overflow_x_scroll()
@@ -1330,8 +1337,7 @@ impl PreviewPanel {
                     .mr(px(em * quotes as f32))
                     .when(muted, |content| content.text_color(colors.muted))
                     .when(row.center, |content| content.text_center())
-                    .child(content)
-                    .children(links),
+                    .child(content),
             )
             .into_any_element()
     }

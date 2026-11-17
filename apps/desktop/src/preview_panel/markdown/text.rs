@@ -6,8 +6,8 @@
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use gpui::{
-    App, Bounds, Element, ElementId, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, Pixels,
-    StyledText, TextAlign, TextLayout, Window, WrappedLineLayout, fill, point, px, quad, size,
+    AnyElement, App, Bounds, Element, ElementId, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId,
+    Pixels, StyledText, TextAlign, TextLayout, Window, WrappedLineLayout, fill, point, px, quad, size,
 };
 
 use super::select::{MdPos, TextKey};
@@ -36,16 +36,24 @@ pub(super) struct MdText {
     key: TextKey,
     boxes: Vec<TextBox>,
     selected: Option<(Range<usize>, Hsla)>,
+    links: Vec<(Range<usize>, AnyElement)>,
     texts: Texts,
 }
 
 impl MdText {
     pub fn new(text: StyledText, key: TextKey, texts: Texts) -> Self {
-        Self { text, key, boxes: Vec::new(), selected: None, texts }
+        Self { text, key, boxes: Vec::new(), selected: None, links: Vec::new(), texts }
     }
 
     pub fn boxes(mut self, boxes: Vec<TextBox>) -> Self {
         self.boxes = boxes;
+        self
+    }
+
+    /// 摆在文字里某段字上的元素（给辅助工具的链接节点）：排好版后按那段字的第一个矩形定位、定大小，
+    /// 自己要铺满给它的大小。
+    pub fn links(mut self, links: Vec<(Range<usize>, AnyElement)>) -> Self {
+        self.links = links;
         self
     }
 
@@ -99,7 +107,16 @@ impl Element for MdText {
         // 到这里布局才有位置，登记之后命中测试才能用。
         let centered = matches!(window.text_style().text_align, TextAlign::Center);
         let visible = window.content_mask().bounds;
-        self.texts.borrow_mut().push(Placed { key: self.key, layout: self.text.layout().clone(), centered, visible });
+        let layout = self.text.layout().clone();
+        for (range, element) in &mut self.links {
+            let rect = range_rects(&layout, centered, range.clone())
+                .into_iter()
+                .next()
+                .unwrap_or(Bounds::new(bounds.origin, size(px(0.), px(0.))));
+            element.layout_as_root(rect.size.into(), window, cx);
+            element.prepaint_at(rect.origin, window, cx);
+        }
+        self.texts.borrow_mut().push(Placed { key: self.key, layout, centered, visible });
     }
 
     fn paint(
@@ -137,6 +154,9 @@ impl Element for MdText {
             }
         }
         self.text.paint(id, inspector_id, bounds, state, prepaint, window, cx);
+        for (_, element) in &mut self.links {
+            element.paint(window, cx);
+        }
     }
 }
 
