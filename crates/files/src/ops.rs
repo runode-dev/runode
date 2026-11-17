@@ -35,7 +35,7 @@ pub fn child_path(dir: &Path, name: &str) -> Option<PathBuf> {
     parts.all(|part| matches!(part, Component::Normal(_))).then(|| dir.join(name))
 }
 
-/// 改名时输入的名字换成 `dir` 下的路径：和 `child_path` 一样，但只能是一段，不能挪到别的目录。
+/// 改名时输入的名字换成 `dir` 下的路径：只能是一段，不能挪到别的目录；不合规时为空。
 pub fn child_name(dir: &Path, name: &str) -> Option<PathBuf> {
     child_path(dir, name).filter(|_| Path::new(name.trim()).components().count() == 1)
 }
@@ -128,7 +128,8 @@ fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
 }
 
 /// 把 `src` 挪进目录 `dir`，返回挪过去的路径；本来就在 `dir` 里时不动。不能挪进它自己或者
-/// 它下面的目录，`dir` 里已经有同名的时报 `Exists`。
+/// 它下面的目录，`dir` 里已经有同名的时报 `Exists`。`dir` 在另一个卷上时先复制过去再删掉 `src`，
+/// 删 `src` 失败时报错，复制出来的那份留着。
 pub fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     let name = src.file_name().ok_or(OpError::IntoItself)?;
     let dest = dir.join(name);
@@ -138,8 +139,18 @@ pub fn move_into(src: &Path, dir: &Path) -> Result<PathBuf> {
     if inside(src, dir) {
         return Err(OpError::IntoItself);
     }
-    rename(src, &dest)?;
+    match rename(src, &dest) {
+        Err(OpError::Io(err)) if err.kind() == io::ErrorKind::CrossesDevices => move_across(src, &dest)?,
+        result => result?,
+    }
     Ok(dest)
+}
+
+/// 跨卷挪动：把 `src` 复制成 `dest` 再删掉 `src`，`dest` 已经有了时报 `Exists`。复制失败时 `src` 不动、
+/// 不留半个副本；删 `src` 失败时 `dest` 已是完整的一份，留着它，只报错。
+fn move_across(src: &Path, dest: &Path) -> Result {
+    copy_all(src, dest)?;
+    remove(src)
 }
 
 /// 把 `src` 复制进目录 `dir`，返回副本的路径。重名时副本叫「名字 copy」「名字 copy 2」，
@@ -201,6 +212,8 @@ fn insert_before_extension(name: &OsStr, insert: &str) -> OsString {
     out
 }
 
+/// 把 `src` 连同里面的东西复制成 `dest`，权限照旧；`dest` 已经有了时报 `AlreadyExists`、不碰它。
+/// 失败时只清掉这次自己建出来的。
 fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_symlink() {
@@ -221,11 +234,18 @@ fn copy_all(src: &Path, dest: &Path) -> io::Result<()> {
     if !meta.is_dir() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{}: not a regular file", src.display())));
     }
-    fs::create_dir(dest)?;
+    // 复制的过程中只有自己进得去，里面的都复制完了才设上源的权限：只读的目录先设上就写不进去了。
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dest)?;
     // 中途失败时把这次建出来的半个副本清掉，免得留下残缺的目录，再试一次又多出一份。
     copy_entries(src, dest).inspect_err(|_| {
         let _ = fs::remove_dir_all(dest);
-    })
+    })?;
+    // 设不了权限的文件系统（FAT 这类）照样算复制成功。
+    let _ = fs::set_permissions(dest, meta.permissions());
+    Ok(())
 }
 
 fn copy_entries(src: &Path, dest: &Path) -> io::Result<()> {
@@ -239,23 +259,57 @@ fn copy_entries(src: &Path, dest: &Path) -> io::Result<()> {
 /// 复制一个文件，`dest` 已经有了时报 `AlreadyExists`，不截断它（`fs::copy` 会截断）。
 #[cfg(target_os = "macos")]
 fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
+    use std::os::{fd::AsRawFd as _, unix::fs::OpenOptionsExt as _};
+    // `<sys/clonefile.h>` 的两个标志，libc 没有导出。不带 `CLONE_ACL` 时副本的 ACL 随目标目录，源上的 ACL 丢掉。
+    const CLONE_NOFOLLOW: u32 = 0x0001;
+    const CLONE_ACL: u32 = 0x0004;
     let (c_src, c_dest) = (c_path(src)?, c_path(dest)?);
-    // 和 `fs::copy` 一样能克隆就克隆，连同权限和扩展属性一起复制。
-    let flags = libc::COPYFILE_METADATA | libc::COPYFILE_DATA | libc::COPYFILE_CLONE | libc::COPYFILE_EXCL;
-    // SAFETY: 两个都是以 NUL 结尾的路径，不传状态。
-    if unsafe { libc::copyfile(c_src.as_ptr(), c_dest.as_ptr(), std::ptr::null_mut(), flags) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
+    // 同一个卷上克隆，连同权限、ACL 和扩展属性；要么建好、要么什么都没建。
+    // SAFETY: 两个都是以 NUL 结尾的路径。
+    if unsafe { libc::clonefile(c_src.as_ptr(), c_dest.as_ptr(), CLONE_NOFOLLOW | CLONE_ACL) } == 0 {
+        return Ok(());
     }
+    let err = io::Error::last_os_error();
+    if !matches!(err.raw_os_error(), Some(libc::EXDEV | libc::ENOTSUP)) {
+        return Err(err);
+    }
+    // 克隆不了时自己独占地建出 `dest` 再往里复制，出错时删的一定是这次建的。复制完权限、ACL 前只有自己读得到。
+    let input = fs::File::open(src)?;
+    let out = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(dest)?;
+    // SAFETY: 两个描述符都开着，不传状态。
+    let copied = unsafe {
+        libc::fcopyfile(
+            input.as_raw_fd(),
+            out.as_raw_fd(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_METADATA | libc::COPYFILE_DATA,
+        )
+    };
+    let result = if copied == 0 { Ok(()) } else { Err(io::Error::last_os_error()) };
+    drop(out);
+    if result.is_err() {
+        let _ = fs::remove_file(dest);
+    }
+    result
 }
 
 #[cfg(not(target_os = "macos"))]
 fn copy_file(src: &Path, dest: &Path) -> io::Result<()> {
     let mut input = fs::File::open(src)?;
-    let permissions = input.metadata()?.permissions();
-    let mut out = fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
-    let result = io::copy(&mut input, &mut out).and_then(|_| out.set_permissions(permissions));
+    let meta = input.metadata()?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    // 复制完设上源的权限之前只有自己读得到。
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut out = options.open(dest)?;
+    let result = io::copy(&mut input, &mut out).and_then(|_| out.set_permissions(meta.permissions()));
+    // 修改时间跟着源走；有的文件系统设不了，设不了不算复制失败。
+    if result.is_ok()
+        && let Ok(modified) = meta.modified()
+    {
+        let _ = out.set_modified(modified);
+    }
     // `dest` 是上面刚建的，复制到一半出错时删掉，不留半个副本。Windows 上要先关了才删得掉。
     drop(out);
     if result.is_err() {
@@ -465,6 +519,142 @@ mod tests {
         assert_eq!(copies.len(), 6);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 6);
         assert!(copies.iter().all(|copy| fs::read_to_string(copy).unwrap() == "a"));
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let tmp = std::env::temp_dir().join(format!("runode-files-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        tmp
+    }
+
+    /// 跨卷挪动后东西都在新位置，原处没了。
+    #[test]
+    fn moving_across_volumes_copies_then_removes() {
+        let tmp = scratch("move-across");
+        let file = tmp.join("a.txt");
+        fs::write(&file, "a").unwrap();
+        let dir = tmp.join("d");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/b.txt"), "b").unwrap();
+        let out = tmp.join("out");
+        fs::create_dir(&out).unwrap();
+
+        move_across(&file, &out.join("a.txt")).unwrap();
+        move_across(&dir, &out.join("d")).unwrap();
+        assert!(fs::symlink_metadata(&file).is_err());
+        assert!(fs::symlink_metadata(&dir).is_err());
+        assert_eq!(fs::read_to_string(out.join("a.txt")).unwrap(), "a");
+        assert_eq!(fs::read_to_string(out.join("d/sub/b.txt")).unwrap(), "b");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 挪过去的目录权限照旧，只有自己进得去的目录不会变成别人也能进。
+    #[cfg(unix)]
+    #[test]
+    fn moving_across_volumes_keeps_directory_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = scratch("move-across-mode");
+        let src = tmp.join("private");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("a.txt"), "a").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o700)).unwrap();
+        let dest = tmp.join("out");
+
+        move_across(&src, &dest).unwrap();
+        assert_eq!(fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "a");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 源复制不了、还没建出 `dest` 时，别人在 `dest` 放的东西不动。
+    #[test]
+    fn moving_across_volumes_leaves_a_dest_it_did_not_make() {
+        let tmp = scratch("move-across-missing");
+        let (src, dest) = (tmp.join("gone"), tmp.join("b"));
+        fs::write(&dest, "b").unwrap();
+        assert!(move_across(&src, &dest).is_err());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "b");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 源读不了、`dest` 已经有了时报错，`dest` 原样留着。
+    #[cfg(unix)]
+    #[test]
+    fn copying_an_unreadable_file_leaves_an_existing_dest() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = scratch("copy-unreadable");
+        let (src, dest) = (tmp.join("a"), tmp.join("b"));
+        fs::write(&src, "a").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o000)).unwrap();
+        fs::write(&dest, "b").unwrap();
+        assert!(copy_all(&src, &dest).is_err());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "b");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 复制出来的文件权限照旧，同一个卷上克隆和跨卷复制都是。
+    #[cfg(unix)]
+    #[test]
+    fn copying_keeps_file_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = scratch("copy-mode");
+        let src = tmp.join("a");
+        fs::write(&src, "a").unwrap();
+        fs::set_permissions(&src, fs::Permissions::from_mode(0o640)).unwrap();
+        copy_all(&src, &tmp.join("b")).unwrap();
+        assert_eq!(fs::metadata(tmp.join("b")).unwrap().permissions().mode() & 0o777, 0o640);
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 复制出来的文件带着源上拒绝某个用户读的 ACL 项。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn copying_keeps_the_acl() {
+        let tmp = scratch("copy-acl");
+        let src = tmp.join("a");
+        fs::write(&src, "a").unwrap();
+        let status = std::process::Command::new("chmod").arg("+a").arg("user:nobody deny read").arg(&src).status();
+        assert!(status.unwrap().success());
+        copy_all(&src, &tmp.join("b")).unwrap();
+        let listing = std::process::Command::new("ls").arg("-le").arg(tmp.join("b")).output().unwrap();
+        let listing = String::from_utf8_lossy(&listing.stdout);
+        assert!(listing.lines().any(|line| line.ends_with(" deny read")), "{listing}");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 目标已经有了时不碰它，源也不动。
+    #[test]
+    fn moving_across_volumes_never_overwrites() {
+        let tmp = scratch("move-across-exists");
+        let (src, dest) = (tmp.join("a"), tmp.join("b"));
+        fs::write(&src, "a").unwrap();
+        fs::write(&dest, "b").unwrap();
+        assert!(matches!(move_across(&src, &dest), Err(OpError::Exists)));
+        assert_eq!(fs::read_to_string(&src).unwrap(), "a");
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "b");
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// 复制到一半失败时不留半个副本，源不动。
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn moving_across_volumes_keeps_the_source_when_copying_fails() {
+        use std::os::unix::fs::FileTypeExt as _;
+        let tmp = scratch("move-across-fails");
+        let src = tmp.join("d");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("a.txt"), "a").unwrap();
+        let fifo = c_path(&src.join("pipe")).unwrap();
+        // SAFETY: 以 NUL 结尾的路径。
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let dest = tmp.join("out");
+
+        assert!(matches!(move_across(&src, &dest), Err(OpError::Io(_))));
+        assert!(fs::symlink_metadata(&dest).is_err());
+        assert_eq!(fs::read_to_string(src.join("a.txt")).unwrap(), "a");
+        assert!(fs::symlink_metadata(src.join("pipe")).unwrap().file_type().is_fifo());
         fs::remove_dir_all(&tmp).ok();
     }
 }
