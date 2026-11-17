@@ -13,8 +13,8 @@ use common::TempDir;
 #[cfg(unix)]
 use runode_ssh::bootstrap::{BIN_DIR, PROBE_EXIT, UPLOADS_DIR, parse_exec_failure, parse_pruned, parse_uploaded};
 use runode_ssh::bootstrap::{
-    Entry, Libc, Os, Platform, Target, Unsupported, connect_command, install_command, install_dir_name, prune_command,
-    run_command, upload_command, windows,
+    Entry, Libc, Os, Platform, SUMS_FILE, Target, Unsupported, connect_command, install_command, install_dir_name,
+    prune_command, run_command, upload_command, windows,
 };
 
 /// 像 ssh 那样把命令行交给登录 shell（默认 /bin/sh）解释。
@@ -67,18 +67,35 @@ fn scripts_avoid_characters_remote_shells_mangle() {
             assert!(Command::new("/bin/sh").args(["-n", "-c", inner]).status().unwrap().success());
         }
     }
+    // 发布的便携包里的文件，摘要按最长的写法算。
+    let sums: Vec<(String, String)> = [
+        "runode.exe",
+        "rn.exe",
+        "conpty.dll",
+        "OpenConsole.exe",
+        "conpty-LICENSE.txt",
+        "agent-rules-LICENSE.txt",
+        "syntaxes-LICENSE.txt",
+    ]
+    .iter()
+    .map(|name| ((*name).to_owned(), "a".repeat(64)))
+    .collect();
+    let dir = "0.1.16.abc-dirty-dev-1234567-69000000";
     for command in [
-        windows::connect_command("0.1.16.abc"),
-        windows::install_command("0.1.16.abc", ".part-1"),
+        windows::connect_command(dir),
+        windows::install_command(dir, ".part-123456-3b9aca00", &sums).unwrap(),
         windows::upload_command("1-2"),
-        windows::run_command("0.1.16.abc", Entry::Project),
-        windows::run_command("0.1.16.abc", Entry::Screen),
+        windows::run_command(dir, Entry::Project),
+        windows::run_command(dir, Entry::Screen),
     ] {
         let inner = command.strip_prefix("cmd /d /v:on /c \"").and_then(|rest| rest.strip_suffix('"')).unwrap();
-        // 开着延迟展开：`!` 只出现在 `!USERPROFILE!` 里，家目录不经 `%…%` 在拆命令前展开。
+        // 开着延迟展开：`!` 只出现在延迟展开的 `!USERPROFILE!`、`!SystemRoot!` 里，环境变量不经 `%…%` 在拆命令前展开。
         assert!(!inner.contains(['"', '$', '`', '\n', '^']), "{inner}");
-        assert_eq!(inner.matches('!').count(), inner.matches("!USERPROFILE!").count() * 2, "{inner}");
+        let delayed = inner.matches("!USERPROFILE!").count() + inner.matches("!SystemRoot!").count();
+        assert_eq!(inner.matches('!').count(), delayed * 2, "{inner}");
         assert!(!inner.contains("%USERPROFILE%"), "{inner}");
+        // cmd 一行最多 8191 个字符，经默认 shell 再交给 cmd 时整条命令都在那一行上；留些余量。
+        assert!(command.len() < 7800, "{} characters: {command}", command.len());
     }
     assert!(
         windows::prune_command("0.1.16.abc")
@@ -87,6 +104,37 @@ fn scripts_avoid_characters_remote_shells_mangle() {
     );
     assert_eq!(install_dir_name("0.1.16.abc-dirty.x/y"), "0.1.16.abc-dirty.x_y");
     assert_eq!(install_dir_name(".."), "_..");
+}
+
+/// 文件名和摘要原样拼进 cmd 脚本：写不进去的、缺了要核对的程序的，不出脚本。
+#[test]
+fn windows_install_refuses_what_it_cannot_write_into_the_script() {
+    let sum = "0123456789abcdefABCDEF".repeat(3)[..64].to_owned();
+    let sums = |extra: &[(&str, &str)]| -> Vec<(String, String)> {
+        [("runode.exe", sum.as_str()), ("rn.exe", sum.as_str())]
+            .iter()
+            .chain(extra)
+            .map(|(name, sha)| ((*name).to_owned(), (*sha).to_owned()))
+            .collect()
+    };
+    assert!(windows::install_command("0.1.16", ".part-1", &sums(&[("conpty.dll", &sum)])).is_ok());
+    for extra in [
+        [("a&b.dll", sum.as_str())],
+        [("a b.dll", sum.as_str())],
+        [(r"..\x.dll", sum.as_str())],
+        [(".hidden", sum.as_str())],
+        [("", sum.as_str())],
+        [(SUMS_FILE, sum.as_str())],
+        [("conpty.dll", &sum[..63])],
+        [("conpty.dll", &"g".repeat(64))],
+        [("conpty.dll", &format!("{}&", &sum[..63]))],
+    ] {
+        assert!(windows::install_command("0.1.16", ".part-1", &sums(&extra)).is_err(), "{extra:?}");
+    }
+    let launcher_only = vec![("rn.exe".to_owned(), sum.clone())];
+    assert!(windows::install_command("0.1.16", ".part-1", &launcher_only).is_err());
+    assert!(windows::install_command("0.1.16", "part&1", &sums(&[])).is_err());
+    assert!(windows::install_command("0.1&16", ".part-1", &sums(&[])).is_err());
 }
 
 #[cfg(unix)]
@@ -114,11 +162,30 @@ fn probes_then_installs_then_bridges() {
     let link = home.0.join(BIN_DIR).join("runode");
     assert_eq!(fs::read_link(&link).unwrap(), std::path::Path::new(dir).join("runode"));
 
+    let build = home.0.join(BIN_DIR).join(dir);
+    assert_eq!(fs::read_to_string(build.join(SUMS_FILE)).unwrap(), format!("{}  runode\n", sha256_hex(&fake)));
+
     let bridged = run(&home.0, &connect_command(dir), b"");
     assert_eq!(String::from_utf8_lossy(&bridged.stdout), "bridged\n");
     let other = run(&home.0, &connect_command("0.1.17.next"), b"");
     let platform = Platform::parse(&String::from_utf8_lossy(&other.stdout)).unwrap();
     assert_eq!(platform.installed, [dir, "runode"]);
+
+    // 装好后被截断：连上时认出来，当作没装；重新装上就好了。
+    let original = fs::read(build.join("runode")).unwrap();
+    fs::write(build.join("runode"), &original[..original.len() / 2]).unwrap();
+    let damaged = run(&home.0, &connect_command(dir), b"");
+    assert_eq!(damaged.status.code(), Some(PROBE_EXIT));
+    assert!(Platform::parse(&String::from_utf8_lossy(&damaged.stdout)).is_some());
+    let reinstalled = run(&home.0, &install_command(dir, &sha256_hex(&fake), false), &original);
+    assert!(reinstalled.status.success(), "{}", String::from_utf8_lossy(&reinstalled.stderr));
+    assert_eq!(String::from_utf8_lossy(&run(&home.0, &connect_command(dir), b"").stdout), "bridged\n");
+
+    // 没有清单或清单是空的也当作没装。
+    fs::remove_file(build.join(SUMS_FILE)).unwrap();
+    assert_eq!(run(&home.0, &connect_command(dir), b"").status.code(), Some(PROBE_EXIT));
+    fs::write(build.join(SUMS_FILE), "").unwrap();
+    assert_eq!(run(&home.0, &connect_command(dir), b"").status.code(), Some(PROBE_EXIT));
 }
 
 /// 在 `BIN_DIR` 下摆一个假的构建 `name`，`old` 时把目录的修改时间挪到很久以前。
@@ -202,7 +269,35 @@ fn installs_from_a_tarball() {
     );
     let output = run(&home.0, &install_command("v1", &sha256_hex(&tar), true), &fs::read(&tar).unwrap());
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(home.0.join(BIN_DIR).join("v1/runode").is_file());
+    let installed = home.0.join(BIN_DIR).join("v1/runode");
+    assert!(installed.is_file());
+    // 清单记的是解出来的可执行文件，不是包。
+    let sums = fs::read_to_string(home.0.join(BIN_DIR).join("v1").join(SUMS_FILE)).unwrap();
+    assert_eq!(sums, format!("{}  runode\n", sha256_hex(&installed)));
+    assert_eq!(run(&home.0, &connect_command("v1"), b"").status.code(), Some(0));
+}
+
+/// 装到一半被打断留下的临时文件，放久了的下次装或清理时删掉，刚留下的（可能还在装）不动。
+#[cfg(unix)]
+#[test]
+fn pruning_drops_leftovers_of_interrupted_installs() {
+    let home = TempDir::new("bootstrap-parts");
+    fake_build(&home.0, "current", false);
+    let build = home.0.join(BIN_DIR).join("current");
+    for name in [".part-1", ".part-1.in", ".part-2", ".part-3"] {
+        fs::write(build.join(name), "half").unwrap();
+    }
+    for name in [".part-1", ".part-1.in"] {
+        assert!(Command::new("touch").args(["-t", "202001010000"]).arg(build.join(name)).status().unwrap().success());
+    }
+    // 放了一天多、不满两天的也删。
+    let day_and_a_bit = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 3600);
+    fs::File::options().write(true).open(build.join(".part-3")).unwrap().set_modified(day_and_a_bit).unwrap();
+    let output = run(&home.0, &prune_command("current"), b"");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let mut left: Vec<_> = fs::read_dir(&build).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    left.sort();
+    assert_eq!(left, [".part-2", "runode"]);
 }
 
 #[test]
@@ -343,8 +438,26 @@ fn run_cmd(home: &std::path::Path, command: &str, stdin: &[u8]) -> std::process:
 /// 用系统的 tar.exe 把 `dir` 里的 `files` 打成 zip。
 #[cfg(windows)]
 fn zip(dir: &std::path::Path, files: &[&str], out: &std::path::Path) {
-    let status = Command::new("tar").arg("-a").arg("-cf").arg(out).arg("-C").arg(dir).args(files).status().unwrap();
+    let root = std::env::var_os("SystemRoot").unwrap();
+    let tar = std::path::Path::new(&root).join(r"System32\tar.exe");
+    let status = Command::new(tar).arg("-a").arg("-cf").arg(out).arg("-C").arg(dir).args(files).status().unwrap();
     assert!(status.success());
+}
+
+/// `dir` 里 `files` 的名字和 SHA-256，用系统的 certutil 算。
+#[cfg(windows)]
+fn windows_sums(dir: &std::path::Path, files: &[&str]) -> Vec<(String, String)> {
+    files
+        .iter()
+        .map(|name| {
+            let output = Command::new("certutil").arg("-hashfile").arg(dir.join(name)).arg("SHA256").output().unwrap();
+            assert!(output.status.success());
+            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+            let hex: String = text.lines().nth(1).unwrap().chars().filter(|c| !c.is_whitespace()).collect();
+            assert_eq!(hex.len(), 64, "{text}");
+            ((*name).to_owned(), hex)
+        })
+        .collect()
 }
 
 #[cfg(windows)]
@@ -359,42 +472,95 @@ fn windows_probes_installs_and_prunes() {
     let platform = Platform::parse(&String::from_utf8_lossy(&probe.stdout)).unwrap();
     assert_eq!(platform.target(), Ok(Target::WindowsX86_64));
 
-    // 假的 rn.exe 是系统的 tar.exe：`--version` 时成功退出。
+    // 假的 rn.exe 是系统的 tar.exe：`--version` 时成功退出，`--ssh-bridge` 时报错退出，不打 `RUNODE-PROBE`。
     let staging = home.0.join("staging");
     fs::create_dir(&staging).unwrap();
     fs::copy(r"C:\Windows\System32\tar.exe", staging.join("rn.exe")).unwrap();
     fs::write(staging.join("conpty.dll"), b"dll").unwrap();
+    fs::write(staging.join("runode.exe"), b"app").unwrap();
+    let files = ["rn.exe", "runode.exe", "conpty.dll"];
+    let sums = windows_sums(&staging, &files);
+    let install = |part: &str, sums: &[(String, String)], stdin: &[u8]| {
+        run_cmd(&home.0, &windows::install_command(dir, part, sums).unwrap(), stdin)
+    };
+    let bridged = |output: &std::process::Output| {
+        output.status.code() != Some(runode_ssh::bootstrap::PROBE_EXIT)
+            && !String::from_utf8_lossy(&output.stdout).contains("RUNODE-PROBE")
+    };
     // 只有 rn.exe、没有 runode.exe 的包不装。
     let launcher_only = home.0.join("launcher.zip");
     zip(&staging, &["rn.exe", "conpty.dll"], &launcher_only);
-    let refused = run_cmd(&home.0, &windows::install_command(dir, ".part-0"), &fs::read(&launcher_only).unwrap());
+    let refused = install(".part-0", &sums, &fs::read(&launcher_only).unwrap());
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("RUNODE-INSTALL exec"));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("RUNODE-INSTALL exec"), "{stderr}");
 
-    fs::write(staging.join("runode.exe"), b"app").unwrap();
     let archive = home.0.join("runode.zip");
-    zip(&staging, &["rn.exe", "runode.exe", "conpty.dll"], &archive);
+    zip(&staging, &files, &archive);
     let bytes = fs::read(&archive).unwrap();
-    let cut = run_cmd(&home.0, &windows::install_command(dir, ".part-1"), &bytes[..bytes.len() / 2]);
+    let cut = install(".part-1", &sums, &bytes[..bytes.len() / 2]);
     assert!(!cut.status.success());
     assert!(String::from_utf8_lossy(&cut.stderr).contains("RUNODE-INSTALL checksum"));
 
+    // 解出来的和本机算的摘要对不上：不装。
+    let mut wrong = sums.clone();
+    wrong.iter_mut().find(|(name, _)| name == "runode.exe").unwrap().1 = "0".repeat(64);
+    let mismatched = install(".part-9", &wrong, &bytes);
+    assert!(!mismatched.status.success());
+    assert!(String::from_utf8_lossy(&mismatched.stderr).contains("RUNODE-INSTALL checksum"));
+
     let bin = home.0.join(runode_ssh::bootstrap::BIN_DIR);
+    assert!(!bin.join(dir).exists());
     fs::create_dir_all(bin.join("stale")).unwrap();
     fs::write(bin.join("stale/rn.exe"), b"old").unwrap();
-    let installed = run_cmd(&home.0, &windows::install_command(dir, ".part-2"), &bytes);
+    let installed = install(".part-2", &sums, &bytes);
     assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
     assert!(bin.join(dir).join("rn.exe").is_file());
     assert!(bin.join(dir).join("conpty.dll").is_file());
+    assert!(bin.join(dir).join(SUMS_FILE).is_file());
     assert!(!bin.join(".part-0").exists());
+    assert!(bridged(&run_cmd(&home.0, &windows::connect_command(dir), b"")));
     // 别的连接已经装好了同一个构建：用它的，丢掉这次解出来的。
-    let again = run_cmd(&home.0, &windows::install_command(dir, ".part-3"), &bytes);
+    let again = install(".part-3", &sums, &bytes);
     assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
     assert!(!bin.join(".part-3").exists());
     // `stale` 刚放进去，没满 `BUILD_KEEP_DAYS` 天，留着。
     let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
     left.sort();
     assert_eq!(left, [dir, "stale"]);
+
+    // 装好后被改坏、没有清单：连上时当作没装，再装时换掉。
+    let damages: [fn(&std::path::Path); 3] = [
+        |build| fs::write(build.join("runode.exe"), b"ap").unwrap(),
+        |build| fs::remove_file(build.join(SUMS_FILE)).unwrap(),
+        |build| fs::write(build.join(SUMS_FILE), b"").unwrap(),
+    ];
+    for damage in damages {
+        damage(&bin.join(dir));
+        let probe = run_cmd(&home.0, &windows::connect_command(dir), b"");
+        assert_eq!(probe.status.code(), Some(runode_ssh::bootstrap::PROBE_EXIT));
+        assert!(Platform::parse(&String::from_utf8_lossy(&probe.stdout)).is_some());
+        let replaced = install(".part-4", &sums, &bytes);
+        assert!(replaced.status.success(), "{}", String::from_utf8_lossy(&replaced.stderr));
+        assert!(bridged(&run_cmd(&home.0, &windows::connect_command(dir), b"")));
+        let mut left: Vec<_> = fs::read_dir(&bin).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        left.sort();
+        assert_eq!(left, [dir, "stale"], "the damaged build is not cleaned up");
+    }
+
+    // 坏了的构建里有文件开着、改不了名：不装，说清楚。
+    fs::write(bin.join(dir).join(SUMS_FILE), b"").unwrap();
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // 只许别人读：不许删、不许改名。
+        let _held = fs::OpenOptions::new().read(true).share_mode(1).open(bin.join(dir).join("conpty.dll")).unwrap();
+        let busy = install(".part-5", &sums, &bytes);
+        assert!(!busy.status.success());
+        assert!(String::from_utf8_lossy(&busy.stderr).contains("RUNODE-INSTALL busy"));
+        assert!(bin.join(dir).join("rn.exe").is_file());
+        assert!(!bin.join(".part-5").exists());
+    }
+    assert!(install(".part-6", &sums, &bytes).status.success());
 
     let output = run_cmd(&home.0, &windows::prune_command(dir), b"");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

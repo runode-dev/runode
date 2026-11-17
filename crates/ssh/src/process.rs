@@ -56,7 +56,7 @@ pub fn spawn(command: &mut Command, pipes: Pipes) -> io::Result<Piped> {
     Ok(Piped { child: child?, stdin, stdout, stderr })
 }
 
-/// 跑完 `command`，收齐 stdout 和 stderr，同 `Command::output`；stdin 照 `command` 上设的。
+/// 跑完 `command`，收齐 stdout 和 stderr 交回 `Output`；stdin 照 `command` 上设的。
 pub fn output(command: &mut Command) -> io::Result<Output> {
     let piped = spawn(command, Pipes { stdin: false, stdout: true, stderr: true })?;
     let Piped { mut child, stdout, stderr, .. } = piped;
@@ -156,7 +156,8 @@ mod windows {
         // SAFETY: 句柄刚建好，归这里。
         let ours = unsafe { OwnedHandle::from_raw_handle(ours) };
         let access = if child_reads { GENERIC_READ } else { GENERIC_WRITE | FILE_READ_ATTRIBUTES };
-        // SAFETY: 同上；打开的是刚建的那个管道，只有一个实例，别人抢先连上时这里失败。
+        // SAFETY: `name` 是以 0 结尾的 UTF-16，活到调用结束；安全属性为空，句柄不能继承。打开的是刚建的
+        // 那个管道，只有一个实例，别人抢先连上时这里失败。
         let theirs = unsafe {
             CreateFileW(name.as_ptr(), access, 0, ptr::null(), OPEN_EXISTING, FILE_FLAG_OVERLAPPED, ptr::null_mut())
         };

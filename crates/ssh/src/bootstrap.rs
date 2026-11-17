@@ -63,13 +63,24 @@ fn wrap(script: &str) -> String {
     format!("/bin/sh -c '{script}'")
 }
 
-/// 连上远端：装着 `dir` 这个构建就直接换成它的桥接（`runode --ssh-bridge`）；没装就打出 `RUNODE-PROBE` 开头的
-/// 平台信息（系统、架构、C 库、家目录、已经装着的构建），以 `PROBE_EXIT` 退出。
+/// 构建目录里记着各个文件 SHA-256 的清单，每行是 `<十六进制>  <文件名>`（`sha256sum` 的格式）。
+/// 连上时按它复核装着的文件；没有它的构建当作没装。
+pub const SUMS_FILE: &str = "SHA256SUMS";
+
+/// sh 里算 `path` 的 SHA-256（十六进制）的命令替换；`sha256sum` 和 `shasum` 都没有时是空串。
+fn sh_sha256(path: &str) -> String {
+    format!(r#"$( (sha256sum "{path}" 2>/dev/null || shasum -a 256 "{path}") | cut -d" " -f1)"#)
+}
+
+/// 连上远端：装着 `dir` 这个构建、`runode` 的摘要又和 `SUMS_FILE` 里记的对得上，就直接换成它的桥接
+/// （`runode --ssh-bridge`）；没装、没有清单、对不上（装好后被改坏、截断）就打出 `RUNODE-PROBE` 开头的平台信息
+/// （系统、架构、C 库、家目录、已经装着的构建），以 `PROBE_EXIT` 退出，由调用方重新装。每次连上都重算一遍摘要。
 pub fn connect_command(dir: &str) -> String {
     wrap(&format!(
         concat!(
-            r#"D="$HOME/{bin}"; X="$D/{dir}/runode"; "#,
-            r#"if [ -x "$X" ]; then exec "$X" --ssh-bridge; fi; "#,
+            r#"D="$HOME/{bin}"; B="$D/{dir}"; X="$B/runode"; "#,
+            r#"if [ -x "$X" ] && [ -f "$B/{sums}" ]; then S={hash}; "#,
+            r#"if [ -n "$S" ] && [ "$(cat "$B/{sums}")" = "$S  runode" ]; then exec "$X" --ssh-bridge; fi; fi; "#,
             r#"printf "RUNODE-PROBE os=%s\n" "$(uname -s)"; "#,
             r#"printf "RUNODE-PROBE arch=%s\n" "$(uname -m)"; "#,
             r#"printf "RUNODE-PROBE arm64=%s\n" "$(sysctl -n hw.optional.arm64 2>/dev/null)"; "#,
@@ -81,6 +92,8 @@ pub fn connect_command(dir: &str) -> String {
         ),
         bin = BIN_DIR,
         dir = dir,
+        sums = SUMS_FILE,
+        hash = sh_sha256("$X"),
         exit = PROBE_EXIT,
     ))
 }
@@ -117,30 +130,42 @@ fn run_installed(dir: &str, arg: &str) -> String {
 
 /// 把 stdin 上的可执行文件装成 `dir` 这个构建：先写成临时文件，核对 SHA-256（`sha256`，十六进制）、试跑一下
 /// （拦住挂成 noexec 的家目录、太旧的 glibc、缺的动态库），都过了才原子地换上，再把 `runode` 链接指过去；哪一步
-/// 没成都删掉临时文件，临时文件名每次不同，留下的没人清。试跑不成时 stderr 上打一行 `RUNODE-INSTALL exec`，
-/// 后面跟着试跑报错的开头（`parse_exec_failure` 认）。`archive` 时
-/// stdin 是只装着 `runode` 的 tar.gz，核对的是包。换上以后删掉放了超过 `BUILD_KEEP_DAYS` 天的旧构建
-/// （`prune_script`），链接原先指着的那个留着。
+/// 没成都删掉临时文件；临时文件名每次不同，被打断时留下的由 `prune_script` 删。试跑不成时 stderr 上打一行
+/// `RUNODE-INSTALL exec`，后面跟着试跑报错的开头（`parse_exec_failure` 认）。`archive` 时
+/// stdin 是只装着 `runode` 的 tar.gz，核对的是包。换上 `runode` 以后才写 `SUMS_FILE`：可执行文件就是 `sha256`，
+/// 从核对过的包里解出来的在远端重算。换上以后删掉放了超过 `BUILD_KEEP_DAYS` 天的旧构建（`prune_script`），
+/// 链接原先指着的那个留着。
 pub fn install_command(dir: &str, sha256: &str, archive: bool) -> String {
     let unpack = if archive { r#"tar -xzOf "$T.in" runode > "$T" && rm -f "$T.in""# } else { r#"mv -f "$T.in" "$T""# };
+    let rehash = if archive {
+        format!(r#"S={}; [ -n "$S" ] || {{ rm -f "$T"; exit 1; }}; "#, sh_sha256("$T"))
+    } else {
+        String::new()
+    };
     wrap(&format!(
         concat!(
             r#"D="$HOME/{bin}"; umask 077; mkdir -p "$D/{dir}" || exit 1; T="$D/{dir}/.part-$$"; "#,
             r#"cat > "$T.in" || {{ rm -f "$T.in"; exit 1; }}; "#,
-            r#"S=$( (sha256sum "$T.in" 2>/dev/null || shasum -a 256 "$T.in") | cut -d" " -f1); "#,
+            r#"S={hash}; "#,
             r#"if [ "$S" = "{sha}" ]; then :; else rm -f "$T.in"; echo "RUNODE-INSTALL checksum" >&2; exit 1; fi; "#,
             r#"{unpack} || {{ rm -f "$T" "$T.in"; exit 1; }}; "#,
             r#"chmod 755 "$T" || {{ rm -f "$T"; exit 1; }}; "#,
             r#"if "$T" --version > /dev/null 2> "$T.err"; then rm -f "$T.err"; else "#,
             r#"E=$(head -c 300 "$T.err" | tr "\n" " "); rm -f "$T" "$T.err"; echo "RUNODE-INSTALL exec $E" >&2; exit 1; fi; "#,
-            r#"mv -f "$T" "$D/{dir}/runode" || {{ rm -f "$T"; exit 1; }}; P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
+            "{rehash}",
+            r#"mv -f "$T" "$D/{dir}/runode" || {{ rm -f "$T"; exit 1; }}; "#,
+            r#"printf "%s  runode\n" "$S" > "$T.sums" && mv -f "$T.sums" "$D/{dir}/{sums}" || {{ rm -f "$T.sums"; exit 1; }}; "#,
+            r#"P=$(readlink "$D/runode" 2>/dev/null); P="${{P%%/*}}"; "#,
             r#"ln -sf "{dir}/runode" "$D/.link-$$" && mv -f "$D/.link-$$" "$D/runode" || exit 1; "#,
             "{prune} > /dev/null; :"
         ),
         bin = BIN_DIR,
         dir = dir,
+        hash = sh_sha256("$T.in"),
         sha = sha256,
         unpack = unpack,
+        rehash = rehash,
+        sums = SUMS_FILE,
         prune = prune_script(dir, Some(BUILD_KEEP_DAYS)),
     ))
 }
@@ -153,6 +178,12 @@ pub fn parse_exec_failure(stderr: &str) -> Option<&str> {
 
 /// 装上新构建时，别的构建放满这么多天才删。
 pub const BUILD_KEEP_DAYS: u32 = 7;
+/// 装到一半被打断留下的临时文件（Windows 上是临时目录）放满这么多天才删：正在装的那些一直在写，不会这么旧。
+const PART_KEEP_DAYS: u32 = 1;
+/// `days` 天折成 `find -mmin` 的分钟数：按分钟比，放满整 `days` 天就删。
+fn minutes(days: u32) -> u32 {
+    days * 24 * 60
+}
 /// 删掉一个旧构建打出的一行以它开头，后面是目录名和它占的 KiB。
 const PRUNED: &str = "RUNODE-PRUNED ";
 
@@ -165,15 +196,18 @@ pub fn prune_command(keep: &str) -> String {
 }
 
 /// 删掉 `$D` 下的构建目录，跳过 `keep`、`$P` 和还有进程在跑着里面的 `runode` 的；给了 `days` 时只删放满这么多天的。
+/// 留着的构建里放满 `PART_KEEP_DAYS` 天的 `.part-` 临时文件也删掉。
 fn prune_script(keep: &str, days: Option<u32>) -> String {
-    let age = days.map(|days| format!(" -mtime +{days}")).unwrap_or_default();
+    let age = days.map(|days| format!(" -mmin +{}", minutes(days))).unwrap_or_default();
     format!(
         concat!(
+            r#"find "$D" -mindepth 2 -maxdepth 2 -type f -name ".part-*" -mmin +{part_minutes} -exec rm -f {{}} + 2>/dev/null; "#,
             r#"R=$( {{ ps -A -o args=; ls -l /proc/[0-9]*/exe; }} 2>/dev/null ); "#,
             r#"find "$D" -mindepth 1 -maxdepth 1 -type d{age} | while read -r E; do N="${{E##*/}}"; "#,
             r#"case "$N" in "{keep}"|"$P") continue;; esac; case "$R" in *"$E/runode"*) continue;; esac; "#,
             r#"K=$(du -sk "$E" 2>/dev/null | cut -f1); rm -rf "$E" && printf "{pruned}%s %s\n" "$N" "${{K:-0}}"; done"#
         ),
+        part_minutes = minutes(PART_KEEP_DAYS),
         age = age,
         keep = keep,
         pruned = PRUNED,
@@ -208,13 +242,13 @@ pub fn upload_command(id: &str, file: Option<&str>) -> String {
     wrap(&format!(
         concat!(
             r#"D="$HOME/{uploads}"; umask 077; mkdir -p "$D" && chmod 700 "$D" || exit 1; "#,
-            r#"find "$D" -mindepth 1 -maxdepth 1 -mtime +{keep} -exec rm -rf {{}} + 2>/dev/null; "#,
+            r#"find "$D" -mindepth 1 -maxdepth 1 -mmin +{keep} -exec rm -rf {{}} + 2>/dev/null; "#,
             r#"U="$D/{id}"; mkdir "$U" || exit 1; "#,
             "{receive} || exit 1; ",
             r#"printf "{uploaded}%s\n" "$U""#
         ),
         uploads = UPLOADS_DIR,
-        keep = UPLOAD_KEEP_DAYS,
+        keep = minutes(UPLOAD_KEEP_DAYS),
         id = id,
         receive = receive,
         uploaded = UPLOADED,

@@ -3,7 +3,7 @@
 # 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
 # runode-remote 和推送中转 runode-push 直接依赖，SQLite 只许 runode-todo 直接依赖，
 # 终端会话（runode-terminal）只许 app 和宿主直接依赖，宿主和前端之间的协议（runode-protocol）只许说这套协议的
-# crate 直接依赖。「某个 crate 只依赖谁」那类规则由 scripts/check-layers.py 核对。
+# crate 直接依赖。「某个 crate 只依赖谁」那类规则由 `make layers` 跑的检查脚本核对。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
 
@@ -56,4 +56,6 @@ deny = [
     { crate = "rcgen", wrappers = ["runode-remote"], reason = "远程访问的自签证书只在 runode-remote 里生成" },
     # rustls、它的证书校验（rustls-webpki）和 rcgen 拿 ring 当密码学后端，也直接依赖它。
     { crate = "ring", wrappers = ["runode-remote", "runode-push", "rustls", "rustls-webpki", "rcgen", "noq-proto", "tokio-websockets"], reason = "远程访问的签名校验和随机数只在 runode-remote 里（连同它用的 iroh），推送中转 runode-push 自己封句柄、签 APNs 的 JWT" },
+    # sherpa-onnx-sys 的构建脚本解它下载的预编译库，也直接依赖它。
+    { crate = "zip", wrappers = ["runode", "sherpa-onnx-sys"], reason = "只有 app 读 zip：装到 Windows 远端前算发布包里各文件的摘要" },
 ]

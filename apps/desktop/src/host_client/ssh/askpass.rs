@@ -2,7 +2,7 @@
 //! 提示，这里按口令（`register` 给每次连接的）认出是哪台主机，交给界面弹框（`RemoteEvent::Ask`），等用户答。
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::{self, BufReader, Read as _},
     path::PathBuf,
     sync::{LazyLock, Mutex, OnceLock, PoisonError},
@@ -50,8 +50,34 @@ struct Server {
 }
 
 static SERVER: OnceLock<Option<Server>> = OnceLock::new();
+static TOKENS: LazyLock<Mutex<Tokens>> = LazyLock::new(Mutex::default);
+
+/// 最多记着这么多个口令，再发新的就忘掉最早发的：同时在问用户的 ssh 不会有这么多。
+const MAX_TOKENS: usize = 64;
+
 /// 发出去的口令，按口令记是哪台主机。
-static TOKENS: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Mutex::default);
+#[derive(Default)]
+struct Tokens {
+    hosts: HashMap<String, String>,
+    /// 按发出的先后。
+    order: VecDeque<String>,
+}
+
+impl Tokens {
+    fn insert(&mut self, token: String, host: String) {
+        if self.order.len() >= MAX_TOKENS
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.hosts.remove(&oldest);
+        }
+        self.order.push_back(token.clone());
+        self.hosts.insert(token, host);
+    }
+
+    fn host(&self, token: &str) -> Option<String> {
+        self.hosts.get(token).cloned()
+    }
+}
 
 /// 给 `host` 的一次连接要一个口令，返回 socket 的路径和口令；开不了 socket 时为空，ssh 只能不问用户。
 pub(super) fn register(host: &str) -> Option<(PathBuf, String)> {
@@ -116,7 +142,7 @@ fn serve(stream: Stream) {
         }
     };
     let Request { token, kind, prompt } = request;
-    let host = TOKENS.lock().unwrap_or_else(PoisonError::into_inner).get(&token).cloned();
+    let host = TOKENS.lock().unwrap_or_else(PoisonError::into_inner).host(&token);
     let Some(host) = host else {
         tracing::warn!("askpass request with an unknown token, refusing it");
         let _ = write_reply(&mut &stream, &None);
@@ -135,4 +161,22 @@ fn serve(stream: Stream) {
     emit(RemoteEvent::Ask(Ask { host, kind, prompt, reply: Some(reply), dismissed: Some(dismissed) }));
     let reply = futures::executor::block_on(answer).unwrap_or(None);
     let _ = write_reply(&mut &stream, &reply);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 记满了再发新的，最早发的口令认不出了，新的认得出。
+    #[test]
+    fn askpass_tokens_forget_the_oldest_past_the_limit() {
+        let mut tokens = Tokens::default();
+        for at in 0..=MAX_TOKENS {
+            tokens.insert(format!("t{at}"), format!("host{at}"));
+        }
+        assert_eq!(tokens.host("t0"), None);
+        assert_eq!(tokens.host("t1").as_deref(), Some("host1"));
+        assert_eq!(tokens.host(&format!("t{MAX_TOKENS}")), Some(format!("host{MAX_TOKENS}")));
+        assert_eq!(tokens.hosts.len(), MAX_TOKENS);
+    }
 }

@@ -18,7 +18,7 @@ runode-agent.workspace = true
 runode-host.workspace = true
 # 和宿主之间的帧和消息，两种跑法都经一条连接说话。
 runode-protocol.workspace = true
-# 带子命令启动时走命令行，见 `runode_cli::wants_cli`。
+# 带子命令启动时走命令行（`runode_cli::wants_cli`）。
 runode-cli.workspace = true
 # 配置文件的读取、主题、快捷键的写法和配置模板。
 runode-config.workspace = true
@@ -35,6 +35,9 @@ runode-ui.workspace = true
 runode-preview.workspace = true
 runode-files = { workspace = true, features = ["serde"] }
 runode-ssh.workspace = true
+# 装到 Windows 远端的 zip：算出包里各个文件的摘要，远端照着核对。
+sha2.workspace = true
+zip.workspace = true
 # 语音输入：下载识别模型、录音、在本机转文字。
 runode-speech.workspace = true
 # 看板的定时对话框和手机设置页按本地时间写钟点。
