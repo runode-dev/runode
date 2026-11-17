@@ -27,7 +27,7 @@ use portable_pty::{ChildKiller, MasterPty, SlavePty, native_pty_system};
 use runode_types::{grid::GridSize, settings::TermSettings, shell::IntegrationMode};
 
 pub use process::process_args;
-pub(crate) use process::{group_members, process_name};
+pub(crate) use process::{children, group_members, process_name, snapshot};
 pub(super) use vt_io::encode_reply;
 
 use super::{PtyEvent, PtySink, PtyWriter, WriterMsg, discard_queued, pty_size, set_current_thread_interactive};

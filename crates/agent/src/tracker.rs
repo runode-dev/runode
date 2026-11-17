@@ -20,17 +20,22 @@
 //!
 //! 求值要读屏幕、跑正则，不在每段输出时都做：只在有新输出、信号变了、或者正等着确认空闲时
 //! 求值，而且两次之间至少隔 `EVAL_INTERVAL`。agent 自己报告的状态变了、前台换了程序时立即
-//! 求值。调用方在 `Tracker::deadline` 到了时再调 `Tracker::poll`。
+//! 求值。规则靠后台 shell 的探测判成工作中时，没有新输出也每隔 `BACKGROUND_RECHECK` 重新探测、
+//! 求值一次：后台起的服务要过一会儿才开始监听端口。调用方在 `Tracker::deadline` 到了时再调
+//! `Tracker::poll`。
 //!
 //! 宿主升级时会话换到新宿主，`Tracker` 也换成新的一个：`Tracker::resume` 接着交接前公布的状态，
 //! 不从「没有 agent」重新认起，见那里。
 
-use std::time::{Duration, Instant};
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 use runode_types::agent::{Agent, AgentKind, AgentState};
 
 use crate::{
-    agent_from_name,
+    BackgroundShells, agent_from_name,
     book::RuleBook,
     osc::ProgressCapture,
     rules::{Signals, Verdict},
@@ -53,6 +58,8 @@ const MAX_STATUS_RECORDS: usize = 256;
 pub const BURST_GAP: Duration = Duration::from_millis(800);
 /// 一阵输出持续这么久（从用户最后一次输入之后算）才算 agent 在干活。
 pub const BURST_MIN: Duration = Duration::from_millis(1500);
+/// 后台 shell 的探测结果用多久；靠它判成工作中时，过了这么久再探测、求值一次。
+pub const BACKGROUND_RECHECK: Duration = Duration::from_secs(3);
 
 /// 前台在跑什么。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +110,10 @@ pub struct Tracker {
     /// 交接前那阵输出还算在继续：输出重新流起来（`output_resumed` 或下一段输出）
     /// 之前，按输出活动判的工作中不撤。
     held_burst: bool,
+    /// 上次探测后台 shell 的时刻和结果。
+    background_cache: Option<(Instant, Option<BackgroundShells>)>,
+    /// 上次求值靠探测找到了后台 shell、说它们在干活，判成了工作中，到这个时刻要重新探测、求值。
+    background_due: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -280,6 +291,7 @@ impl Tracker {
                 self.process = kind;
                 self.grace_from = kind.filter(|_| !carried).map(|_| now);
                 self.pending_idle = None;
+                self.forget_background();
                 self.urgent = Some(now);
             }
             Foreground::Program(_) => {}
@@ -299,6 +311,7 @@ impl Tracker {
             (self.dirty && in_grace.is_none()).then_some(last + EVAL_INTERVAL),
             in_grace,
             self.by_activity.then(|| self.activity.last.map(|at| at + BURST_GAP + Duration::from_millis(1))).flatten(),
+            self.background_due,
         ]
         .into_iter()
         .flatten()
@@ -307,13 +320,15 @@ impl Tracker {
 
     /// 到了该求值的时候就求值，返回对外的状态是否变了。`last_input` 是最近一次向程序发输入
     /// 的时刻；`screen` 读屏幕底部的文字，只在要比规则时才调用，读不到时为 `None`（这时只比
-    /// 标题和进度报告的规则）。
+    /// 标题和进度报告的规则）。`background` 探测 agent 起的后台 shell，只在规则要看时才调用，
+    /// 结果在 `BACKGROUND_RECHECK` 内复用；说不清时为 `None`。
     pub fn poll(
         &mut self,
         now: Instant,
         last_input: Option<Instant>,
         rules: &RuleBook,
         screen: impl FnOnce() -> Option<String>,
+        background: impl Fn() -> Option<BackgroundShells>,
     ) -> bool {
         if self.deadline().is_none_or(|at| at > now) {
             // 没有 agent 时 `deadline` 也是 `None`，但之前发布过的状态要撤掉。
@@ -326,7 +341,21 @@ impl Tracker {
         self.urgent = None;
         self.dirty = false;
         self.last_eval = Some(now);
-        let next = self.evaluate(now, last_input, rules, screen);
+        self.background_due = None;
+        let cached = self.background_cache.filter(|&(at, _)| now.saturating_duration_since(at) < BACKGROUND_RECHECK);
+        let probed = Cell::new(None);
+        let probe = || {
+            let (at, shells) = probed.get().or(cached).unwrap_or_else(|| (now, background()));
+            probed.set(Some((at, shells)));
+            shells
+        };
+        let next = self.evaluate(now, last_input, rules, screen, probe);
+        if let Some((at, shells)) = probed.get() {
+            self.background_cache = Some((at, shells));
+            if shells.is_some_and(|found| found.shells > 0 && found.busy()) && next.is_some_and(Agent::is_working) {
+                self.background_due = Some(at + BACKGROUND_RECHECK);
+            }
+        }
         let changed = next != self.published;
         self.published = next;
         changed
@@ -369,6 +398,12 @@ impl Tracker {
         self.progress_text.clear();
         self.pending_idle = None;
         self.by_activity = false;
+        self.forget_background();
+    }
+
+    fn forget_background(&mut self) {
+        self.background_cache = None;
+        self.background_due = None;
     }
 
     /// 交接前的 agent 已经不在前台了，不再按它算。
@@ -383,6 +418,7 @@ impl Tracker {
         last_input: Option<Instant>,
         rules: &RuleBook,
         screen: impl FnOnce() -> Option<String>,
+        background: impl Fn() -> Option<BackgroundShells>,
     ) -> Option<Agent> {
         let was_overriding = std::mem::take(&mut self.overriding);
         let Some(kind) = self.kind() else {
@@ -406,6 +442,7 @@ impl Tracker {
                         screen: screen.as_deref(),
                         title: &self.title_text,
                         progress: self.progress_text.latest(),
+                        background: Some(&background),
                     });
                     match verdict {
                         Verdict::Matched { state, overrides_reported_idle, .. } => {
@@ -436,6 +473,7 @@ impl Tracker {
                 screen: screen.as_deref(),
                 title: &self.title_text,
                 progress: self.progress_text.latest(),
+                background: Some(&background),
             })
         });
         let (state, visible) = match verdict {

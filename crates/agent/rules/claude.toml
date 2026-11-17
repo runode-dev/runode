@@ -1,7 +1,7 @@
 id = "claude"
-version = "2026.11.16.2"
-min_engine_version = 4
-updated_at = "2026-11-16T00:00:00Z"
+version = "2026.11.17.1"
+min_engine_version = 5
+updated_at = "2026-11-17T00:00:00Z"
 aliases = ["claude-code"]
 # Claude reports idle over OSC 7501 when its turn ends, even while background shells,
 # agents or MCP tasks it waits on are still running; the rules for those override it.
@@ -63,9 +63,12 @@ priority = 965
 region = "after_last_horizontal_rule"
 visible_working = true
 overrides_reported_idle = true
+background_shell_busy = true
 # A shell Claude started in the background shows as "N shell(s)" in the footer under
 # the prompt box. Claude sits at the prompt while it waits for one (gh pr checks
 # --watch, a build) and picks up again when it exits, so the turn is not over.
+# Shells that are servers listening on a port (next dev, vite) never exit, so they
+# do not count.
 line_regex = ['(?:^\s*|·\s+)[1-9]\d* shells?(?:\s+·|\s*$)']
 not = [
   { contains = ["do you want to proceed?"] },

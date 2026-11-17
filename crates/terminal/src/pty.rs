@@ -7,11 +7,14 @@
 //! Unix 上的伪终端（`unix`）能在宿主升级时交给新宿主，shell 不中断；Windows 上的是 ConPTY
 //! （`conpty`）：没有能交出去的描述符，不能交接，读写都是阻塞的。
 
+mod background;
 #[cfg(windows)]
 mod conpty;
 mod fish_marks;
 #[cfg(unix)]
 mod unix;
+
+pub(crate) use background::background_shells;
 
 use std::{
     ffi::OsString,
@@ -30,7 +33,7 @@ use runode_types::grid::GridSize;
 #[cfg(windows)]
 pub(crate) use conpty::default_shell_in;
 #[cfg(windows)]
-use conpty::group_members;
+pub(crate) use conpty::group_members;
 #[cfg(windows)]
 pub use conpty::process_args;
 #[cfg(windows)]
@@ -40,11 +43,13 @@ pub(crate) use conpty::process_name;
 #[cfg(windows)]
 pub use conpty::{Pty, default_shell};
 #[cfg(unix)]
+use unix::args_of;
+#[cfg(unix)]
+pub(crate) use unix::group_members;
+#[cfg(unix)]
 pub(crate) use unix::process_name;
 #[cfg(unix)]
 pub use unix::{AdoptError, Pty, PtyHandoff, default_shell, login_shell, process_args, raise_fd_limit};
-#[cfg(unix)]
-use unix::{args_of, group_members};
 
 /// 进程号：Unix 上是 `pid_t`，Windows 上是 `u32`。
 #[cfg(unix)]
@@ -56,6 +61,14 @@ pub(crate) type Pid = u32;
 pub(crate) fn pid_u32(pid: Pid) -> Option<u32> {
     #[cfg(unix)]
     return u32::try_from(pid).ok();
+    #[cfg(windows)]
+    Some(pid)
+}
+
+/// 对外用的 `u32` 换回 `Pid`；放不进 `Pid` 的（Unix 上）为 `None`。
+pub(crate) fn pid_from_u32(pid: u32) -> Option<Pid> {
+    #[cfg(unix)]
+    return Pid::try_from(pid).ok();
     #[cfg(windows)]
     Some(pid)
 }
@@ -275,25 +288,25 @@ fn pty_size(size: GridSize) -> PtySize {
 /// 以 `leader` 为组长的进程组里的全部进程，带着进程名和参数，认 agent 用。一个都读不到时
 /// 为 `None`。
 pub(crate) fn process_group(leader: Pid) -> Option<ForegroundJob> {
-    let processes: Vec<ForegroundProcess> = group_members(leader)
-        .into_iter()
-        .filter_map(|pid| {
-            let (exe, argv) = args_of(pid).unzip();
-            Some(ForegroundProcess {
-                pid: pid_u32(pid)?,
-                name: process_name(pid)?,
-                exe: exe.filter(|exe| !exe.is_empty()),
-                argv0: argv.as_ref().and_then(|argv| argv.first()).and_then(|first| {
-                    let name = first.rsplit(std::path::is_separator).next().unwrap_or(first);
-                    let name = name.strip_prefix('-').unwrap_or(name);
-                    (!name.is_empty()).then(|| name.to_owned())
-                }),
-                argv,
-            })
-        })
-        .collect();
+    let processes: Vec<ForegroundProcess> = group_members(leader).into_iter().filter_map(process_info).collect();
     let leader = pid_u32(leader)?;
     (!processes.is_empty()).then_some(ForegroundJob { leader, processes })
+}
+
+/// 进程 `pid` 的进程名、可执行文件和参数；读不到进程名（进程已经退出）时为 `None`。
+fn process_info(pid: Pid) -> Option<ForegroundProcess> {
+    let (exe, argv) = args_of(pid).unzip();
+    Some(ForegroundProcess {
+        pid: pid_u32(pid)?,
+        name: process_name(pid)?,
+        exe: exe.filter(|exe| !exe.is_empty()),
+        argv0: argv.as_ref().and_then(|argv| argv.first()).and_then(|first| {
+            let name = first.rsplit(std::path::is_separator).next().unwrap_or(first);
+            let name = name.strip_prefix('-').unwrap_or(name);
+            (!name.is_empty()).then(|| name.to_owned())
+        }),
+        argv,
+    })
 }
 
 /// 界面上写的程序名：进程名去掉 Windows 可执行文件的 `.exe`，标签上写 `powershell` 而不是

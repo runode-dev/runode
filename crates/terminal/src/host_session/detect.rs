@@ -2,7 +2,8 @@
 //! `runode_agent::Tracker`，由它判断是哪个 agent、在干什么。
 //!
 //! 标题和进度在 `HostSession::feed` 里随输出交过去；前台进程组在 `HostSession::refresh_foreground`
-//! 里认；屏幕文字只在 tracker 要比规则时才读。tracker 自己按时间节流，调用方在
+//! 里认；屏幕文字只在 tracker 要比规则时才读，agent 放到后台的 shell 也只在规则要看时才查
+//! （`pty::background_shells`）。tracker 自己按时间节流，调用方在
 //! `HostSession::agent_deadline` 到了时调 `HostSession::poll_agent`。
 
 use std::{
@@ -11,7 +12,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use runode_agent::{Foreground, RuleBook, conversation, identify_job};
+use runode_agent::{Foreground, RuleBook, conversation, identify_agent_process};
 use runode_types::agent::AgentKind;
 
 use super::{HostSession, log_err};
@@ -33,6 +34,8 @@ pub(super) struct ForegroundProbe {
     since: Option<Instant>,
     probed_at: Option<Instant>,
     agent: Option<AgentKind>,
+    /// 认出的 agent 是组里哪个进程，查它放到后台的 shell 用。
+    agent_pid: Option<u32>,
     /// 上次认的时候组里的进程，找 agent 记着的对话用。
     pids: Vec<u32>,
     conversation_read_at: Option<Instant>,
@@ -72,9 +75,18 @@ impl HostSession {
 
     pub(super) fn poll_agent_at(&mut self, now: Instant) -> bool {
         let terminal = &self.terminal;
-        let changed = self.agent_tracker.poll(now, self.input_at, rules(), || {
-            log_err("read the screen for agent detection", detection_text(terminal)).flatten()
-        });
+        let probe = &self.foreground_probe;
+        let changed = self.agent_tracker.poll(
+            now,
+            self.input_at,
+            rules(),
+            || log_err("read the screen for agent detection", detection_text(terminal)).flatten(),
+            || {
+                let agent = pty::pid_from_u32(probe.agent_pid?)?;
+                // 现读组里的进程：agent 认出来以后才起的 MCP、hook 也和它同组。
+                pty::background_shells(agent, &pty::group_members(probe.leader?))
+            },
+        );
         for warning in rules().take_warnings() {
             tracing::warn!("{warning}");
         }
@@ -138,7 +150,9 @@ impl HostSession {
         if fresh || retry {
             probe.probed_at = Some(now);
             let job = pty::process_group(leader);
-            probe.agent = job.as_ref().and_then(identify_job);
+            let found = job.as_ref().and_then(identify_agent_process);
+            probe.agent = found.map(|(_, kind)| kind);
+            probe.agent_pid = found.map(|(pid, _)| pid);
             probe.pids = job.map(|job| job.processes.iter().map(|process| process.pid).collect()).unwrap_or_default();
         }
         self.agent_tracker.foreground(Foreground::Program(probe.agent), now);

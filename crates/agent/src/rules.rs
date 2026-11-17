@@ -30,21 +30,27 @@
 //!
 //! `overrides_reported_idle = true` 的规则（状态必须是 working）命中时，agent 自己报告了空闲
 //! 也算在干活：agent 只按自己的回合报告状态，回合外还在跑的事（比如后台 shell）要靠屏幕认出来。
+//!
+//! `background_shell_busy = true` 的规则（状态必须是 working）是在认后台 shell：调用方探测到
+//! agent 起的后台 shell 全是在监听端口的服务（`Signals::background`）时，这条不算命中，接着比
+//! 优先级更低的规则；探测说不清时照常命中。
 
-use std::cell::OnceCell;
+use std::{cell::OnceCell, fmt};
 
 use regex::Regex;
 use runode_types::agent::{AgentKind, AgentState};
 use serde::Deserialize;
 
-use crate::{identify, region::Region};
+use crate::{BackgroundShells, identify, region::Region};
 
 /// 支持到第几版规则格式；规则文件的 `min_engine_version` 比它大时不用。
-pub const ENGINE_VERSION: u32 = 4;
+pub const ENGINE_VERSION: u32 = 5;
 /// `top_non_empty_lines` 从第几版格式开始有。
 const TOP_LINES_ENGINE_VERSION: u32 = 3;
 /// `overrides_reported_idle` 从第几版格式开始有。
 const OVERRIDES_ENGINE_VERSION: u32 = 4;
+/// `background_shell_busy` 从第几版格式开始有。
+const BACKGROUND_ENGINE_VERSION: u32 = 5;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +88,8 @@ struct RuleSpec {
     skip_state_update: bool,
     #[serde(default)]
     overrides_reported_idle: bool,
+    #[serde(default)]
+    background_shell_busy: bool,
     #[serde(default)]
     all: Vec<GateSpec>,
     #[serde(default)]
@@ -146,6 +154,7 @@ struct Rule {
     visible: bool,
     skip: bool,
     overrides_reported_idle: bool,
+    background_shell_busy: bool,
     gate: Gate,
 }
 
@@ -161,7 +170,7 @@ struct Gate {
 }
 
 /// 求值用的输入。
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Signals<'a> {
     /// 屏幕底部的文字：一行一行，行尾空白去掉，用 `\n` 连接。读不到时为 `None`，这时只比
     /// 标题和进度报告的规则，比屏幕的规则都不算命中。
@@ -170,6 +179,20 @@ pub struct Signals<'a> {
     pub title: &'a str,
     /// 程序最近一次 OSC 9 报告里 `9;` 后面的部分，没有时为空。
     pub progress: &'a str,
+    /// 探测 agent 起的后台 shell，只在带 `background_shell_busy` 的规则其余条件都满足时调用，
+    /// 一次求值最多调一次。为 `None` 或探测给出 `None` 时当作说不清。
+    pub background: Option<&'a dyn Fn() -> Option<BackgroundShells>>,
+}
+
+impl fmt::Debug for Signals<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Signals")
+            .field("screen", &self.screen)
+            .field("title", &self.title)
+            .field("progress", &self.progress)
+            .field("background", &self.background.is_some())
+            .finish()
+    }
 }
 
 /// 一次求值的结果。
@@ -223,6 +246,7 @@ impl RuleSet {
     pub fn evaluate<'r>(&'r self, signals: Signals<'_>) -> Verdict<'r> {
         // 每块区域只切一次；转小写、压空白供 `contains` 用，用到时才做一次。同一块区域多条规则共用。
         let mut regions: Vec<(Region, &str, OnceCell<String>)> = Vec::new();
+        let background = OnceCell::new();
         for rule in &self.rules {
             let i = match regions.iter().position(|(region, ..)| *region == rule.region) {
                 Some(i) => i,
@@ -238,6 +262,12 @@ impl RuleSet {
             };
             let (_, text, lower) = &regions[i];
             if !rule.gate.matches(text, lower) {
+                continue;
+            }
+            if rule.background_shell_busy
+                && let Some(probe) = signals.background
+                && background.get_or_init(probe).is_some_and(|shells| !shells.busy())
+            {
                 continue;
             }
             if rule.skip {
@@ -283,6 +313,14 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>) -> Result<Rule, String>
             return Err(format!("overrides_reported_idle needs min_engine_version {OVERRIDES_ENGINE_VERSION}"));
         }
     }
+    if rule.background_shell_busy {
+        if rule.state != Some(StateSpec::Working) {
+            return Err("background_shell_busy needs state = \"working\"".into());
+        }
+        if min_engine.is_some_and(|v| v < BACKGROUND_ENGINE_VERSION) {
+            return Err(format!("background_shell_busy needs min_engine_version {BACKGROUND_ENGINE_VERSION}"));
+        }
+    }
     let visible = match state {
         Some(AgentState::Idle) => rule.visible_idle,
         Some(AgentState::Working) => rule.visible_working,
@@ -305,6 +343,7 @@ fn compile_rule(rule: RuleSpec, min_engine: Option<u32>) -> Result<Rule, String>
         visible,
         skip: rule.skip_state_update,
         overrides_reported_idle: rule.overrides_reported_idle,
+        background_shell_busy: rule.background_shell_busy,
         gate: compile_gate(gate, false)?,
     })
 }

@@ -4,6 +4,7 @@
 //! - `rules`、`region`：识别规则的格式和求值，规则拿屏幕底部的文字、标题和进度报告去比。
 //! - `book`：各 agent 用哪份规则，内置的编进二进制，用户可以放同名文件覆盖。
 //! - `title`：agent 在标题前缀里自己报告的状态。
+//! - `background`：agent 起的后台 shell 是在干活还是一直跑着的服务。
 //! - `osc`：从输出里留下 OSC 9 报告的原文给规则用。
 //! - `tracker`：把这些合成对外的状态，并去抖、节流。
 //! - `conversation`：前台 agent 在进行哪场对话，新 shell 里怎么接回。
@@ -13,6 +14,7 @@
 //!
 //! 这里不碰终端仿真、PTY 和界面：屏幕文字、前台进程都由调用方读好了交进来。
 
+pub mod background;
 mod book;
 pub mod conversation;
 mod identify;
@@ -26,9 +28,11 @@ mod rules;
 pub mod title;
 mod tracker;
 
+pub use background::BackgroundShells;
 pub use book::RuleBook;
-pub use identify::{ForegroundJob, ForegroundProcess, agent_from_name, identify_job};
+pub use identify::{ForegroundJob, ForegroundProcess, agent_from_name, identify_agent_process, identify_job};
 pub use rules::{ENGINE_VERSION, RuleSet, Signals, Verdict};
 pub use tracker::{
-    BURST_GAP, BURST_MIN, EVAL_INTERVAL, Foreground, IDLE_CAP, IDLE_CONFIRMATIONS, IDLE_RECHECK, STARTUP_GRACE, Tracker,
+    BACKGROUND_RECHECK, BURST_GAP, BURST_MIN, EVAL_INTERVAL, Foreground, IDLE_CAP, IDLE_CONFIRMATIONS, IDLE_RECHECK,
+    STARTUP_GRACE, Tracker,
 };

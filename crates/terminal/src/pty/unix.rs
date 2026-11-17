@@ -795,7 +795,7 @@ fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
 
 /// 进程组里的进程号；组长总在里面，读不到组员时只有组长。
 #[cfg(target_os = "macos")]
-pub(super) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+pub(crate) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     // `proc_listpids` 按进程组列进程的类型，libc 里没有这个常量。
     const PROC_PGRP_ONLY: u32 = 2;
     let Ok(group) = u32::try_from(leader) else {
@@ -888,7 +888,7 @@ fn process_cwd(pid: libc::pid_t) -> Option<PathBuf> {
 
 /// 进程组里的进程号：扫一遍 `/proc` 里各进程的 `stat`；组长总在里面，读不到组员时只有组长。
 #[cfg(target_os = "linux")]
-pub(super) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+pub(crate) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     let mut pids: Vec<libc::pid_t> = std::fs::read_dir("/proc")
         .into_iter()
         .flatten()
@@ -911,6 +911,13 @@ fn stat_group(stat: &[u8]) -> Option<libc::pid_t> {
     std::str::from_utf8(&stat[end + 1..]).ok()?.split_ascii_whitespace().nth(2)?.parse().ok()
 }
 
+/// `/proc/<pid>/stat` 里的父进程号，从最后一个 `)` 往后数第二项。
+#[cfg(any(test, target_os = "linux"))]
+pub(super) fn stat_parent(stat: &[u8]) -> Option<libc::pid_t> {
+    let end = stat.iter().rposition(|&byte| byte == b')')?;
+    std::str::from_utf8(&stat[end + 1..]).ok()?.split_ascii_whitespace().nth(1)?.parse().ok()
+}
+
 /// 进程的可执行文件路径（`/proc/<pid>/exe`）和全部参数（`/proc/<pid>/cmdline`，各个参数以 NUL 结尾）。
 /// 程序运行中改了 argv[0]（比如 node 的 `process.title`）时读到的是改过的。
 #[cfg(target_os = "linux")]
@@ -927,7 +934,7 @@ pub(super) fn args_of(pid: libc::pid_t) -> Option<(String, Vec<String>)> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(super) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
+pub(crate) fn group_members(leader: libc::pid_t) -> Vec<libc::pid_t> {
     vec![leader]
 }
 
@@ -1006,6 +1013,14 @@ mod tests {
         assert_eq!(stat_group(b"42 (claude) S 1 40 40 0 -1"), Some(40));
         assert_eq!(stat_group(b"42 (a) b (c) R 1 7 7"), Some(7));
         assert_eq!(stat_group(b"42 (no end"), None);
+    }
+
+    /// 程序名里带空格和括号时也读得出父进程号。
+    #[test]
+    fn the_parent_follows_any_program_name() {
+        assert_eq!(stat_parent(b"42 (claude) S 1 40 40 0 -1"), Some(1));
+        assert_eq!(stat_parent(b"42 (a) b (c) R 9 7 7"), Some(9));
+        assert_eq!(stat_parent(b"42 (no end"), None);
     }
 
     /// `KERN_PROCARGS2` 的布局：argc、可执行文件路径、补齐的 NUL、参数、环境变量。

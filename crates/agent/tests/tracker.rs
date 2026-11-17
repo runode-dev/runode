@@ -1,10 +1,15 @@
 //! `Tracker` 按前台进程、标题、进度报告和屏幕文字认出 agent 的状态，并去抖。
 
-use std::time::{Duration, Instant};
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 use AgentKind::*;
 use AgentState::*;
-use runode_agent::{BURST_GAP, EVAL_INTERVAL, Foreground, IDLE_RECHECK, RuleBook, Tracker};
+use runode_agent::{
+    BACKGROUND_RECHECK, BURST_GAP, BackgroundShells, EVAL_INTERVAL, Foreground, IDLE_RECHECK, RuleBook, Tracker,
+};
 use runode_types::agent::{Agent, AgentKind, AgentState};
 
 fn agent(kind: AgentKind, state: AgentState) -> Option<Agent> {
@@ -18,6 +23,10 @@ struct Fixture {
     t0: Instant,
     screen: String,
     last_input: Option<Instant>,
+    /// 后台 shell 的探测结果。
+    background: Cell<Option<BackgroundShells>>,
+    /// 探测被调了几次。
+    probes: Cell<u32>,
 }
 
 impl Fixture {
@@ -28,6 +37,8 @@ impl Fixture {
             t0: Instant::now(),
             screen: String::new(),
             last_input: None,
+            background: Cell::new(None),
+            probes: Cell::new(0),
         }
     }
 
@@ -38,7 +49,17 @@ impl Fixture {
     fn poll(&mut self, ms: u64) -> Option<Agent> {
         let now = self.at(ms);
         let screen = self.screen.clone();
-        self.tracker.poll(now, self.last_input, &self.rules, || Some(screen));
+        let (background, probes) = (&self.background, &self.probes);
+        self.tracker.poll(
+            now,
+            self.last_input,
+            &self.rules,
+            || Some(screen),
+            || {
+                probes.set(probes.get() + 1);
+                background.get()
+            },
+        );
         self.tracker.agent()
     }
 
@@ -139,15 +160,27 @@ fn evaluation_is_throttled_and_only_follows_new_output() {
     f.output(GRACE_MS + 50, "• Working (3s • esc to interrupt)\n\n› \n");
     assert_eq!(f.tracker.deadline(), Some(f.at(GRACE_MS) + EVAL_INTERVAL));
     let mut read = false;
-    f.tracker.poll(f.at(GRACE_MS + 100), None, &f.rules, || {
-        read = true;
-        None
-    });
+    f.tracker.poll(
+        f.at(GRACE_MS + 100),
+        None,
+        &f.rules,
+        || {
+            read = true;
+            None
+        },
+        || None,
+    );
     assert!(!read);
-    f.tracker.poll(f.at(GRACE_MS + 250), None, &f.rules, || {
-        read = true;
-        Some(String::new())
-    });
+    f.tracker.poll(
+        f.at(GRACE_MS + 250),
+        None,
+        &f.rules,
+        || {
+            read = true;
+            Some(String::new())
+        },
+        || None,
+    );
     assert!(read);
     // 没有新输出就不再看屏幕。
     assert_eq!(f.tracker.deadline(), Some(f.at(GRACE_MS + 250) + IDLE_RECHECK));
@@ -232,7 +265,7 @@ fn a_resumed_agent_keeps_its_state_across_the_handoff() {
     assert_eq!(f.tracker.deadline(), Some(f.at(0)));
     let mut changed = Vec::new();
     for ms in (0..=2000).step_by(100) {
-        changed.push(f.tracker.poll(f.at(ms), None, &f.rules, || Some(String::new())));
+        changed.push(f.tracker.poll(f.at(ms), None, &f.rules, || Some(String::new()), || None));
     }
     assert!(changed.iter().all(|changed| !changed), "{changed:?}");
     assert_eq!(f.tracker.agent(), agent(Omp, Working));
@@ -322,12 +355,49 @@ fn rules_can_override_a_reported_idle() {
 }
 
 #[test]
+fn background_servers_do_not_override_a_reported_idle() {
+    let mut f = Fixture::started(Claude);
+    let start = GRACE_MS;
+    let footer = "● Started the dev server.\n\n────\n❯\n────\n  ⏵⏵ auto mode on · 1 shell\n";
+    // 后台 shell 还没开始监听端口：算在干活。
+    f.background.set(Some(BackgroundShells { shells: 1, serving: 0 }));
+    f.output(start, footer);
+    f.tracker.program_status("", "claude-code", Some(Idle), f.at(start));
+    assert_eq!(f.poll(start), agent(Claude, Working));
+    assert_eq!(f.probes.get(), 1);
+    // 服务起来了，但上次的结果还没过期：有新输出也不再探测。
+    f.background.set(Some(BackgroundShells { shells: 1, serving: 1 }));
+    let step = EVAL_INTERVAL.as_millis() as u64;
+    f.output(start + step, footer);
+    assert_eq!(f.poll(start + step), agent(Claude, Working));
+    assert_eq!(f.probes.get(), 1);
+    // 屏幕不动，到点也重新探测：全是服务时按报告的空闲算。
+    let recheck = start + BACKGROUND_RECHECK.as_millis() as u64;
+    assert_eq!(f.tracker.deadline(), Some(f.at(recheck)));
+    assert_eq!(f.poll(recheck), agent(Claude, Idle));
+    assert_eq!(f.probes.get(), 2);
+    assert!(f.tracker.deadline().is_none_or(|at| at > f.at(recheck)), "{:?}", f.tracker.deadline());
+}
+
+#[test]
+fn background_shells_without_a_probe_still_override_a_reported_idle() {
+    let mut f = Fixture::started(Claude);
+    let footer = "● Waiting.\n\n────\n❯\n────\n  ⏵⏵ auto mode on · 1 shell\n";
+    f.output(GRACE_MS, footer);
+    f.tracker.program_status("", "claude-code", Some(Idle), f.at(GRACE_MS));
+    assert_eq!(f.poll(GRACE_MS), agent(Claude, Working));
+    assert_eq!(f.probes.get(), 1);
+    // 探测说不清时不定时重新探测。
+    assert_eq!(f.tracker.deadline(), None);
+}
+
+#[test]
 fn an_unreadable_screen_still_compares_the_title_and_progress() {
     let mut f = Fixture::started(Letta);
     // letta 用 `4;3;` 报告在等用户；解析后的进度只说在进行中。
     f.tracker.output(b"\x1b]9;4;3;\x07", f.at(GRACE_MS));
     f.tracker.progress(true, f.at(GRACE_MS), || false);
-    f.tracker.poll(f.at(GRACE_MS), None, &f.rules, || None);
+    f.tracker.poll(f.at(GRACE_MS), None, &f.rules, || None, || None);
     assert_eq!(f.tracker.agent(), agent(Letta, Blocked));
 }
 

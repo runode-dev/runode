@@ -34,6 +34,11 @@ pub struct ForegroundJob {
 
 /// 认出前台进程组里跑的是哪个 agent，认不出时为 `None`。
 pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
+    identify_agent_process(job).map(|(_, kind)| kind)
+}
+
+/// 认出前台进程组里跑的是哪个 agent，连同认出它的那个进程的进程号；认不出时为 `None`。
+pub fn identify_agent_process(job: &ForegroundJob) -> Option<(u32, AgentKind)> {
     let usable = |process: &ForegroundProcess, name: &str, kind: AgentKind| {
         (kind != AgentKind::Letta || letta_is_interactive(process))
             && (!AMBIGUOUS_NAMES.contains(&lookup_name(basename(name)).as_str()) || installed(process))
@@ -43,12 +48,12 @@ pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
         if let Some(kind) = agent_from_name(&name)
             && usable(leader, &name, kind)
         {
-            return Some(kind);
+            return Some((leader.pid, kind));
         }
     }
     // 组长认不出时在整组里挑：从参数里认出来的最可信，其次是进程名本身就是 agent 的，最后是
     // 一个通用的运行时或 shell 恰好叫这个名字。一样可信的取先出现的。
-    let mut best: Option<(u8, AgentKind)> = None;
+    let mut best: Option<(u8, u32, AgentKind)> = None;
     for process in &job.processes {
         let name = effective_name(process);
         let Some(kind) = agent_from_name(&name).filter(|&kind| usable(process, &name, kind)) else {
@@ -61,11 +66,11 @@ pub fn identify_job(job: &ForegroundJob) -> Option<AgentKind> {
         } else {
             1
         };
-        if best.is_none_or(|(best, _)| score > best) {
-            best = Some((score, kind));
+        if best.is_none_or(|(best, ..)| score > best) {
+            best = Some((score, process.pid, kind));
         }
     }
-    best.map(|(_, kind)| kind)
+    best.map(|(_, pid, kind)| (pid, kind))
 }
 
 /// 容易和别的程序撞名的 agent 名字（查表用的名字）。前台进程按这些名字认出来时
@@ -158,7 +163,7 @@ pub fn agent_from_name(name: &str) -> Option<AgentKind> {
 }
 
 /// 查表用的名字：去掉首尾空白、转成小写、去掉一个可执行文件或脚本的后缀。
-fn lookup_name(name: &str) -> String {
+pub(crate) fn lookup_name(name: &str) -> String {
     let mut name = name.trim().to_lowercase();
     if let Some(suffix) = [".exe", ".cmd", ".bat", ".ps1", ".js"].iter().find(|suffix| name.ends_with(*suffix)) {
         name.truncate(name.len() - suffix.len());
@@ -167,7 +172,7 @@ fn lookup_name(name: &str) -> String {
 }
 
 /// 路径的最后一段，结尾的分隔符不算。
-fn basename(path: &str) -> &str {
+pub(crate) fn basename(path: &str) -> &str {
     path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or(path)
 }
 

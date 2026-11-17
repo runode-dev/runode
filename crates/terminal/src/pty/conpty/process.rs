@@ -74,7 +74,7 @@ impl Drop for Process {
 }
 
 /// 现在所有进程的（进程号，父进程号）。
-fn snapshot() -> Vec<(u32, u32)> {
+pub(crate) fn snapshot() -> Vec<(u32, u32)> {
     // SAFETY: 只是取快照，失败时返回 `INVALID_HANDLE_VALUE`。
     let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     if snap == INVALID_HANDLE_VALUE {
@@ -99,7 +99,7 @@ fn created(pid: u32) -> Option<u64> {
 }
 
 /// `parent` 的子进程，带着起来的时刻；比 `parent` 起得早的不算（父进程号被重用了）。
-fn children(pairs: &[(u32, u32)], parent: u32) -> Vec<(u32, u64)> {
+pub(crate) fn children(pairs: &[(u32, u32)], parent: u32) -> Vec<(u32, u64)> {
     let Some(since) = created(parent) else {
         return Vec::new();
     };

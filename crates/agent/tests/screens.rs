@@ -1,13 +1,17 @@
 //! 内置规则对各 agent 典型界面的判断。屏幕文字照 `Signals::screen` 要的格式：行尾空白去掉，
 //! 一行一个 `\n`。
 
-use runode_agent::{RuleBook, Signals, Verdict};
+use runode_agent::{BackgroundShells, RuleBook, Signals, Verdict};
 use runode_types::agent::{AgentKind, AgentState};
 
 fn verdict(kind: AgentKind, screen: &str, title: &str, progress: &str) -> &'static str {
+    verdict_with(kind, Signals { screen: Some(screen), title, progress, ..Default::default() })
+}
+
+fn verdict_with(kind: AgentKind, signals: Signals<'_>) -> &'static str {
     let book = RuleBook::new(None);
     let rules = book.rules(kind).unwrap_or_else(|| panic!("no rules for {kind:?}"));
-    match rules.evaluate(Signals { screen: Some(screen), title, progress }) {
+    match rules.evaluate(signals) {
         Verdict::Matched { state: AgentState::Working, .. } => "working",
         Verdict::Matched { state: AgentState::Idle, .. } => "idle",
         Verdict::Matched { state: AgentState::Blocked, visible, rule, .. } => {
@@ -68,6 +72,11 @@ fn claude() {
     assert_eq!(screen(Claude, &format!("{prompt_box}  ? for shortcuts · 2 shells · PR #6\n")), "working");
     assert_eq!(screen(Claude, &format!("{prompt_box}  1 shell\n")), "working");
     assert_eq!(screen(Claude, &format!("{prompt_box}  ⏵⏵ bypass permissions on · PR #6\n")), "idle");
+    // 后台 shell 全是在监听端口的服务（dev server）：不算在等它们。
+    let servers = format!("{prompt_box}  ? for shortcuts · 2 shells · PR #6\n");
+    let serving = || Some(BackgroundShells { shells: 2, serving: 2 });
+    let signals = Signals { screen: Some(&servers), background: Some(&serving), ..Default::default() };
+    assert_eq!(verdict_with(Claude, signals), "idle");
     // 输入框里打的字不算。
     assert_eq!(screen(Claude, "● 好了。\n\n────────\n❯ 1 shell\n────────\n  ? for shortcuts\n"), "idle");
     let running = "  ◯ reviewer  在审查改动   30s · ↓ 33.7k tokens\n";
