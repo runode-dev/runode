@@ -1,5 +1,5 @@
 //! 用 Bonjour 公布远程访问的服务（`BONJOUR_SERVICE`），手机按存下的证书指纹找这台电脑现在的
-//! 地址，见 `runode_protocol::remote`。macOS 上直接调 libSystem 里的 `DNSServiceRegister`（交给系统的
+//! 地址。macOS 上直接调 libSystem 里的 `DNSServiceRegister`（交给系统的
 //! mDNSResponder 去应答）；别的系统上没有人人都装着的 mDNS 服务，用 mdns-sd 在进程里自己应答，地址
 //! 变了跟着重新公布。
 //!
@@ -24,7 +24,7 @@ use crate::client::Found;
 
 /// 一次公布，丢掉时撤回。
 pub(crate) struct Registration {
-    /// 只为丢掉时撤回，见 `imp::ServiceRef`、`responder::Responder`。
+    /// 只为丢掉时撤回。
     #[cfg(target_os = "macos")]
     _service: imp::ServiceRef,
     #[cfg(not(target_os = "macos"))]
@@ -86,9 +86,17 @@ impl Drop for Browsing {
     }
 }
 
+/// 查找时最多记着这么多台电脑，再有新的不收，记着的没了才腾出位置。
+const MAX_FOUND: usize = 64;
+/// 一台电脑最多留这么多个地址。
+const MAX_ADDRS: usize = 8;
+
 /// 查 `BONJOUR_SERVICE`，解析出来的列表变了时把当前完整的列表交给 `changed`（在读事件的线程里调）。
-/// TXT 里没有能解成指纹的 `fp` 的不算。
-pub(crate) fn browse(changed: impl Fn(Vec<Found>) + Send + 'static) -> io::Result<Browsing> {
+/// TXT 里没有能解成指纹的 `fp` 的不算；`want` 有值时只收这个指纹的。
+pub(crate) fn browse(
+    want: Option<[u8; FINGERPRINT_LEN]>,
+    changed: impl Fn(Vec<Found>) + Send + 'static,
+) -> io::Result<Browsing> {
     let daemon = ServiceDaemon::new().map_err(io::Error::other)?;
     let events = daemon.browse(&format!("{BONJOUR_SERVICE}.local.")).map_err(io::Error::other)?;
     let stopped = Arc::new(AtomicBool::new(false));
@@ -99,13 +107,9 @@ pub(crate) fn browse(changed: impl Fn(Vec<Found>) + Send + 'static) -> io::Resul
             while let Ok(event) = events.recv() {
                 let changed_now = match event {
                     ServiceEvent::ServiceResolved(service) => {
-                        let fullname = service.get_fullname().to_owned();
-                        match resolved(&service) {
-                            Some(machine) => found.insert(fullname, machine.clone()) != Some(machine),
-                            None => found.remove(&fullname).is_some(),
-                        }
+                        record(&mut found, service.get_fullname().to_owned(), resolved(&service), want)
                     }
-                    ServiceEvent::ServiceRemoved(_, fullname) => found.remove(&fullname).is_some(),
+                    ServiceEvent::ServiceRemoved(_, fullname) => record(&mut found, fullname, None, want),
                     _ => false,
                 };
                 if stopped.load(Ordering::Relaxed) {
@@ -120,6 +124,24 @@ pub(crate) fn browse(changed: impl Fn(Vec<Found>) + Send + 'static) -> io::Resul
         })?
     };
     Ok(Browsing { daemon, stopped, thread: Some(thread) })
+}
+
+/// 实例 `fullname` 解析成了 `machine`（`None` 是没了或解析不出），记进 `found`，返回 `found` 变没变。指纹不是
+/// `want` 的当作没了；`found` 记满 `MAX_FOUND` 台时新的实例不收，记着的照常更新和删掉。
+fn record(
+    found: &mut HashMap<String, Found>,
+    fullname: String,
+    machine: Option<Found>,
+    want: Option<[u8; FINGERPRINT_LEN]>,
+) -> bool {
+    let machine = machine.filter(|machine| want.is_none_or(|want| machine.fingerprint == want));
+    match machine {
+        Some(machine) if found.contains_key(&fullname) || found.len() < MAX_FOUND => {
+            found.insert(fullname, machine.clone()) != Some(machine)
+        }
+        Some(_) => false,
+        None => found.remove(&fullname).is_some(),
+    }
 }
 
 /// mdns-sd 解析出的一个服务。IPv6 的链路本地地址不要：`Found` 不带网卡，连不上。
@@ -137,6 +159,7 @@ fn resolved(service: &mdns_sd::ResolvedService) -> Option<Found> {
     }
     // IPv4 在前：同一网段里它最常连得通。
     addrs.sort_by_key(|addr| (addr.is_ipv6(), *addr));
+    addrs.truncate(MAX_ADDRS);
     let suffix = format!(".{BONJOUR_SERVICE}.local.");
     let fullname = service.get_fullname();
     let name = fullname.strip_suffix(&suffix).unwrap_or(fullname);
@@ -343,6 +366,42 @@ mod tests {
         assert_eq!(unescape("李的电脑"), "李的电脑");
     }
 
+    fn machine(fingerprint: u8) -> Found {
+        Found {
+            name: "mac".into(),
+            fingerprint: [fingerprint; FINGERPRINT_LEN],
+            addrs: vec![IpAddr::from([192, 168, 1, 2])],
+            port: 47124,
+        }
+    }
+
+    /// 记满了不收新的实例，记着的照常更新；删掉一个又能收。
+    #[test]
+    fn recording_stops_taking_new_instances_when_full() {
+        let mut found = HashMap::new();
+        for at in 0..MAX_FOUND {
+            assert!(record(&mut found, format!("m{at}"), Some(machine(1)), None));
+        }
+        assert!(!record(&mut found, "extra".into(), Some(machine(1)), None));
+        assert!(!found.contains_key("extra"));
+        assert!(record(&mut found, "m0".into(), Some(machine(2)), None), "known instances still update");
+        assert!(!record(&mut found, "m0".into(), Some(machine(2)), None), "unchanged");
+        assert!(record(&mut found, "m1".into(), None, None));
+        assert!(record(&mut found, "extra".into(), Some(machine(1)), None));
+        assert_eq!(found.len(), MAX_FOUND);
+    }
+
+    /// 只要某个指纹时，别的指纹不收；记着的实例换了指纹就删掉。
+    #[test]
+    fn recording_keeps_only_the_wanted_fingerprint() {
+        let mut found = HashMap::new();
+        let want = Some([1; FINGERPRINT_LEN]);
+        assert!(!record(&mut found, "other".into(), Some(machine(2)), want));
+        assert!(record(&mut found, "mine".into(), Some(machine(1)), want));
+        assert!(record(&mut found, "mine".into(), Some(machine(2)), want));
+        assert!(found.is_empty());
+    }
+
     /// 本机公布的服务（macOS 上经 mDNSResponder）`browse` 查得到，指纹从 TXT 里解出来。要本机的网卡能收发
     /// 组播，手动跑：`cargo test -p runode-remote --lib bonjour -- --ignored`。
     #[test]
@@ -358,7 +417,7 @@ mod tests {
         let txt: Vec<(&str, &str)> = txt.iter().map(|(key, value)| (*key, value.as_str())).collect();
         let _registration = register(&name, 47124, &txt, None).unwrap();
         let (tx, rx) = mpsc::channel();
-        let _browsing = browse(move |list| {
+        let _browsing = browse(None, move |list| {
             let _ = tx.send(list);
         })
         .unwrap();

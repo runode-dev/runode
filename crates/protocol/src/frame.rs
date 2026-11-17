@@ -20,15 +20,15 @@ pub enum FrameKind {
     Output = 0,
     /// 前端发给宿主、要写进 PTY 的输入，原样的字节。
     Input = 1,
-    /// 控制消息，JSON，见 `ClientMsg`、`HostMsg`。
+    /// 控制消息：JSON 编的 `ClientMsg`、`HostMsg` 这类消息。
     Control = 2,
-    /// 快照或 VT 重放的一段，见 `AttachMode`；一份可以分成几帧，以 `HostMsg::SnapshotEnd` 结束。
+    /// 快照或 VT 重放的一段；一份可以分成几帧，以 `HostMsg::SnapshotEnd` 结束。
     Snapshot = 3,
-    /// 远程桌面编好的一帧画面，载荷见 `screen::encode_video`。
+    /// 远程桌面编好的一帧画面，载荷由 `screen::encode_video` 编。
     Video = 4,
-    /// 手机交给电脑识别的一段录音，载荷见 `speech`。
+    /// 手机交给电脑识别的一段录音。
     Audio = 5,
-    /// 手机交给电脑的一个图片或视频文件的一段，载荷见 `media`。
+    /// 手机交给电脑的一个图片或视频文件的一段。
     Media = 6,
 }
 
@@ -125,8 +125,8 @@ pub fn read_frame(reader: &mut impl Read) -> Result<Option<Frame>, FrameError> {
     read_frame_limited(reader, MAX_PAYLOAD)
 }
 
-/// 同 `read_frame`，但载荷超过 `limit` 就报 `FrameError::TooLong`（`limit` 比 `MAX_PAYLOAD` 大时
-/// 按 `MAX_PAYLOAD`）。对面还没证明自己是谁时用小的上限，见 `remote::GATE_MAX_PAYLOAD`。
+/// 读一帧，声明的载荷超过 `limit` 就报 `FrameError::TooLong`（`limit` 比 `MAX_PAYLOAD` 大时
+/// 按 `MAX_PAYLOAD`）。对面还没证明自己是谁时用小的上限。
 pub fn read_frame_limited(reader: &mut impl Read, limit: u32) -> Result<Option<Frame>, FrameError> {
     let mut header = [0u8; HEADER_LEN];
     if !read_full(reader, &mut header)? {
@@ -161,13 +161,17 @@ pub fn read_control<T: serde::de::DeserializeOwned>(
     Ok(None)
 }
 
+/// `spawn_control_reader` 读出来、还没被取走的消息最多这么多条。
+const CONTROL_READER_BACKLOG: usize = 1024;
+
 /// 在名叫 `name` 的线程上一直读 `reader` 里的帧，控制帧解成 `T` 交给返回的通道；别的帧和解不出的控制消息
-/// 跳过。读到结尾、读出错或者通道的收端丢了就停。
+/// 跳过。读到结尾、读出错或者通道的收端丢了就停。通道里排满 `CONTROL_READER_BACKLOG` 条时停下不读，
+/// 积压留在对端，由对端按它的积压处理，不在本进程里无界地攒。
 pub fn spawn_control_reader<T: serde::de::DeserializeOwned + Send + 'static>(
     mut reader: impl Read + Send + 'static,
     name: &str,
 ) -> io::Result<std::sync::mpsc::Receiver<T>> {
-    let (tx, messages) = std::sync::mpsc::channel();
+    let (tx, messages) = std::sync::mpsc::sync_channel(CONTROL_READER_BACKLOG);
     std::thread::Builder::new().name(name.into()).spawn(move || {
         while let Ok(Some(message)) = read_control::<T>(&mut reader) {
             let Ok(message) = message else { continue };

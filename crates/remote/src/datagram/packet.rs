@@ -85,10 +85,11 @@ impl Packet<'_> {
             }
             4 => {
                 let (frame, index, count) = (u32_at(rest, 0)?, u16_at(rest, 4)?, u16_at(rest, 6)?);
-                if count == 0 || index >= count {
+                let data = &rest[8..];
+                if count == 0 || index >= count || data.len() > CHUNK {
                     return None;
                 }
-                Packet::Video { frame, index, count, data: &rest[8..] }
+                Packet::Video { frame, index, count, data }
             }
             5 => {
                 let (frame, len) = (u32_at(rest, 0)?, u16_at(rest, 4)?);
@@ -264,5 +265,18 @@ mod tests {
         let missing = vec![0u16; MAX_NACKED];
         let sealed = Sealer::new(&SECRET, Direction::FromViewer).seal(&Packet::Nack { frame: 0, missing });
         assert!(sealed.len() <= MAX_PACKET);
+    }
+
+    /// 一片超过 `CHUNK` 字节的画面不要。
+    #[test]
+    fn rejects_oversized_video_chunks() {
+        let data = vec![0u8; CHUNK + 1];
+        let mut sealed = Sealer::new(&SECRET, Direction::FromHost).seal(&Packet::Video {
+            frame: 0,
+            index: 0,
+            count: 1,
+            data: &data,
+        });
+        assert_eq!(Opener::new(&SECRET, Direction::FromHost).open(&mut sealed), None);
     }
 }

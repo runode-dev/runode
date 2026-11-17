@@ -18,6 +18,8 @@ const NACK_RETRY: Duration = Duration::from_millis(20);
 const GIVE_UP: Duration = Duration::from_millis(150);
 /// 最多攒着这么多没交出的帧，再多就是电脑那边一直在丢，全丢掉等关键帧。
 const MAX_PENDING: usize = 240;
+/// 没拼齐的帧按声明的片数占的槽位合计最多这么多，装得下一个声明满 `u16` 片的帧；再多同样全丢掉等关键帧。
+const MAX_PENDING_CHUNKS: usize = 1 << 16;
 
 /// 拼到一半的一帧。
 struct Partial {
@@ -107,6 +109,14 @@ impl Assembler {
             return Vec::new();
         }
         self.top = Some(self.top.map_or(frame, |top| top.max(frame)));
+        let allocates = self.frames.get(&frame).is_none_or(|partial| partial.chunks.is_empty());
+        if allocates
+            && self.frames.values().map(|partial| partial.chunks.len()).sum::<usize>() + usize::from(count)
+                > MAX_PENDING_CHUNKS
+        {
+            self.overflow();
+            return Vec::new();
+        }
         let partial = self.frames.entry(frame).or_insert_with(|| Partial::new(count, now));
         // 整帧要过重发的只占着位置，第一片到了才知道片数。
         if partial.chunks.is_empty() {
@@ -123,12 +133,17 @@ impl Assembler {
         }
         partial.last_chunk = now;
         if self.frames.len() > MAX_PENDING {
-            self.frames.clear();
-            self.next = None;
-            self.overflowed = true;
+            self.overflow();
             return Vec::new();
         }
         self.deliver()
+    }
+
+    /// 攒多了：全丢掉，等关键帧。
+    fn overflow(&mut self) {
+        self.frames.clear();
+        self.next = None;
+        self.overflowed = true;
     }
 
     /// 电脑说它最近发到了第 `frame` 帧：整帧都丢了时只有这样才知道。
@@ -437,6 +452,41 @@ mod tests {
             assembler.chunk(frame, 0, 2, &[0], now);
         }
         assert!(assembler.poll(now, Duration::ZERO).gave_up);
+    }
+
+    /// 几片就声明了满 `u16` 片数的帧：占的槽位合计超了 `MAX_PENDING_CHUNKS` 就全丢掉，报放弃。
+    #[test]
+    fn frames_claiming_too_many_chunks_overflow() {
+        let now = Instant::now();
+        let mut assembler = Assembler::new();
+        assembler.chunk(0, 0, u16::MAX, &[0], now);
+        assert_eq!(assembler.frames.len(), 1, "one frame of the most chunks fits");
+        assembler.chunk(1, 0, u16::MAX, &[0], now);
+        assert!(assembler.frames.is_empty());
+        assert!(assembler.poll(now, Duration::ZERO).gave_up);
+        for frame in 2..8 {
+            assembler.chunk(frame, 0, u16::MAX, &[0], now);
+            let slots: usize = assembler.frames.values().map(|partial| partial.chunks.len()).sum();
+            assert!(slots <= MAX_PENDING_CHUNKS, "{slots} slots");
+        }
+    }
+
+    /// 几千片的大关键帧后面跟着差分帧，照常拼齐交出，不算攒多了。
+    #[test]
+    fn a_large_keyframe_does_not_overflow() {
+        let now = Instant::now();
+        let mut assembler = Assembler::new();
+        let key = payload(true, 5000);
+        let parts = chunks(&key, 1);
+        assert!(feed(&mut assembler, 0, &parts, &[0], now).is_empty());
+        let deltas: Vec<Vec<u8>> = (0..10).map(|_| payload(false, 3000)).collect();
+        for (frame, delta) in (1..).zip(&deltas) {
+            assert!(feed(&mut assembler, frame, &chunks(delta, 1), &[], now).is_empty());
+        }
+        let mut out = assembler.chunk(0, 0, parts.len() as u16, &parts[0], now);
+        assert_eq!(out.remove(0), key);
+        assert_eq!(out, deltas);
+        assert!(!assembler.poll(now, Duration::ZERO).gave_up);
     }
 
     /// 要来的关键帧整帧丢了，等一阵再要一次，不会一直干等。
