@@ -1,9 +1,9 @@
-//! 远程访问的客户端：这台电脑配对、连上别的电脑上开着远程访问的 Runode，把它当远程主机用。线上格式见
-//! `runode_protocol::remote`，配对时报 `DeviceKind::Desktop`。
+//! 远程访问的客户端：这台电脑配对、连上别的电脑上开着远程访问的 Runode，把它当远程主机用。按
+//! `runode_protocol::remote` 的线上格式说话，配对时报 `DeviceKind::Desktop`。
 //!
-//! 配对过的电脑记在 `Dirs::paired_machines_file`（`PairedMachine`），每台一把自己的设备私钥。`dial` 过了
-//! 门禁后交回一条本机的 socket：TLS 由这里的线程在另一头搬，调用方在 socket 上发第一帧（终端的 `Hello`、
-//! `ScreenHello` 或 `ChannelHello`），之后照普通连接说话。
+//! 配对过的电脑记在 `Dirs::paired_machines_file`（`PairedMachine`），每台一把自己的设备私钥和 iroh 私钥。
+//! `dial` 过了门禁后交回一条本机的 socket：TLS 由这里的线程在另一头搬，调用方在 socket 上发第一帧（终端的
+//! `Hello`、`ScreenHello` 或 `ChannelHello`），之后照普通连接说话。
 //!
 //! 连配对过的电脑时先单独试一个首选的地址（上次连上的，或调用方给的），它在 `PREFERRED_HEAD_START` 里过了
 //! 门禁就用它，Bonjour、iroh 都不开。它失败了或者没来得及，几条路同时走（`race`）：直连的地址错开一点先后
@@ -42,7 +42,7 @@ use runode_paths::Dirs;
 use runode_protocol::remote::{DeviceId, FINGERPRINT_LEN, PairingUri, RejectReason, SECRET_LEN};
 
 pub use self::cancel::Cancel;
-use self::{handshake::Gated, store::Entry};
+use self::{handshake::Gated, store::Entry, tunnel::TunnelKey};
 use crate::{files::random, now_unix};
 
 /// 配对过的一台电脑。
@@ -82,9 +82,15 @@ pub fn find_machine(dirs: &Dirs, id: &str) -> Option<PairedMachine> {
     store::find(dirs, id).ok().flatten().map(|entry| entry.machine)
 }
 
-/// 忘掉 `id` 那台：删掉记录和设备私钥。不通知那台电脑，要它也忘掉这边，先连上发 `ClientMsg::Unpair`。
+/// 忘掉 `id` 那台：删掉记录、设备私钥和 iroh 私钥，关掉跨网络连它的端点。不通知那台电脑，要它也忘掉这边，
+/// 先连上发 `ClientMsg::Unpair`。
 pub fn forget_machine(dirs: &Dirs, id: &str) -> io::Result<()> {
-    store::forget(dirs, id).map(drop)
+    let tunnel_key = store::find(dirs, id).ok().flatten().and_then(|entry| entry.tunnel_key);
+    store::forget(dirs, id)?;
+    if let Some(key) = tunnel_key {
+        tunnel::forget(&key);
+    }
+    Ok(())
 }
 
 /// 连不上、或者门禁没过。
@@ -153,30 +159,43 @@ pub fn pair(dirs: &Dirs, uri: &PairingUri, device_name: &str, cancel: &Cancel) -
         return Err(DialError::Expired);
     }
     let pkcs8 = handshake::generate_key()?;
+    let tunnel_key = random()?;
     let race = Arc::new(Race::new(
         uri.fingerprint,
         handshake::load_key(&pkcs8)?,
         Gate::Pair { secret: uri.secret, name: device_name.into(), claimed: AtomicBool::new(false) },
     ));
     let direct = uri.addrs.iter().map(|ip| SocketAddr::new(*ip, uri.port)).collect();
-    let tunnel = uri.node.clone().map(TunnelRoute::Fallback);
-    let won = race.run(None, direct, tunnel, cancel).map_err(|err| match err {
-        DialError::Rejected(RejectReason::PairingInvalid) if now_unix() >= uri.expires_at => DialError::Expired,
-        err => err,
-    })?;
-    let id: String = random::<16>()?.iter().map(|b| format!("{b:02x}")).collect();
-    let machine = PairedMachine {
-        id,
-        host_name: won.host_name.clone(),
-        fingerprint: uri.fingerprint,
-        port: uri.port,
-        addrs: uri.addrs.clone(),
-        last_addr: won.addr,
-        node: won.node.clone().or_else(|| uri.node.clone()),
-        device_id: won.gated.device_id,
-        paired_at: now_unix(),
+    let tunnel = uri.node.clone().map(|node| TunnelRoute::Fallback(Tunnel { node, key: tunnel_key }));
+    let paired = race
+        .run(None, direct, tunnel, cancel)
+        .map_err(|err| match err {
+            DialError::Rejected(RejectReason::PairingInvalid) if now_unix() >= uri.expires_at => DialError::Expired,
+            err => err,
+        })
+        .and_then(|won| {
+            let id: String = random::<16>()?.iter().map(|b| format!("{b:02x}")).collect();
+            let machine = PairedMachine {
+                id,
+                host_name: won.host_name.clone(),
+                fingerprint: uri.fingerprint,
+                port: uri.port,
+                addrs: uri.addrs.clone(),
+                last_addr: won.addr,
+                node: won.node.clone().or_else(|| uri.node.clone()),
+                device_id: won.gated.device_id,
+                paired_at: now_unix(),
+            };
+            store::add(dirs, Entry { machine: machine.clone(), key: pkcs8, tunnel_key: Some(tunnel_key) })?;
+            Ok((won, machine))
+        });
+    let (won, machine) = match paired {
+        Ok(paired) => paired,
+        Err(err) => {
+            race.forget_tunnel(&tunnel_key);
+            return Err(err);
+        }
     };
-    store::add(dirs, Entry { machine: machine.clone(), key: pkcs8 })?;
     tracing::info!("paired with {} ({})", machine.host_name, machine.id);
     won.hand_over(machine)
 }
@@ -192,7 +211,7 @@ pub fn dial(dirs: &Dirs, id: &str, cancel: &Cancel) -> Result<Dialed, DialError>
 /// `DIAL_TIMEOUT`。已经有一条连接连着那台电脑时把它连上的地址（`Dialed::addr`）给 `prefer`，另开的连接走同一处。
 /// `cancel` 取消了时马上返回 `DialError::Cancelled`。
 pub fn dial_via(dirs: &Dirs, id: &str, prefer: Option<SocketAddr>, cancel: &Cancel) -> Result<Dialed, DialError> {
-    let Entry { machine, key } = store::find(dirs, id)?
+    let Entry { machine, key, tunnel_key } = store::find(dirs, id)?
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no paired computer {id}")))?;
     let race = Arc::new(Race::new(machine.fingerprint, handshake::load_key(&key)?, Gate::Auth(machine.device_id)));
     let mut direct: Vec<SocketAddr> = machine.last_addr.into_iter().collect();
@@ -201,7 +220,11 @@ pub fn dial_via(dirs: &Dirs, id: &str, prefer: Option<SocketAddr>, cancel: &Canc
             direct.push(addr);
         }
     }
-    let tunnel = machine.node.clone().map(TunnelRoute::Delayed);
+    let tunnel = match (machine.node.clone(), tunnel_key) {
+        (None, _) => None,
+        (Some(node), Some(key)) => Some(TunnelRoute::Delayed(Tunnel { node, key })),
+        (Some(node), None) => Some(TunnelRoute::Delayed(Tunnel { node, key: kept_tunnel_key(dirs, id)? })),
+    };
     let won = race.run(prefer.or(machine.last_addr), direct, tunnel, cancel)?;
     let recorded = store::connected(dirs, id, &won.host_name, won.node.as_deref(), won.addr).unwrap_or_else(|err| {
         tracing::warn!("cannot record how {id} was reached: {err}");
@@ -214,6 +237,15 @@ pub fn dial_via(dirs: &Dirs, id: &str, prefer: Option<SocketAddr>, cancel: &Canc
         ..machine
     });
     won.hand_over(machine)
+}
+
+/// 跨网络连 `id` 那台用的 iroh 私钥（`store::tunnel_key`）。存不下来或存着的读不懂时这一次用一把临时的：
+/// 照样连得上，只是那台电脑认不出这边。
+fn kept_tunnel_key(dirs: &Dirs, id: &str) -> io::Result<TunnelKey> {
+    store::tunnel_key(dirs, id).or_else(|err| {
+        tracing::warn!("cannot keep the iroh key for {id}, using a temporary one: {err}");
+        random()
+    })
 }
 
 /// `dial` 最长等多久。
@@ -243,7 +275,7 @@ pub struct Found {
 /// 在局域网里找开着远程访问的电脑，`changed` 在找到的列表变了时收到当前完整的列表（在后台线程里调）。
 /// 丢掉返回值就停。
 pub fn browse(changed: impl Fn(Vec<Found>) + Send + 'static) -> io::Result<Browser> {
-    crate::bonjour::browse(changed).map(|browsing| Browser { _browsing: browsing })
+    crate::bonjour::browse(None, changed).map(|browsing| Browser { _browsing: browsing })
 }
 
 /// `browse` 开着的查找，丢掉就停。
@@ -272,6 +304,8 @@ struct Race {
     stop: Cancel,
     /// 开过的直连地址，同一个地址不连两次。
     tried: Mutex<HashSet<SocketAddr>>,
+    /// 预热跨网络连接端点的线程（`tunnel::warm`）。
+    warming: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 /// 过了门禁的那条。
@@ -306,15 +340,22 @@ type Source = Box<dyn FnOnce(&Arc<Race>, &mpsc::Sender<Event>) + Send>;
 #[derive(Clone)]
 enum Route {
     Direct(SocketAddr),
-    Tunnel(String),
+    Tunnel(Tunnel),
 }
 
-/// 跨网络连接（带着 `node`）什么时候开。
+/// 跨网络连接连谁、用哪把私钥。
+#[derive(Clone)]
+struct Tunnel {
+    node: String,
+    key: TunnelKey,
+}
+
+/// 跨网络连接什么时候开。
 enum TunnelRoute {
     /// 晚 `TUNNEL_DELAY` 开，和直连、Bonjour 一起走。
-    Delayed(String),
+    Delayed(Tunnel),
     /// 直连和 Bonjour 都失败了才开。
-    Fallback(String),
+    Fallback(Tunnel),
 }
 
 impl Race {
@@ -326,7 +367,17 @@ impl Race {
             deadline: Instant::now() + DIAL_TIMEOUT,
             stop: Cancel::new(),
             tried: Mutex::new(HashSet::new()),
+            warming: Mutex::new(None),
         }
+    }
+
+    /// 配对没成时关掉为它建的跨网络连接端点（私钥 `key` 的），预热还没建完时等它建完再关。
+    fn forget_tunnel(&self, key: &TunnelKey) {
+        let warming = self.warming.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(warming) = warming {
+            let _ = warming.join();
+        }
+        tunnel::forget(key);
     }
 
     /// 有 `prefer` 时先单独连它，`PREFERRED_HEAD_START` 里过了门禁就用它；它失败了或没来得及，直连 `direct`、
@@ -390,18 +441,18 @@ impl Race {
         self.source(&tx, &mut pending, "direct", Box::new(move |race, tx| race.stagger(tx, direct)));
         self.source(&tx, &mut pending, "bonjour", Box::new(|race, tx| race.bonjour(tx)));
         let fallback = match tunnel {
-            Some(TunnelRoute::Delayed(node)) => {
+            Some(TunnelRoute::Delayed(tunnel)) => {
                 let body: Source = Box::new(move |race, tx| {
                     if !race.stop.sleep(TUNNEL_DELAY) {
-                        race.open_tunnel(tx, node);
+                        race.open_tunnel(tx, tunnel);
                     }
                 });
                 self.source(&tx, &mut pending, "tunnel", body);
                 None
             }
-            Some(TunnelRoute::Fallback(node)) => {
-                tunnel::warm();
-                Some(node)
+            Some(TunnelRoute::Fallback(tunnel)) => {
+                *self.warming.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = tunnel::warm(tunnel.key);
+                Some(tunnel)
             }
             None => None,
         };
@@ -411,11 +462,11 @@ impl Race {
         }
         // `pending` 还有剩的是到了 `deadline`；口令已经交给了失败的那条时，跨网络连上了也配不了对。
         let claimed = matches!(&self.gate, Gate::Pair { claimed, .. } if claimed.load(Ordering::Relaxed));
-        if let Some(node) = fallback
+        if let Some(tunnel) = fallback
             && pending == 0
             && !claimed
         {
-            self.source(&tx, &mut pending, "tunnel", Box::new(move |race, tx| race.open_tunnel(tx, node)));
+            self.source(&tx, &mut pending, "tunnel", Box::new(move |race, tx| race.open_tunnel(tx, tunnel)));
             if let Some(result) = self.collect(rx, &mut pending, &mut failures, deadline) {
                 return result;
             }
@@ -436,10 +487,10 @@ impl Race {
         }
     }
 
-    /// 经跨网络连接连 `node`，结果报给 `tx`。
-    fn open_tunnel(&self, tx: &mpsc::Sender<Event>, node: String) {
+    /// 经跨网络连接连 `tunnel`，结果报给 `tx`。
+    fn open_tunnel(&self, tx: &mpsc::Sender<Event>, tunnel: Tunnel) {
         let _ = tx.send(Event::Started);
-        let _ = tx.send(Event::Finished(self.attempt(&Route::Tunnel(node))));
+        let _ = tx.send(Event::Finished(self.attempt(&Route::Tunnel(tunnel))));
     }
 
     /// 收各条路的结果，直到有了定论（胜出的、被拒的、取消了）、`pending` 条都结束了或到了 `until`；后两种为
@@ -510,7 +561,7 @@ impl Race {
             self.stop.on_cancel(move || drop(found_tx.send(None)))
         };
         let fingerprint = self.fingerprint;
-        let browsing = crate::bonjour::browse(move |list| {
+        let browsing = crate::bonjour::browse(Some(fingerprint), move |list| {
             if let Some(machine) = list.into_iter().find(|machine| machine.fingerprint == fingerprint) {
                 let _ = found_tx.send(Some(machine));
             }
@@ -537,7 +588,9 @@ impl Race {
                 let until = (Instant::now() + CONNECT_TIMEOUT).min(self.deadline);
                 connect(*addr, until).map(|tcp| (tcp, until))
             }
-            Route::Tunnel(node) => tunnel::open(node, self.deadline, &self.stop).map(|tcp| (tcp, self.deadline)),
+            Route::Tunnel(Tunnel { node, key }) => {
+                tunnel::open(node, key, self.deadline, &self.stop).map(|tcp| (tcp, self.deadline))
+            }
         };
         let (tcp, until) = match tcp {
             Ok(tcp) => tcp,
