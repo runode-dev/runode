@@ -340,7 +340,9 @@ impl SettingsView {
             .child(Input::new(&picker.field).h(scaled(30.)).mx(px(8.)).bg(theme.mix(0.10)))
             .map(|panel| match empty {
                 Some(empty) => panel.child(empty),
-                None => panel.child(list),
+                // `UniformList` 报不了角色，列表框的角色挂在包它的一层上。
+                None => panel
+                    .child(div().id("picker-options").role(Role::ListBox).aria_label(picker.title.clone()).child(list)),
             });
         // 铺满窗口的一层，点在浮层外面就关掉。
         Some(
