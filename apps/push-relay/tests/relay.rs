@@ -203,16 +203,22 @@ async fn bad_tokens_try_the_other_environment() {
     assert_eq!(relay.sent().len(), 4);
 }
 
-/// 换到另一个环境那次连不上时照第一次的回话算：APNs 说过不认这个 token，电脑该删登记，不该一直重试。
+/// 换到另一个环境那次连不上时回 502：第一次不认可能只是环境不对，电脑该过会儿重试，不该删登记。
 #[tokio::test]
-async fn an_unreachable_second_environment_keeps_the_first_answer() {
+async fn an_unreachable_second_environment_is_retryable() {
     let relay = Harness::new();
     let handle = relay.handle().await;
     relay.reply(410, "Unregistered", None);
     relay.apns.replies.lock().unwrap().push_back(Err("connection reset".into()));
     let (status, _, body) = relay.notify(&handle, &notification()).await;
-    assert_eq!((status, body["reason"].as_str()), (StatusCode::GONE, Some("Unregistered")));
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_GATEWAY, Some("ApnsUnreachable")));
     assert_eq!(relay.sent().len(), 2);
+
+    relay.reply(400, "BadDeviceToken", None);
+    relay.apns.replies.lock().unwrap().push_back(Err("connection reset".into()));
+    let (status, _, body) = relay.notify(&handle, &notification()).await;
+    assert_eq!((status, body["reason"].as_str()), (StatusCode::BAD_GATEWAY, Some("ApnsUnreachable")));
+    assert_eq!(relay.sent().len(), 4);
 }
 
 /// APNs 一直不回话时按总时限放弃、回 504，不让电脑那头先等到超时再重发。

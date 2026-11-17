@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 runode-protocol.workspace = true
 axum.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "sync"] }
 reqwest.workspace = true
 rustls.workspace = true
 ring.workspace = true

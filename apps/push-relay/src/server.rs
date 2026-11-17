@@ -202,14 +202,14 @@ async fn notify<A: Apns, F: Fcm>(
     relay_reply(reply)
 }
 
-/// 发给 APNs；不认 device token 时换另一个环境再发一次，两边都不认才算不认。另一个环境那次连不上时
-/// 照第一次的回话算，电脑据此删掉登记，手机下次连上会重新登记。
+/// 发给 APNs；不认 device token 时换另一个环境再发一次。两边都明说不认才算不认；另一个环境那次没拿到
+/// 回话时照没拿到回话处理，不拿第一次的回话顶替：第一次不认可能只是环境不对。
 async fn deliver(apns: &impl Apns, push: Push) -> Result<Reply, String> {
     let reply = apns.send(&push).await?;
     if !reply.bad_token() {
         return Ok(reply);
     }
-    Ok(apns.send(&Push { env: push.env.other(), ..push }).await.unwrap_or(reply))
+    apns.send(&Push { env: push.env.other(), ..push }).await
 }
 
 fn relay_reply(reply: Reply) -> Response {
