@@ -68,11 +68,11 @@ struct Shared {
 
 // SAFETY: VideoToolbox 的编码会话可以在任意线程上调用；`Shared` 本身是 Send + Sync。
 unsafe impl Send for Encoder {}
-// SAFETY: 同上。
+// SAFETY: VideoToolbox 的编码会话可以在几个线程上同时调用；`Shared` 本身是 Send + Sync。
 unsafe impl Sync for Encoder {}
 
 impl Encoder {
-    /// 按 `codecs` 的先后挑编码建编码器，见模块的说明。一种也建不出时错误是 `io::ErrorKind::Unsupported`。
+    /// 按 `codecs` 的先后挑编码建编码器。一种也建不出时错误是 `io::ErrorKind::Unsupported`。
     pub(crate) fn new(
         width: u32,
         height: u32,
@@ -315,21 +315,24 @@ unsafe extern "C-unwind" fn on_encoded(
 ) {
     // SAFETY: refcon 是 `Encoder::new` 给的，指着 `Encoder::shared`，会话关掉之前一直有效。
     let shared = unsafe { &*refcon.cast_const().cast::<Shared>() };
+    // 在 `in_callback` 外面记交回：后面 panic 了也要记上，不然 `Encoder::encode` 一直当它还在编。
     shared.returned_one();
-    if status != 0 || flags.contains(VTEncodeInfoFlags::FrameDropped) {
-        if status != 0 {
-            tracing::warn!("the encoder failed on a frame ({status})");
+    crate::callback::in_callback("encoded frame", || {
+        if status != 0 || flags.contains(VTEncodeInfoFlags::FrameDropped) {
+            if status != 0 {
+                tracing::warn!("the encoder failed on a frame ({status})");
+            }
+            if !frame.is_null() {
+                shared.force_keyframe.store(true, Ordering::Relaxed);
+            }
+            return;
         }
-        if !frame.is_null() {
-            shared.force_keyframe.store(true, Ordering::Relaxed);
+        // SAFETY: 回调期间样本有效。
+        let Some(sample) = (unsafe { sample.as_ref() }) else { return };
+        if let Some(frame) = video_frame(shared.codec, sample) {
+            (shared.sink)(Event::Frame(frame));
         }
-        return;
-    }
-    // SAFETY: 回调期间样本有效。
-    let Some(sample) = (unsafe { sample.as_ref() }) else { return };
-    if let Some(frame) = video_frame(shared.codec, sample) {
-        (shared.sink)(Event::Frame(frame));
-    }
+    });
 }
 
 fn video_frame(codec: Codec, sample: &CMSampleBuffer) -> Option<VideoFrame> {

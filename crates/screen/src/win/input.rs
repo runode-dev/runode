@@ -89,11 +89,7 @@ impl Injector {
                 events.extend(held.iter().rev().map(|&vk| key(vk, false)));
                 send(&events);
             }
-            ScreenInput::Text { text } => {
-                let events: Vec<INPUT> =
-                    text.encode_utf16().flat_map(|unit| [false, true].map(|up| unicode(unit, up))).collect();
-                send(&events);
-            }
+            ScreenInput::Text { text } => send(&text_events(text)),
         }
     }
 
@@ -185,6 +181,28 @@ fn key(vk: u16, down: bool) -> INPUT {
             ki: KEYBDINPUT { wVk: VIRTUAL_KEY(vk), wScan: scan, dwFlags: flags, ..Default::default() },
         },
     }
+}
+
+/// 输入 `text` 的事件。换行和制表符按回车键和 Tab 键敲，程序收到的是 `VK_RETURN`、`VK_TAB`，不是只带字符
+/// 的 `WM_CHAR`；其余字符不管键盘布局逐个 UTF-16 码元输入。
+fn text_events(text: &str) -> Vec<INPUT> {
+    let mut events = Vec::new();
+    for c in crate::keys::text_chars(text) {
+        let control = match c {
+            '\n' => Some(Key::Enter),
+            '\t' => Some(Key::Tab),
+            _ => None,
+        };
+        if let Some(vk) = control.and_then(virtual_key) {
+            events.extend([key(vk, true), key(vk, false)]);
+            continue;
+        }
+        let mut buf = [0; 2];
+        for &unit in c.encode_utf16(&mut buf).iter() {
+            events.extend([unicode(unit, false), unicode(unit, true)]);
+        }
+    }
+    events
 }
 
 /// 不管键盘布局输入一个 UTF-16 码元。

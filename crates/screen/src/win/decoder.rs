@@ -156,7 +156,7 @@ impl Session {
             Err(err) if err.code() == MF_E_NOTACCEPTING => {
                 // 先把攒着的取出来再交。
                 latest = self.drain()?;
-                // SAFETY: 同上。
+                // SAFETY: 样本在调用期间有效，解码器要用就自己留一份引用。
                 unsafe { self.mft.ProcessInput(0, &sample, 0) }.map_err(other)?;
             }
             result => result.map_err(other)?,
@@ -276,7 +276,7 @@ fn find_decoder(codec: Codec) -> io::Result<IMFTransform> {
     // SAFETY: `list` 有 `count` 项，每项的引用接过来一次，数组本身用 CoTaskMemFree 放。
     let activates: Vec<IMFActivate> =
         unsafe { (0..count as usize).filter_map(|index| ptr::read(list.add(index))).collect() };
-    // SAFETY: 同上。
+    // SAFETY: `list` 是 `MFTEnumEx` 给的数组，各项的引用上面已经接走，这里只放数组本身。
     unsafe { CoTaskMemFree(Some(list.cast())) };
     let unsupported = || io::Error::new(io::ErrorKind::Unsupported, format!("no {codec:?} decoder on this system"));
     activates

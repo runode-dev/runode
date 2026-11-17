@@ -463,33 +463,33 @@ pub(super) struct SliceParameterHevc {
     pub(super) va_reserved: [u32; 6],
 }
 
-// SAFETY: 以下类型都只含整数、整数数组、裸指针和由它们组成的结构体，全零合法。
+// SAFETY: 只含整数、整数数组和只含整数的 `ImageFormat`，全零合法。
 unsafe impl Zeroable for Image {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数、裸指针的联合体，全零合法（指针为空）。
 unsafe impl Zeroable for SurfaceAttrib {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for PackedHeaderParameter {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for RateControl {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for FrameRate {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for Hrd {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for PictureH264 {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for SequenceH264 {}
-// SAFETY: 同上。
+// SAFETY: 只含整数、整数数组、`PictureH264` 和它的数组，全零合法。
 unsafe impl Zeroable for PictureParameterH264 {}
-// SAFETY: 同上。
+// SAFETY: 只含整数、整数数组和 `PictureH264` 的数组，全零合法。
 unsafe impl Zeroable for SliceParameterH264 {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for PictureHevc {}
-// SAFETY: 同上。
+// SAFETY: 只含整数和整数数组，全零合法。
 unsafe impl Zeroable for SequenceHevc {}
-// SAFETY: 同上。
+// SAFETY: 只含整数、整数数组、`PictureHevc` 和它的数组，全零合法。
 unsafe impl Zeroable for PictureParameterHevc {}
-// SAFETY: 同上。
+// SAFETY: 只含整数、整数数组和 `PictureHevc` 的数组，全零合法。
 unsafe impl Zeroable for SliceParameterHevc {}
 
 impl PictureH264 {
@@ -632,9 +632,11 @@ unsafe extern "C" fn log_message(_context: *mut c_void, message: *const c_char) 
     if message.is_null() {
         return;
     }
-    // SAFETY: libva 交来的是以 NUL 结尾的字符串，回调期间有效。
-    let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
-    tracing::debug!("libva: {}", message.trim_end());
+    crate::callback::in_callback("libva message", || {
+        // SAFETY: libva 交来的是以 NUL 结尾的字符串，回调期间有效。
+        let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+        tracing::debug!("libva: {}", message.trim_end());
+    });
 }
 
 #[cfg(test)]

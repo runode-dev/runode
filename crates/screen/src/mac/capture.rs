@@ -53,9 +53,9 @@ pub struct Capture {
     _awake: KeepAwake,
 }
 
-// SAFETY: SCStream 的方法可以在任意线程上调用；`Encoder` 本身是 Send + Sync，其余字段只为持有。
+// SAFETY: SCStream 的方法可以在任意线程上调用；`Latest` 本身是 Send + Sync，其余字段只为持有。
 unsafe impl Send for Capture {}
-// SAFETY: 同上。
+// SAFETY: SCStream 的方法可以在几个线程上同时调用；`Latest` 本身是 Sync，其余字段只为持有。
 unsafe impl Sync for Capture {}
 
 impl Capture {
@@ -105,7 +105,9 @@ impl Capture {
                 .map_err(|error| io::Error::other(error.localizedDescription().to_string()))?;
             let (tx, rx) = mpsc::channel();
             let done = RcBlock::new(move |error: *mut NSError| {
-                let _ = tx.send(error_text(error));
+                crate::callback::in_callback("capture start", || {
+                    let _ = tx.send(error_text(error));
+                });
             });
             stream.startCaptureWithCompletionHandler(Some(&done));
             wait(&rx, "start the screen capture")?;
@@ -138,7 +140,9 @@ impl Drop for Capture {
     fn drop(&mut self) {
         let (tx, rx) = mpsc::channel();
         let done = RcBlock::new(move |error: *mut NSError| {
-            let _ = tx.send(error_text(error));
+            crate::callback::in_callback("capture stop", || {
+                let _ = tx.send(error_text(error));
+            });
         });
         // SAFETY: 停下这条流；等它停好，丢掉以后 `on_event` 不再收到帧。
         unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&done)) };
@@ -190,7 +194,7 @@ struct Latest {
 
 // SAFETY: CVPixelBuffer 可以在任意线程上读，这里只在锁里碰它；`Encoder` 本身是 Send + Sync。
 unsafe impl Send for Latest {}
-// SAFETY: 同上。
+// SAFETY: CVPixelBuffer 可以在几个线程上同时读，这里只在锁里碰它；`Encoder` 本身是 Send + Sync。
 unsafe impl Sync for Latest {}
 
 impl Latest {
@@ -199,7 +203,7 @@ impl Latest {
         self.encoder.request_keyframe();
         let latest = self.clone();
         let when = DispatchTime::try_from(REPEAT_DELAY).unwrap_or(DispatchTime::NOW);
-        let _ = queue.after(when, move || latest.encode_again());
+        let _ = queue.after(when, move || crate::callback::in_callback("keyframe repeat", || latest.encode_again()));
     }
 
     /// ScreenCaptureKit 交来一张新画面：记成最新的一张，编码的队列闲着时叫它来编。
@@ -217,7 +221,7 @@ impl Latest {
         let next = self.pending.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some((image, pts)) = next {
             if !self.stopped.load(Ordering::Relaxed) {
-                self.encode(image, pts);
+                crate::callback::in_callback("screen encode", || self.encode(image, pts));
             }
             let latest = self.clone();
             self.queue.exec_async(move || latest.drain());
@@ -295,7 +299,7 @@ impl Latest {
         let when = DispatchTime::try_from(wait).unwrap_or(DispatchTime::NOW);
         let _ = self.queue.after(when, move || {
             latest.refine_scheduled.store(false, Ordering::Relaxed);
-            latest.refine();
+            crate::callback::in_callback("screen refine", || latest.refine());
         });
     }
 
@@ -357,9 +361,11 @@ fn wait(rx: &mpsc::Receiver<Result<(), String>>, what: &str) -> io::Result<()> {
 fn display(id: u32) -> io::Result<Retained<SCDisplay>> {
     let (tx, rx) = mpsc::channel();
     let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        // SAFETY: 回调给的内容要么为空，要么有效，这里多持有一份。
-        let content = unsafe { Retained::retain(content) };
-        let _ = tx.send(content.ok_or_else(|| (error_text(error).err().unwrap_or_default(), user_declined(error))));
+        crate::callback::in_callback("display list", || {
+            // SAFETY: 回调给的内容要么为空，要么有效，这里多持有一份。
+            let content = unsafe { Retained::retain(content) };
+            let _ = tx.send(content.ok_or_else(|| (error_text(error).err().unwrap_or_default(), user_declined(error))));
+        });
     });
     // 只列屏上的窗口：列全部窗口要几百毫秒，这里只要屏幕。
     // SAFETY: ScreenCaptureKit 自己复制回调块。
@@ -406,19 +412,23 @@ define_class!(
             if kind != SCStreamOutputType::Screen {
                 return;
             }
-            // SAFETY: 回调期间样本有效；屏幕没变时样本不带画面，跳过。
-            unsafe {
-                if let Some(image) = sample.image_buffer() {
-                    self.ivars().latest.offer(image, sample.presentation_time_stamp());
+            crate::callback::in_callback("screen frame", || {
+                // SAFETY: 回调期间样本有效；屏幕没变时样本不带画面，跳过。
+                unsafe {
+                    if let Some(image) = sample.image_buffer() {
+                        self.ivars().latest.offer(image, sample.presentation_time_stamp());
+                    }
                 }
-            }
+            });
         }
     }
 
     unsafe impl SCStreamDelegate for Output {
         #[unsafe(method(stream:didStopWithError:))]
         fn did_stop(&self, _stream: &SCStream, error: &NSError) {
-            (self.ivars().sink)(Event::Stopped(format!("{} ({})", error.localizedDescription(), error.code())));
+            crate::callback::in_callback("capture stopped", || {
+                (self.ivars().sink)(Event::Stopped(format!("{} ({})", error.localizedDescription(), error.code())));
+            });
         }
     }
 );

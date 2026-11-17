@@ -1,5 +1,5 @@
 //! 把手机发来的 `ScreenInput` 变成系统的鼠标和键盘事件（`CGEvent`），发到 HID 层，程序收到的和真的
-//! 键鼠一样。没有注入事件的授权时系统悄悄丢掉，见 `permissions`。
+//! 键鼠一样。没有注入事件的授权时系统悄悄丢掉。
 
 use std::time::{Duration, Instant};
 
@@ -117,19 +117,13 @@ struct TextChunk {
 
 /// 普通输入框读事件上的文字，密码框（安全输入）和虚拟机、游戏这类程序却只认键码，所以美式键盘敲得出的
 /// 字符一个一个发、带上键码，跟实体键盘一样会经过输入法。键码按美式布局取，被看的电脑用别的布局时，
-/// 只认键码的地方个别字符会对不上。换行（`\r\n` 算一个）和制表符按回车键和 Tab 键发、不带文字，由系统按键码
-/// 生成。其余字符攒成最多 `TEXT_CHUNK` 个码元一块，不把一个字符的代理对拆到两块里。
+/// 只认键码的地方个别字符会对不上。换行和制表符按回车键和 Tab 键发、不带文字，由系统按键码生成。
+/// 其余字符攒成最多 `TEXT_CHUNK` 个码元一块，不把一个字符的代理对拆到两块里。
 fn text_chunks(text: &str) -> Vec<TextChunk> {
     let mut chunks: Vec<TextChunk> = Vec::new();
-    let mut after_cr = false;
-    for c in text.chars() {
-        let skip = c == '\n' && after_cr;
-        after_cr = c == '\r';
-        if skip {
-            continue;
-        }
+    for c in crate::keys::text_chars(text) {
         let control = match c {
-            '\r' | '\n' => Some(Key::Enter),
+            '\n' => Some(Key::Enter),
             '\t' => Some(Key::Tab),
             _ => None,
         };

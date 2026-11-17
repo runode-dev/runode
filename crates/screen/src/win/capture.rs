@@ -851,7 +851,7 @@ fn output_view(
         Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 } },
     };
     let mut view = None;
-    // SAFETY: 同上。
+    // SAFETY: 描述是本地变量，输出参数指向本地变量。
     unsafe { video_device.CreateVideoProcessorOutputView(texture, enumerator, &desc, Some(&mut view)) }
         .map_err(other)?;
     view.ok_or_else(|| io::Error::other("no video processor output view"))
@@ -873,7 +873,7 @@ unsafe fn blit(
         pInputSurface: ManuallyDrop::new(Some(input.clone())),
         ..Default::default()
     };
-    // SAFETY: 见上；流的输入视图引用用完放掉。
+    // SAFETY: 调用方保证视图和处理器都在 `video` 的设备上；流的输入视图引用用完放掉。
     unsafe {
         let blitted = video.VideoProcessorBlt(processor, output, 0, std::slice::from_ref(&stream));
         ManuallyDrop::drop(&mut stream.pInputSurface);

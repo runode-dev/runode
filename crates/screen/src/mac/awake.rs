@@ -37,7 +37,7 @@ impl KeepAwake {
         let (mut activity, mut prevent) = (0u32, 0u32);
         // SAFETY: 字符串在调用期间有效，输出参数指向本地变量。
         let woke = unsafe { IOPMAssertionDeclareUserActivity(&name, USER_ACTIVE_LOCAL, &mut activity) };
-        // SAFETY: 同上。
+        // SAFETY: 两个字符串在调用期间有效，输出参数指向本地变量。
         let held = unsafe {
             IOPMAssertionCreateWithName(
                 &CFString::from_static_str("PreventUserIdleDisplaySleep"),

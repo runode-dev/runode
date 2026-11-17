@@ -28,7 +28,7 @@ impl KeepAwake {
 
 impl Drop for KeepAwake {
     fn drop(&mut self) {
-        // SAFETY: 同 `acquire`。
+        // SAFETY: 只改本线程的电源要求。
         unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
     }
 }

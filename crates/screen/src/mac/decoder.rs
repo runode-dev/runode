@@ -188,11 +188,13 @@ unsafe extern "C-unwind" fn on_decoded(
     _pts: objc2_core_media::CMTime,
     _duration: objc2_core_media::CMTime,
 ) {
-    // SAFETY: `frame` 是 `decode_frame` 给的 `Output`，同步解码时它在回调期间有效。
-    let Some(output) = (unsafe { frame.cast::<Output>().as_mut() }) else { return };
-    output.status = status;
-    // SAFETY: 回调期间图像有效，这里自己再持有一份。
-    output.image = NonNull::new(image).map(|image| unsafe { CFRetained::retain(image) });
+    crate::callback::in_callback("decoded frame", || {
+        // SAFETY: `frame` 是 `decode_frame` 给的 `Output`，同步解码时它在回调期间有效。
+        let Some(output) = (unsafe { frame.cast::<Output>().as_mut() }) else { return };
+        output.status = status;
+        // SAFETY: 回调期间图像有效，这里自己再持有一份。
+        output.image = NonNull::new(image).map(|image| unsafe { CFRetained::retain(image) });
+    });
 }
 
 /// 按参数集（HEVC 的 VPS、SPS、PPS，H.264 的 SPS、PPS）建格式描述。

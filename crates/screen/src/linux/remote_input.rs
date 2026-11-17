@@ -33,23 +33,18 @@ pub(super) fn button_code(button: MouseButton) -> i32 {
 
 /// 把 `input` 注入 `target`。鼠标键和组合键像真键盘一样先按下修饰键、做完再倒着松开。
 pub(super) fn inject<T: RemoteInput>(target: &T, input: &ScreenInput) -> Result<(), T::Error> {
-    let keys = |keysyms: &[u32], down: bool| -> Result<(), T::Error> {
-        let ordered: Vec<u32> = if down { keysyms.to_vec() } else { keysyms.iter().rev().copied().collect() };
-        ordered.into_iter().try_for_each(|keysym| target.keysym(keysym, down))
-    };
     let move_to = |x: f64, y: f64| {
         let (width, height) = target.extent();
         let (width, height) = (f64::from(width), f64::from(height));
         target.pointer_to(x.clamp(0.0, 1.0) * (width - 1.0).max(0.0), y.clamp(0.0, 1.0) * (height - 1.0).max(0.0))
     };
+    let press = |keysym, down| target.keysym(keysym, down);
     match input {
         ScreenInput::MouseMove { x, y } => move_to(*x, *y),
         ScreenInput::MouseButton { button, down, x, y, mods } => {
             move_to(*x, *y)?;
             let held = if *down { keysym::modifiers(*mods) } else { Vec::new() };
-            keys(&held, true)?;
-            target.button(button_code(*button), *down)?;
-            keys(&held, false)
+            super::holding(&held, press, || target.button(button_code(*button), *down))
         }
         ScreenInput::Scroll { dx, dy } => {
             // 正的 `dy` 是内容往下走、往上滚，接口的格数朝下为正；横向同理。
@@ -62,16 +57,9 @@ pub(super) fn inject<T: RemoteInput>(target: &T, input: &ScreenInput) -> Result<
         }
         ScreenInput::Key { key, mods } => {
             let Some(keysym) = keysym::of_key(*key) else { return Ok(()) };
-            let held = keysym::modifiers(*mods);
-            keys(&held, true)?;
-            target.keysym(keysym, true)?;
-            target.keysym(keysym, false)?;
-            keys(&held, false)
+            super::holding(&keysym::modifiers(*mods), press, || super::tap(keysym, press))
         }
-        ScreenInput::Text { text } => text.chars().filter_map(keysym::of_char).try_for_each(|keysym| {
-            target.keysym(keysym, true)?;
-            target.keysym(keysym, false)
-        }),
+        ScreenInput::Text { text } => keysym::of_text(text).try_for_each(|keysym| super::tap(keysym, press)),
     }
 }
 
@@ -89,12 +77,13 @@ pub(super) async fn sleep(duration: Duration) {
 mod tests {
     use std::cell::RefCell;
 
-    use runode_types::screen::ScreenMods;
+    use runode_types::{input::Key, screen::ScreenMods};
 
     use super::*;
 
+    /// 记下注入了什么；第二项是注入时出错的 keysym，出错的那次不记。
     #[derive(Default)]
-    struct Recorder(RefCell<Vec<String>>);
+    struct Recorder(RefCell<Vec<String>>, Option<u32>);
 
     impl RemoteInput for Recorder {
         type Error = ();
@@ -119,6 +108,9 @@ mod tests {
         }
 
         fn keysym(&self, keysym: u32, down: bool) -> Result<(), ()> {
+            if self.1 == Some(keysym) {
+                return Err(());
+            }
             self.0.borrow_mut().push(format!("key {keysym:#x} {down}"));
             Ok(())
         }
@@ -133,6 +125,37 @@ mod tests {
         assert_eq!(
             target.0.take(),
             ["move 100 25", "key 0xffe1 true", "button 0x110 true", "key 0xffe1 false"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn failed_keys_still_release_the_modifiers() {
+        let target = Recorder(RefCell::default(), Some('a' as u32));
+        let mods = ScreenMods { shift: true, ..ScreenMods::default() };
+        assert!(inject(&target, &ScreenInput::Key { key: Key::A, mods }).is_err());
+        assert_eq!(target.0.take(), ["key 0xffe1 true", "key 0xffe1 false"].map(String::from));
+
+        let target = Recorder(RefCell::default(), Some(keysym::SHIFT_L));
+        let mods = ScreenMods { shift: true, ctrl: true, ..ScreenMods::default() };
+        assert!(inject(&target, &ScreenInput::Key { key: Key::A, mods }).is_err());
+        assert_eq!(target.0.take(), ["key 0xffe3 true", "key 0xffe3 false"].map(String::from));
+    }
+
+    #[test]
+    fn line_breaks_press_enter_once() {
+        let target = Recorder::default();
+        inject(&target, &ScreenInput::Text { text: "a\r\nb".into() }).unwrap();
+        assert_eq!(
+            target.0.take(),
+            [
+                "key 0x61 true",
+                "key 0x61 false",
+                "key 0xff0d true",
+                "key 0xff0d false",
+                "key 0x62 true",
+                "key 0x62 false"
+            ]
+            .map(String::from)
         );
     }
 

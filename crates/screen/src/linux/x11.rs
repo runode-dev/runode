@@ -435,19 +435,15 @@ impl Injector {
 
     fn try_inject(&mut self, input: &ScreenInput) -> io::Result<()> {
         self.drain_events()?;
+        let press = |keycode, down| self.key(keycode, down);
         match input {
             ScreenInput::MouseMove { x, y } => self.move_to(*x, *y)?,
             ScreenInput::MouseButton { button, down, x, y, mods } => {
                 self.move_to(*x, *y)?;
                 // 按下时带着的修饰键（Shift 加点击之类）只在按下那一刻按住。
                 let held = if *down { self.modifier_keys(*mods) } else { Vec::new() };
-                for &keycode in &held {
-                    self.fake(KEY_PRESS, keycode)?;
-                }
-                self.fake(if *down { BUTTON_PRESS } else { BUTTON_RELEASE }, button_number(*button))?;
-                for &keycode in held.iter().rev() {
-                    self.fake(KEY_RELEASE, keycode)?;
-                }
+                let kind = if *down { BUTTON_PRESS } else { BUTTON_RELEASE };
+                super::holding(&held, press, || self.fake(kind, button_number(*button)))?;
             }
             ScreenInput::Scroll { dx, dy } => {
                 // 正的 `dy` 是内容往下走，就是往上滚（按钮 4）；正的 `dx` 是内容往右走，往左滚（按钮 6）。
@@ -463,18 +459,10 @@ impl Injector {
             ScreenInput::Key { key, mods } => {
                 let Some(keysym) = keysym::of_key(*key) else { return Ok(()) };
                 let held = self.modifier_keys(*mods);
-                for &keycode in &held {
-                    self.fake(KEY_PRESS, keycode)?;
-                }
-                // 打不出来也要抬起修饰键，不然之后的输入都带着它。
-                let typed = self.type_keysym(keysym);
-                for &keycode in held.iter().rev() {
-                    self.fake(KEY_RELEASE, keycode)?;
-                }
-                typed?;
+                super::holding(&held, press, || self.type_keysym(keysym))?;
             }
             ScreenInput::Text { text } => {
-                for keysym in text.chars().filter_map(keysym::of_char) {
+                for keysym in keysym::of_text(text) {
                     self.type_keysym(keysym)?;
                 }
             }
@@ -509,6 +497,10 @@ impl Injector {
         Ok(())
     }
 
+    fn key(&self, keycode: u8, down: bool) -> io::Result<()> {
+        self.fake(if down { KEY_PRESS } else { KEY_RELEASE }, keycode)
+    }
+
     fn modifier_keys(&self, mods: runode_types::screen::ScreenMods) -> Vec<u8> {
         keysym::modifiers(mods)
             .into_iter()
@@ -517,18 +509,11 @@ impl Injector {
     }
 
     /// 按一下打出 `keysym` 的键，要 Shift 时连 Shift 一起按；键位表里没有时临时把一个空键改成它。
-    fn type_keysym(&mut self, keysym: u32) -> io::Result<()> {
+    fn type_keysym(&self, keysym: u32) -> io::Result<()> {
         if let Some((keycode, shift)) = self.keymap.find(keysym) {
             let shift_key = shift.then(|| self.keymap.find(keysym::SHIFT_L).map(|(keycode, _)| keycode)).flatten();
-            if let Some(shift_key) = shift_key {
-                self.fake(KEY_PRESS, shift_key)?;
-            }
-            self.fake(KEY_PRESS, keycode)?;
-            self.fake(KEY_RELEASE, keycode)?;
-            if let Some(shift_key) = shift_key {
-                self.fake(KEY_RELEASE, shift_key)?;
-            }
-            return Ok(());
+            let press = |keycode, down| self.key(keycode, down);
+            return super::holding(shift_key.as_slice(), press, || super::tap(keycode, press));
         }
         let Some(spare) = self.keymap.spare() else {
             return Err(io::Error::other(format!("no free key to type keysym {keysym:#x}")));
@@ -540,14 +525,17 @@ impl Injector {
             syms[1] = keysym;
         }
         self.conn.change_keyboard_mapping(1, spare, per, &syms).map_err(other)?.check().map_err(other)?;
-        thread::sleep(REMAP_SETTLE);
-        self.fake(KEY_PRESS, spare)?;
-        self.fake(KEY_RELEASE, spare)?;
-        self.conn.sync().map_err(other)?;
+        // 从这里起不管哪步出错，都要把空键改回空白、发出去再返回。
+        let typed = (|| {
+            thread::sleep(REMAP_SETTLE);
+            super::tap(spare, |keycode, down| self.key(keycode, down))?;
+            self.conn.sync().map_err(other)
+        })();
         thread::sleep(REMAP_SETTLE);
         let blank = vec![0u32; usize::from(per)];
-        self.conn.change_keyboard_mapping(1, spare, per, &blank).map_err(other)?;
-        Ok(())
+        let restored = self.conn.change_keyboard_mapping(1, spare, per, &blank).map_err(other);
+        let flushed = self.conn.flush().map_err(other);
+        typed.and(restored.map(drop)).and(flushed)
     }
 }
 

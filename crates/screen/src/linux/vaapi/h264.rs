@@ -447,7 +447,7 @@ mod tests {
         });
     }
 
-    /// 同上，和参数集一起核对过；CAVLC 的片头不补齐字节，有效位数不是 8 的倍数。
+    /// 和参数集一起核对过；CAVLC 的片头不补齐字节，有效位数不是 8 的倍数。
     #[test]
     fn writes_slice_headers() {
         let main = H264::new(Profile::Main, (1920, 1080), (1, 1), 60, 10_000_000);

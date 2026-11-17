@@ -511,7 +511,7 @@ impl Vaapi {
             let current = unsafe { &*segment };
             overflow |= current.status & ffi::CODED_BUF_STATUS_SLICE_OVERFLOW != 0;
             if !current.buf.is_null() && current.size > 0 {
-                // SAFETY: 同上，`buf` 指向 `size` 字节。
+                // SAFETY: 段的数据由驱动建，解除映射前有效，`buf` 指向 `size` 字节。
                 out.extend_from_slice(unsafe {
                     slice::from_raw_parts(current.buf.cast::<u8>(), current.size as usize)
                 });

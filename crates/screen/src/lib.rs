@@ -7,6 +7,8 @@
 //! 采集，Media Foundation 编解码，`SendInput` 注入，不用授权。Linux 上只采集和注入，不解码，按屏幕上的图形会话
 //! 挑 X11、Mutter 或 portal（`linux`）。
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod callback;
 mod keys;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -109,7 +111,7 @@ pub enum Event {
 /// 怎么采集。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
-    /// 采哪块屏幕，见 `Display`。
+    /// 采哪块屏幕，是 `Display` 的 `id`。
     pub display: u32,
     /// 画面的像素尺寸；和屏幕的宽高比不同时留黑边。
     pub width: u32,

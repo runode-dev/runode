@@ -66,7 +66,7 @@ pub(crate) fn outputs() -> Vec<Output> {
         // SAFETY: 序号越界时返回 `DXGI_ERROR_NOT_FOUND`，到那里为止。
         let Ok(adapter) = (unsafe { factory.EnumAdapters1(adapter_index) }) else { break };
         for output_index in 0.. {
-            // SAFETY: 同上。
+            // SAFETY: 输出的序号越界时返回 `DXGI_ERROR_NOT_FOUND`，到那里为止。
             let Ok(output) = (unsafe { adapter.EnumOutputs(output_index) }) else { break };
             let Ok(output) = output.cast::<IDXGIOutput1>() else { continue };
             // SAFETY: 读输出的描述。
@@ -86,7 +86,7 @@ pub(crate) fn outputs() -> Vec<Output> {
                 dpi = BASE_DPI;
             }
             let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-            // SAFETY: 同上，`cbSize` 已经填好。
+            // SAFETY: 显示器句柄来自输出的描述，输出参数指向本地变量，`cbSize` 已经填好。
             let primary = unsafe { GetMonitorInfoW(desc.Monitor, &mut info) }.as_bool()
                 && info.dwFlags & MONITORINFOF_PRIMARY != 0;
             let display = Display {

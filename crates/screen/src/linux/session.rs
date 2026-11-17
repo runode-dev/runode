@@ -70,7 +70,7 @@ pub(crate) fn adopt(session: &Session) {
         unsafe { std::env::remove_var("DISPLAY") };
     }
     for (key, value) in &session.env {
-        // SAFETY: 同上。
+        // SAFETY: 调用方保证本进程还没有别的线程，没人同时读写环境。
         unsafe { std::env::set_var(key, value) };
     }
 }

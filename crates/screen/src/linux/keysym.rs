@@ -96,12 +96,17 @@ pub(crate) fn of_key(key: Key) -> Option<u32> {
     })
 }
 
+/// 要注入的文字逐个字符的 keysym，换行按 `keys::text_chars` 归并，没有 keysym 的字符跳过。
+pub(crate) fn of_text(text: &str) -> impl Iterator<Item = u32> + '_ {
+    crate::keys::text_chars(text).filter_map(of_char)
+}
+
 /// 字符的 keysym：Latin-1 的可见字符就是码位，换行和制表是对应的键，别的 Unicode 字符是 `0x0100_0000` 加码位。
 /// 控制字符没有 keysym。
-pub(crate) fn of_char(ch: char) -> Option<u32> {
+fn of_char(ch: char) -> Option<u32> {
     let code = ch as u32;
     match ch {
-        '\n' | '\r' => Some(0xff0d),
+        '\n' => Some(0xff0d),
         '\t' => Some(0xff09),
         _ if ch.is_control() => None,
         _ if (0x20..=0x7e).contains(&code) || (0xa0..=0xff).contains(&code) => Some(code),
@@ -123,6 +128,7 @@ mod tests {
         assert_eq!(of_char('中'), Some(0x0100_4e2d));
         assert_eq!(of_char('\n'), Some(0xff0d));
         assert_eq!(of_char('\u{7}'), None);
+        assert_eq!(of_text("a\r\n\tb\r\u{7}").collect::<Vec<_>>(), [0x61, 0xff0d, 0xff09, 0x62, 0xff0d]);
         let mods = ScreenMods { shift: true, ctrl: true, alt: false, cmd: true };
         assert_eq!(modifiers(mods), vec![CONTROL_L, SHIFT_L, SUPER_L]);
     }

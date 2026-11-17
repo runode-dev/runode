@@ -409,43 +409,48 @@ fn fail(shared: &Shared, error: String) {
 }
 
 unsafe extern "C" fn on_state_changed(data: *mut c_void, _old: c_int, state: c_int, error: *const c_char) {
-    // SAFETY: `data` 是 `Stream::connect` 交的 `Callback`，活得比流久。
-    let callback = unsafe { &*data.cast::<Callback>() };
-    match state {
-        PW_STREAM_STATE_ERROR => {
-            let error = if error.is_null() {
-                "unknown error".to_owned()
-            } else {
-                // SAFETY: PipeWire 交来的是以 NUL 结尾的字符串，回调期间有效。
-                unsafe { CStr::from_ptr(error) }.to_string_lossy().into_owned()
-            };
-            fail(&callback.shared, format!("the screen stream failed: {error}"));
+    crate::callback::in_callback("PipeWire state", || {
+        // SAFETY: `data` 是 `Stream::connect` 交的 `Callback`，活得比流久。
+        let callback = unsafe { &*data.cast::<Callback>() };
+        match state {
+            PW_STREAM_STATE_ERROR => {
+                let error = if error.is_null() {
+                    "unknown error".to_owned()
+                } else {
+                    // SAFETY: PipeWire 交来的是以 NUL 结尾的字符串，回调期间有效。
+                    unsafe { CStr::from_ptr(error) }.to_string_lossy().into_owned()
+                };
+                fail(&callback.shared, format!("the screen stream failed: {error}"));
+            }
+            PW_STREAM_STATE_UNCONNECTED => fail(&callback.shared, "the screen stream ended".to_owned()),
+            _ => {}
         }
-        PW_STREAM_STATE_UNCONNECTED => fail(&callback.shared, "the screen stream ended".to_owned()),
-        _ => {}
-    }
+    });
 }
 
 unsafe extern "C" fn on_param_changed(data: *mut c_void, id: u32, param: *const SpaPod) {
     if id != SPA_PARAM_FORMAT || param.is_null() {
         return;
     }
-    // SAFETY: `data` 是 `Stream::connect` 交的 `Callback`，活得比流久；`param` 是一个完整的 pod，长度在它的头里。
-    let (callback, pod) = unsafe {
-        let pod = std::slice::from_raw_parts(param.cast::<u8>(), 8 + (*param).size as usize);
-        (&*data.cast::<Callback>(), pod)
-    };
-    let Some((format, size)) = parse_format(pod) else {
-        fail(&callback.shared, "the screen stream offered no usable picture format".to_owned());
-        return;
-    };
-    tracing::info!("screen stream format {format} at {}x{}", size.0, size.1);
-    callback.shared.state.lock().unwrap_or_else(PoisonError::into_inner).format = Some((format, size));
-    // 只要内存里的画面：不认 DMA-BUF。
-    let buffers = buffers_param();
-    let mut params = [buffers.as_ptr().cast::<SpaPod>()];
-    // SAFETY: 在循环线程上、流的回调里调，参数在调用期间有效。
-    unsafe { (callback.lib.stream_update_params)(callback.stream, params.as_mut_ptr(), 1) };
+    crate::callback::in_callback("PipeWire format", || {
+        // SAFETY: `data` 是 `Stream::connect` 交的 `Callback`，活得比流久；`param` 是一个完整的 pod，长度在它的
+        // 头里。
+        let (callback, pod) = unsafe {
+            let pod = std::slice::from_raw_parts(param.cast::<u8>(), 8 + (*param).size as usize);
+            (&*data.cast::<Callback>(), pod)
+        };
+        let Some((format, size)) = parse_format(pod) else {
+            fail(&callback.shared, "the screen stream offered no usable picture format".to_owned());
+            return;
+        };
+        tracing::info!("screen stream format {format} at {}x{}", size.0, size.1);
+        callback.shared.state.lock().unwrap_or_else(PoisonError::into_inner).format = Some((format, size));
+        // 只要内存里的画面：不认 DMA-BUF。
+        let buffers = buffers_param();
+        let mut params = [buffers.as_ptr().cast::<SpaPod>()];
+        // SAFETY: 在循环线程上、流的回调里调，参数在调用期间有效。
+        unsafe { (callback.lib.stream_update_params)(callback.stream, params.as_mut_ptr(), 1) };
+    });
 }
 
 unsafe extern "C" fn on_process(data: *mut c_void) {
@@ -461,7 +466,7 @@ unsafe extern "C" fn on_process(data: *mut c_void) {
             break;
         }
         if !latest.is_null() {
-            // SAFETY: 同上。
+            // SAFETY: 在流的回调里还缓冲，`latest` 是刚从这条流取出的。
             unsafe { (lib.stream_queue_buffer)(callback.stream, latest) };
         }
         latest = next;
@@ -469,11 +474,11 @@ unsafe extern "C" fn on_process(data: *mut c_void) {
     if latest.is_null() {
         return;
     }
+    // 取、还缓冲只调 PipeWire，不会 panic；拷画面时 panic 了丢掉这一帧，缓冲照样还回去。
     // SAFETY: 缓冲在还回去之前有效；`MAP_BUFFERS` 让内存类的数据已经映射好。
-    unsafe {
-        copy_buffer(callback, latest);
-        (lib.stream_queue_buffer)(callback.stream, latest);
-    }
+    crate::callback::in_callback("PipeWire frame", || unsafe { copy_buffer(callback, latest) });
+    // SAFETY: 在流的回调里还缓冲，`latest` 是刚从这条流取出的。
+    unsafe { (lib.stream_queue_buffer)(callback.stream, latest) };
 }
 
 /// 把缓冲里的画面换成 BGRx 拷进 `Shared`。

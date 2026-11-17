@@ -76,9 +76,10 @@ enum Kind {
 }
 
 // SAFETY: 异步 MFT 和 ICodecAPI 可以在任意线程上调用（多线程套间）；同步 MFT 的调用都在 `Kind::Software` 的锁里，
-// 一次只有一个线程调。其余字段本身是 Send + Sync。
+// 一次只有一个线程调；`Kind::Hardware` 的设备管理器只为持有。
 unsafe impl Send for Encoder {}
-// SAFETY: 同上。
+// SAFETY: 异步 MFT 和 ICodecAPI 可以在几个线程上同时调用（多线程套间）；同步 MFT 的调用都拿着 `Kind::Software`
+// 的锁，锁里的样本也只在锁里用；`Kind::Hardware` 的设备管理器只为持有。其余字段本身是 Sync。
 unsafe impl Sync for Encoder {}
 
 /// 事件线程也要用的。
@@ -102,7 +103,8 @@ struct Worker {
     shared: Arc<Shared>,
 }
 
-// SAFETY: 同 `Encoder`。
+// SAFETY: 只有硬件编码器有事件线程，`mft` 是异步 MFT、`generator` 是它的事件接口，都可以在任意线程上调用
+// （多线程套间）；`Shared` 本身是 Send + Sync。
 unsafe impl Send for Worker {}
 
 impl Encoder {
@@ -714,7 +716,7 @@ fn encoder(flags: MFT_ENUM_FLAG, adapter: Option<LUID>, codec: Codec) -> io::Res
     // SAFETY: `list` 有 `count` 项，每项的引用接过来一次，数组本身用 CoTaskMemFree 放。
     let activates: Vec<IMFActivate> =
         unsafe { (0..count as usize).filter_map(|index| ptr::read(list.add(index))).collect() };
-    // SAFETY: 同上。
+    // SAFETY: `list` 是 `MFTEnumEx` 给的数组，各项的引用上面已经接走，这里只放数组本身。
     unsafe { CoTaskMemFree(Some(list.cast())) };
     let wanted = adapter.map(luid_bytes);
     let on_adapter = |activate: &IMFActivate| {

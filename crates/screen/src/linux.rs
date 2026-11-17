@@ -193,6 +193,45 @@ fn input_kind(input: &ScreenInput) -> &'static str {
     }
 }
 
+/// 用 `key(键, 是否按下)` 按顺序按下修饰键 `held`，做 `action`，再倒着松开（`release`）真按下了的那些。哪一步
+/// 出错都照样把按下了的逐个松开；返回最先出的错。
+fn holding<K: Copy, E>(
+    held: &[K],
+    key: impl Fn(K, bool) -> Result<(), E>,
+    action: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    let mut pressed = 0;
+    let mut result = Ok(());
+    for &held_key in held {
+        result = key(held_key, true);
+        if result.is_err() {
+            break;
+        }
+        pressed += 1;
+    }
+    if result.is_ok() {
+        result = action();
+    }
+    for &held_key in held[..pressed].iter().rev() {
+        let released = release(held_key, &key);
+        if result.is_ok() {
+            result = released;
+        }
+    }
+    result
+}
+
+/// 用 `key(键, 是否按下)` 按一下 `pressed`：按下了就一定松开。
+fn tap<K: Copy, E>(pressed: K, key: impl Fn(K, bool) -> Result<(), E>) -> Result<(), E> {
+    holding(&[pressed], key, || Ok(()))
+}
+
+/// 松开按下了的 `pressed`，出错时再试一次：松不开的键之后的输入都带着它。两次都不成时记 warn，返回第二次的错。
+fn release<K: Copy, E>(pressed: K, key: &impl Fn(K, bool) -> Result<(), E>) -> Result<(), E> {
+    key(pressed, false)
+        .or_else(|_| key(pressed, false))
+        .inspect_err(|_| tracing::warn!("cannot release an injected key; it may stay held down"))
+}
 /// 攒进 `rest` 的滚动点数里满整格的那部分，符号和点数一样；不满一格的留在 `rest`，换了方向时丢掉。
 fn whole_notches(rest: &mut i32, points: i32) -> i32 {
     if points.signum() == -rest.signum() {
@@ -249,7 +288,51 @@ pub(crate) fn screen_locked() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
+
     use super::*;
+
+    #[test]
+    fn taps_retry_a_failed_release_once() {
+        let calls = RefCell::new(Vec::new());
+        let failures = Cell::new(1);
+        let key = |keycode: u8, down: bool| {
+            calls.borrow_mut().push((keycode, down));
+            if !down && failures.get() > 0 {
+                failures.set(failures.get() - 1);
+                return Err(());
+            }
+            Ok(())
+        };
+        assert_eq!(tap(7, key), Ok(()));
+        assert_eq!(calls.take(), [(7, true), (7, false), (7, false)]);
+
+        failures.set(2);
+        assert_eq!(tap(7, key), Err(()));
+        assert_eq!(calls.take(), [(7, true), (7, false), (7, false)]);
+    }
+
+    #[test]
+    fn taps_do_not_release_keys_that_never_went_down() {
+        let calls = RefCell::new(Vec::new());
+        let key = |keycode: u8, down: bool| {
+            calls.borrow_mut().push((keycode, down));
+            if down { Err(()) } else { Ok(()) }
+        };
+        assert_eq!(tap(7, key), Err(()));
+        assert_eq!(calls.take(), [(7, true)]);
+    }
+
+    #[test]
+    fn a_stuck_modifier_does_not_stop_the_other_releases() {
+        let calls = RefCell::new(Vec::new());
+        let key = |keycode: u8, down: bool| {
+            calls.borrow_mut().push((keycode, down));
+            if keycode == 2 && !down { Err("stuck") } else { Ok(()) }
+        };
+        assert_eq!(holding(&[1, 2], key, || tap(3, key)), Err("stuck"));
+        assert_eq!(calls.take(), [(1, true), (2, true), (3, true), (3, false), (2, false), (2, false), (1, false)]);
+    }
 
     #[test]
     fn scrolling_adds_up_to_whole_notches() {

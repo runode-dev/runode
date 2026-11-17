@@ -561,7 +561,8 @@ mod tests {
     /// 4 到 32，层级深度 0 到 2。
     const FEATURES: u32 = 546_309_264;
     const BLOCK_SIZES: u32 = 35_015;
-    /// 同上：AMP、SAO、时域 MV 预测、变换跳过、CU 级 QP 支持，强帧内平滑、符号位隐藏、变换量化旁路要求。
+    /// GCC 给 `VAConfigAttribValEncHEVCFeatures` 设这些字段后读出的整数：AMP、SAO、时域 MV 预测、变换跳过、
+    /// CU 级 QP 支持，强帧内平滑、符号位隐藏、变换量化旁路要求。
     const ALL_TOOLS: u32 = 139_600_976;
     /// `ALL_TOOLS` 去掉 CU 级 QP。
     const RICH: u32 = ALL_TOOLS & !(3 << 22);
@@ -682,7 +683,7 @@ mod tests {
         });
     }
 
-    /// 同上，和参数集一起核对过。
+    /// 和参数集一起核对过。
     #[test]
     fn writes_slice_headers() {
         let plain = Hevc::new((1280, 720), (1, 1), 30, 5_000_000, Some(AMP), Some(PLAIN_BLOCKS), false).unwrap();
