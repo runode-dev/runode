@@ -1,6 +1,9 @@
 package dev.runode.mobile.connection
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import dev.runode.mobile.protocol.CertificateFingerprint
 import dev.runode.mobile.protocol.tunnelALPN
 import java.io.IOException
@@ -28,8 +31,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * 真的是 [NativeIroh]；JVM 单测换成假的，不加载原生库。
  */
 interface IrohNative {
-    /** 建一个端点，返回它的编号。 */
-    fun bind(): Long
+    /**
+     * 用私钥 [secret]（32 字节）建一个端点，返回它的编号。[secret] 长度不对时抛 [IllegalArgumentException]。
+     */
+    fun bind(secret: ByteArray): Long
 
     /**
      * 经 [endpoint] 拨公钥是 [node]（十六进制）的电脑，连上后开一条双向流，返回流的编号。[node] 不是公钥时抛
@@ -47,6 +52,9 @@ interface IrohNative {
     fun close(stream: Long)
 
     fun closeEndpoint(endpoint: Long)
+
+    /** 本机网络可能变了：所有端点重新探测地址、换掉绑在旧网络上的路径。 */
+    fun networkChanged()
 }
 
 /** librunode_tunnel.so，第一次调到时加载。 */
@@ -55,7 +63,7 @@ internal object IrohLibrary {
         System.loadLibrary("runode_tunnel")
     }
 
-    @JvmStatic external fun bind(context: Any?): Long
+    @JvmStatic external fun bind(context: Any?, secret: ByteArray): Long
 
     @JvmStatic external fun connect(endpoint: Long, node: String, alpn: ByteArray, timeoutMillis: Long): Long
 
@@ -66,6 +74,8 @@ internal object IrohLibrary {
     @JvmStatic external fun close(stream: Long)
 
     @JvmStatic external fun closeEndpoint(endpoint: Long)
+
+    @JvmStatic external fun networkChanged()
 }
 
 /** 真的原生库。 */
@@ -74,7 +84,7 @@ object NativeIroh : IrohNative {
     @Volatile
     var context: Context? = null
 
-    override fun bind(): Long = IrohLibrary.bind(context?.applicationContext)
+    override fun bind(secret: ByteArray): Long = IrohLibrary.bind(context?.applicationContext, secret)
 
     override fun connect(endpoint: Long, node: String, alpn: ByteArray, timeoutMillis: Long): Long =
         IrohLibrary.connect(endpoint, node, alpn, timeoutMillis)
@@ -88,12 +98,15 @@ object NativeIroh : IrohNative {
     override fun close(stream: Long) = IrohLibrary.close(stream)
 
     override fun closeEndpoint(endpoint: Long) = IrohLibrary.closeEndpoint(endpoint)
+
+    override fun networkChanged() = IrohLibrary.networkChanged()
 }
 
 /**
  * 跨网络连电脑：iroh 按电脑的公钥拨号，先打洞直连，打不通走中继。连接上开一条双向流，流上跑的和局域网的 TCP 一样是 TLS
  * 加门禁。[TlsChannel] 只能开在 socket 上，所以在本机回环地址上起一个只接一条连接的代理（[LoopbackProxy]）接到流上，
- * [open] 连它。一个 [IrohDialer] 共用一个 iroh 端点，第一次拨号时建，几台电脑同时拨号时共用同一次建；整个 app 用 [shared]。
+ * [open] 连它。每把私钥一个 iroh 端点，第一次用它拨号时建，同一把私钥同时拨号时共用同一次建；最多留 [tunnelEndpointLimit]
+ * 个（[TunnelEndpointPool]），一条连接从拨号到关掉都借着它的端点。整个 app 用 [shared]。
  */
 class IrohDialer(
     private val native: IrohNative,
@@ -101,26 +114,31 @@ class IrohDialer(
 ) {
     private val lock = Any()
 
-    /** 正在建或者建好了的端点；建失败时清掉，下次拨号重建。 */
-    private var binding: Deferred<Long>? = null
+    /** 正在建或者建好了的端点；建失败的从这里忘掉，下次拨号重建。 */
+    private val pool = TunnelEndpointPool<TunnelSecret, Deferred<Long>>(tunnelEndpointLimit)
 
-    suspend fun open(node: String, fingerprint: CertificateFingerprint): FrameTransport {
-        val endpoint = endpoint()
+    /** 用私钥 [secret] 的端点拨公钥是 [node] 的电脑。 */
+    suspend fun open(node: String, fingerprint: CertificateFingerprint, secret: ByteArray): FrameTransport {
+        val (endpoint, lease) = bound(TunnelSecret(secret))
         val alpn = tunnelALPN.encodeToByteArray()
         val stream = try {
             abandoningOnCancel(
                 work = { native.connect(endpoint, node, alpn, connectTimeout.inWholeMilliseconds) },
                 discard = native::close,
             )
-        } catch (_: IllegalArgumentException) {
-            throw LinkFailure.ProtocolViolation("the computer reported a malformed iroh address")
-        } catch (error: IOException) {
-            throw LinkFailure.ConnectionFailed(error.message ?: error.toString())
+        } catch (error: Throwable) {
+            giveBack(lease)
+            throw when (error) {
+                is IllegalArgumentException -> LinkFailure.ProtocolViolation("the computer reported a malformed iroh address")
+                is IOException -> LinkFailure.ConnectionFailed(error.message ?: error.toString())
+                else -> error
+            }
         }
         val proxy = try {
-            LoopbackProxy.start(native, stream)
+            LoopbackProxy.start(native, stream, onClose = { giveBack(lease) })
         } catch (error: IOException) {
             native.close(stream)
+            giveBack(lease)
             throw LinkFailure.ConnectionFailed(error.message ?: error.toString())
         }
         return try {
@@ -131,26 +149,82 @@ class IrohDialer(
         }
     }
 
-    private suspend fun endpoint(): Long {
-        val pending = synchronized(lock) {
-            binding ?: detached.async { native.bind() }.also { binding = it }
+    /** 关掉私钥 [secret] 的端点，经它开着的连接一起断掉。没建过时什么也不做。 */
+    fun forget(secret: ByteArray) {
+        val removed = synchronized(lock) { pool.remove(TunnelSecret(secret)) }
+        closeLater(listOfNotNull(removed))
+    }
+
+    /** 本机网络可能变了，告诉建着的端点；一个也没有时不碰原生库。 */
+    fun networkChanged() {
+        if (synchronized(lock) { pool.count } == 0) return
+        detached.launch { runCatching { native.networkChanged() } }
+    }
+
+    /**
+     * 跟着 [context] 里系统的默认网络，换了网络、链路属性变了时调 [networkChanged]。整个进程调一次，一直跟着。
+     */
+    fun followNetwork(context: Context) {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        connectivity.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = networkChanged()
+
+                override fun onLost(network: Network) = networkChanged()
+
+                override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = networkChanged()
+            },
+        )
+    }
+
+    /** [secret] 的端点和借它的凭据，用完要 [giveBack]；取消或者失败时已经还了。 */
+    private suspend fun bound(secret: TunnelSecret): Pair<Long, TunnelEndpointPool.Lease<TunnelSecret>> {
+        val (binding, lease) = synchronized(lock) {
+            pool.borrow(secret) ?: run {
+                val binding = detached.async { native.bind(secret.bytes) }
+                val (lease, evicted) = pool.insert(binding, secret)
+                closeLater(evicted)
+                binding to lease
+            }
         }
         return try {
-            pending.await()
+            binding.await() to lease
         } catch (cancelled: CancellationException) {
+            giveBack(lease)
             throw cancelled
         } catch (error: Exception) {
-            throw bindFailed(pending, error)
+            throw bindFailed(lease, error)
         } catch (error: LinkageError) {
             // 这个 ABI 没打进原生库时加载不了，当成连不上，不让它冲出主循环。
-            throw bindFailed(pending, error)
+            throw bindFailed(lease, error)
         }
     }
 
-    /** 建端点失败：清掉这次，下次拨号重建。 */
-    private fun bindFailed(pending: Deferred<Long>, error: Throwable): LinkFailure {
-        synchronized(lock) { if (binding === pending) binding = null }
+    /** 建端点失败：忘掉这次，下次拨号重建。 */
+    private fun bindFailed(lease: TunnelEndpointPool.Lease<TunnelSecret>, error: Throwable): LinkFailure {
+        synchronized(lock) { pool.remove(lease) }
         return LinkFailure.ConnectionFailed(error.message ?: error.toString())
+    }
+
+    private fun giveBack(lease: TunnelEndpointPool.Lease<TunnelSecret>) {
+        closeLater(synchronized(lock) { pool.giveBack(lease) })
+    }
+
+    /** 在后台关掉 [endpoints]：关端点要等它把连接关好，不占调用方的线程。建失败的不用关。 */
+    private fun closeLater(endpoints: List<Deferred<Long>>) {
+        if (endpoints.isEmpty()) return
+        detached.launch {
+            for (endpoint in endpoints) runCatching { native.closeEndpoint(endpoint.await()) }
+        }
+    }
+
+    /** 池里按内容比较的私钥；拷一份，调用方之后改了数组也不影响。 */
+    private class TunnelSecret(bytes: ByteArray) {
+        val bytes: ByteArray = bytes.copyOf()
+
+        override fun equals(other: Any?): Boolean = other is TunnelSecret && bytes.contentEquals(other.bytes)
+
+        override fun hashCode(): Int = bytes.contentHashCode()
     }
 
     companion object {
@@ -161,6 +235,9 @@ class IrohDialer(
         private val connectTimeout: Duration = 15.seconds
     }
 }
+
+/** 同时留着的 iroh 端点最多几个。 */
+internal const val tunnelEndpointLimit = 8
 
 /** 拨号、建端点这类调用方取消了也要跑完的活；不随哪个调用方取消。 */
 private val detached = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -211,6 +288,7 @@ internal class LoopbackProxy private constructor(
     private val native: IrohNative,
     private val stream: Long,
     private val server: ServerSocket,
+    private val onClose: () -> Unit,
 ) {
     val target: TransportTarget = TransportTarget(server.inetAddress.hostAddress!!, server.localPort.toUShort(), "iroh")
 
@@ -268,15 +346,19 @@ internal class LoopbackProxy private constructor(
         closeQuietly(server)
         accepted?.let(::closeQuietly)
         native.close(stream)
+        onClose()
     }
 
     companion object {
         private const val chunk = 64 shl 10
 
-        /** 开始监听、在后台等那一条连接；[stream] 从此归它管，监听开不出来时抛 [IOException]，流仍归调用方。 */
-        fun start(native: IrohNative, stream: Long): LoopbackProxy {
+        /**
+         * 开始监听、在后台等那一条连接；[stream] 从此归它管，监听开不出来时抛 [IOException]，流仍归调用方。代理关掉时调
+         * 一次 [onClose]。
+         */
+        fun start(native: IrohNative, stream: Long, onClose: () -> Unit = {}): LoopbackProxy {
             val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
-            val proxy = LoopbackProxy(native, stream, server)
+            val proxy = LoopbackProxy(native, stream, server, onClose)
             thread(name = "runode-iroh-up", isDaemon = true) { proxy.serve() }
             return proxy
         }

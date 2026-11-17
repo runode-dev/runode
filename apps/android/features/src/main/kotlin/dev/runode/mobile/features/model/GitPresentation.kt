@@ -279,15 +279,15 @@ fun Presentation.gitDisplaySegments(text: String, words: List<IntRange>): List<G
     return segments
 }
 
-/** 制表符对齐到这么多列的倍数；要和电脑上的 `runode_preview::TAB_WIDTH` 相同，两边的 diff 才对得齐。 */
+/** 制表符对齐到这么多列的倍数；要等于电脑上的 `runode_preview::TAB_WIDTH`，否则两边的 diff 对不齐。 */
 val Presentation.gitTabWidth: Int get() = 4
 
 /** 中间不同的那段按词数相乘超过这么多时不细比，整段算改了。 */
 private const val maxWordPairs = 250_000
 
 /**
- * [old] 改成 [new] 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则要和电脑上的 `changed_words`
- * 相同，改一边要跟着改另一边。
+ * [old] 改成 [new] 时两边各自改了的范围：切成词，求最长公共子序列，没对上的就是改了的。规则要等于电脑上的
+ * `runode_git::changed_words`，否则手机和电脑上标出的改动不一样。
  */
 fun Presentation.gitChangedWords(old: String, new: String): Pair<List<IntRange>, List<IntRange>> {
     val rangesA = wordTokens(old)

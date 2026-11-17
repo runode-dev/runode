@@ -106,7 +106,7 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
         )
     }
 
-    /** 在宿主套用主题的位置（`HostMsg.ThemeApplied`）套用同一份主题，步骤和宿主的 `vt::apply_theme` 一样，两份 VT 才不会分叉。 */
+    /** 在宿主套用主题的位置（`HostMsg.ThemeApplied`）套用同一份主题。步骤要和宿主的 `vt::apply_theme` 相同，否则两份 VT 会分叉。 */
     fun applyTheme(newSettings: TermSettings) {
         checkThread()
         settings = newSettings
@@ -188,7 +188,7 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
 
     /**
      * 按像素滚动回滚历史：[lines] 为正往回看更早的内容，可以是零点几行。凑够整行的部分挪视口，剩下的记成错开量
-     * （[ScreenFrame.scrollOffset]），做法同桌面的 `Session::scroll_smoothly`。返回画面是否变了；到了历史顶上或者
+     * （[ScreenFrame.scrollOffset]）。返回画面是否变了；到了历史顶上或者
      * 已经在最底下、挪不动时为假。
      */
     fun scrollSmoothly(lines: Double): Boolean {
@@ -226,8 +226,8 @@ class VTerminal(size: GridSize, settings: TermSettings) : AutoCloseable {
         get() = VtJni.nativeAlternateScreen(live())
 
     /**
-     * 在第 [row] 行第 [column] 列滚 [lines] 行（负数往上看更早的内容）要发给程序的字节：开着鼠标上报时每行一个滚轮事件
-     * （同桌面的 `Session::scroll`），否则按备用滚动每行一个方向键。程序不管滚动时为空。
+     * 在第 [row] 行第 [column] 列滚 [lines] 行（负数往上看更早的内容）要发给程序的字节：开着鼠标上报时每行一个滚轮事件，
+     * 否则按备用滚动每行一个方向键。程序不管滚动时为空。
      */
     fun encodeWheel(lines: Int, column: Int, row: Int): ByteArray {
         checkThread()

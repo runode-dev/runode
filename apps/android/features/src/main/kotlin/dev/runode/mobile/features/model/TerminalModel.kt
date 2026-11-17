@@ -31,12 +31,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** 谁的视图尺寸决定这个会话的尺寸，见宿主的 `HostMsg::SizeOwner`。 */
+/** 谁的视图尺寸决定这个会话的尺寸（宿主的 `runode_protocol::HostMsg::SizeOwner`）。 */
 sealed class SizeOwnership {
     data object Unknown : SizeOwnership()
 
@@ -196,7 +197,7 @@ class TerminalModel(
     private var channel: UInt? = null
     private var awaitingAttach = false
 
-    /** 这一次 `Attach` 是怎么来的，见类型文档的「重新连上时不抢尺寸」。 */
+    /** 这一次 `Attach` 是怎么来的。 */
     private var rejoin: Rejoin? = null
 
     /** 收到过 `Attached`：之后的 `Ready` 是断线重连。 */
@@ -215,7 +216,7 @@ class TerminalModel(
     /** 自动模式下现在要不要适配手机。 */
     private var autoFit = ownerHint == SizeOwnerHint.None
 
-    /** Claude Code 全屏界面的滚轮：按它的加速规则攒着发，见 [ClaudeWheelPacer]。 */
+    /** Claude Code 全屏界面的滚轮：按它的加速规则攒着发。 */
     private var claudeWheel = ClaudeWheelPacer()
     private var claudeWheelAnchor = 0 to 0
     private var claudeWheelRetry: Job? = null
@@ -223,7 +224,7 @@ class TerminalModel(
     /** 宿主因为积压不接订阅时，过一会儿再连的那次；关页面、断线、重新连时撤掉。 */
     private var attachRetry: Job? = null
 
-    /** 页面开着时按 [keepAwakeInterval] 发 `KeepAwake`。 */
+    /** 页面开着、连接连上时按 [keepAwakeInterval] 发 `KeepAwake`；没连上时挂起等连上，不按间隔空转。 */
     private var keepAwake: Job? = null
 
     private val currentDisplay: TerminalDisplay? get() = display?.get()
@@ -251,6 +252,7 @@ class TerminalModel(
         task = scope.launch { link.events().collect { handle(it) } }
         keepAwake = scope.launch {
             while (isActive) {
+                link.state.first { it.isConnected }
                 link.send(ClientMsg.KeepAwake)
                 delay(keepAwakeInterval)
             }

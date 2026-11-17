@@ -504,6 +504,7 @@ class TerminalModelTests {
         model.open()
         assertEquals(listOf(sessionA), opened)
         assertTrue(eventually { link.subscriberCount == 1 })
+        link.state.value = LinkState.Connected("MacBook", null)
         link.emit(HostEvent.Ready(1u))
         assertTrue(eventually { attach() in link.sent })
         // 开着时一直发 KeepAwake，关掉就停。

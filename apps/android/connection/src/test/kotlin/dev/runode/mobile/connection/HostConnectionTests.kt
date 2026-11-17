@@ -11,7 +11,10 @@ import dev.runode.mobile.protocol.SessionId
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
+import java.util.Collections
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -24,6 +27,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.channels.Channel
@@ -33,6 +37,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -265,15 +270,15 @@ class HostConnectionTests {
         link.stop()
     }
 
-    /** 记着的地址都连不上时经 iroh 按公钥拨过去，门禁照常走。 */
+    /** 记着的地址都连不上时经 iroh 按公钥拨过去，用这台电脑存着的 iroh 端点私钥，门禁照常走。 */
     @Test
     fun fallsBackToTheTunnel() = test { scope ->
         val tunnelled = FakeTransport(remoteAddress = null)
-        val dialed = mutableListOf<String>()
+        val dialed = mutableListOf<Pair<String, List<Byte>>>()
         val link = connection(
             record = machine.copy(node = node),
-            tunnel = { node, _ ->
-                synchronized(dialed) { dialed += node }
+            tunnel = { node, _, secret ->
+                synchronized(dialed) { dialed += node to secret.toList() }
                 tunnelled
             },
         )
@@ -281,7 +286,8 @@ class HostConnectionTests {
         link.start()
         admit(FakeHost(tunnelled))
         assertNotNull(events.waitReady())
-        assertEquals(listOf(node), synchronized(dialed) { dialed.toList() })
+        val stored = assertNotNull(keys.storedTunnelSecret(machine.id))
+        assertEquals(listOf(node to stored.toList()), synchronized(dialed) { dialed.toList() })
         link.stop()
     }
 
@@ -404,6 +410,40 @@ class HostConnectionTests {
         assertNotNull(events.waitReady())
         assertTrue(started.elapsedNow() < 2.seconds)
         link.stop()
+    }
+
+    /** 等电脑回来时找 Bonjour 出了错：不当成未捕获的异常抛出连接的协程，按普通退避等一会儿接着连。 */
+    @Test
+    fun aFailingSearchWhileOfflineFallsBackToTheBackoff() = test { scope ->
+        val failing = object : HostDiscovery {
+            override suspend fun locate(fingerprint: CertificateFingerprint, timeout: Duration): TransportTarget? = null
+
+            override suspend fun awaitPresence(fingerprint: CertificateFingerprint) {
+                throw IllegalStateException("discovery broke")
+            }
+        }
+        val uncaught = Collections.synchronizedList(mutableListOf<Throwable>())
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, error -> uncaught += error }
+        try {
+            val link = connection(
+                policy = ReconnectPolicy(base = 50.milliseconds, maximum = 50.milliseconds, offlineRetry = 30.seconds),
+                discovery = failing,
+            )
+            val events = link.subscribe(scope)
+            link.start()
+            val waiting = events.waitState { it is LinkState.Waiting } as? LinkState.Waiting
+            assertEquals(true, waiting?.offline)
+            val attempts = supply.requestedTargets.size
+            delay(500.milliseconds)
+            assertEquals(emptyList(), uncaught.toList())
+            // 照退避接着试，没有停下，也没有不歇地连。
+            val retried = supply.requestedTargets.size - attempts
+            assertTrue(retried in 1..30, "retried $retried")
+            link.stop()
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
     }
 
     /** 连不上、服务却还公布着（电脑睡着、睡眠代理替它公布）：不按退避一遍遍连，也不干等兜底的重试，按 `idleMaximum` 隔一会儿试一次。 */
@@ -579,6 +619,50 @@ class HostConnectionTests {
         }
         assertEquals(16, frames)
         assertEquals(0, transport.inbound.pending)
+        link.stop()
+    }
+
+    /**
+     * 收集方在订阅登记好、还没回到自己的调度器时被取消，登记也要撤掉：留下的订阅者没人取，积压过了上限后连接再也不往下读。
+     */
+    @Test
+    fun cancelledSubscriberDoesNotHoldBackReading() = test { scope ->
+        val link = connection()
+        val transport = FakeTransport()
+        supply.add(transport)
+        val events = link.subscribe(scope)
+        link.start()
+        admit(FakeHost(transport))
+        assertNotNull(events.waitReady())
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val gate = CountDownLatch(1)
+            val blocked = CountDownLatch(1)
+            val cancelled = CoroutineScope(executor.asCoroutineDispatcher()).launch { link.events().collect {} }
+            // 收集方切去登记后，它所在的线程被占住，登记完回不来。
+            executor.execute {
+                blocked.countDown()
+                gate.await()
+            }
+            runInterruptible { blocked.await() }
+            // 登记排在前面，这次切过去回来时登记已经做完。
+            link.setDeviceName("测试 Pixel")
+            cancelled.cancel()
+            gate.countDown()
+            cancelled.join()
+            val chunk = Frame(FrameKind.Output, 1u, ByteArray(64 shl 10)).encoded()
+            repeat(16) { transport.inbound.push(chunk) }
+            var frames = 0
+            withTimeout(5.seconds) {
+                for (event in events) {
+                    if (event is HostEvent.Frame) frames += 1
+                    if (frames == 16) break
+                }
+            }
+            assertEquals(16, frames)
+        } finally {
+            executor.shutdownNow()
+        }
         link.stop()
     }
 

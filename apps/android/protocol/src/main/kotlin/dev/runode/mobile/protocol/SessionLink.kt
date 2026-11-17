@@ -35,8 +35,8 @@ data class SessionLink(
         }
 
         /**
-         * 从电脑推来的等回答通知的数据读：宿主的 `push::notify_payload` 在 `aps` 外面带着 `machine`（登记时报的
-         * UUID）和 `session`。不是这种通知、`machine` 不是 UUID、`session` 为空时为空。
+         * 从电脑推来的等回答通知的数据读：`runode_protocol::push::notify_payload` 在 `aps` 外面带着
+         * `machine`（登记时报的 UUID）和 `session`。不是这种通知、`machine` 不是 UUID、`session` 为空时为空。
          */
         operator fun invoke(userInfo: Map<*, *>): SessionLink? {
             val machine = (userInfo["machine"] as? String)?.let(::parseUuid) ?: return null

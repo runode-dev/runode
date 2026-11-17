@@ -10,7 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * librunode_tunnel.so 真的加载得上、JNI 的名字和签名对得上，异常按 [IrohNative] 说的抛。端点按 n0 的预设会去问中继和
+ * librunode_tunnel.so 真的加载得上、JNI 的名字和签名对得上，异常按 [IrohNative] 说的抛。端点会去连 n0 的中继、问它的
  * DNS。
  */
 @RunWith(AndroidJUnit4::class)
@@ -20,7 +20,7 @@ class IrohLibraryTests {
     @Test
     fun bindsAndClosesAnEndpoint() {
         NativeIroh.context = InstrumentationRegistry.getInstrumentation().targetContext
-        val endpoint = NativeIroh.bind()
+        val endpoint = NativeIroh.bind(secret)
         assertTrue(endpoint > 0)
         NativeIroh.closeEndpoint(endpoint)
         NativeIroh.closeEndpoint(endpoint)
@@ -28,8 +28,25 @@ class IrohLibraryTests {
     }
 
     @Test
+    fun rejectsAShortSecret() {
+        assertFailsWith<IllegalArgumentException> { NativeIroh.bind(ByteArray(31)) }
+    }
+
+    /** 有端点和没端点时通知网络变化都不出错。 */
+    @Test
+    fun forwardsANetworkChange() {
+        NativeIroh.networkChanged()
+        val endpoint = NativeIroh.bind(secret)
+        try {
+            NativeIroh.networkChanged()
+        } finally {
+            NativeIroh.closeEndpoint(endpoint)
+        }
+    }
+
+    @Test
     fun rejectsAMalformedNode() {
-        val endpoint = NativeIroh.bind()
+        val endpoint = NativeIroh.bind(secret)
         try {
             assertFailsWith<IllegalArgumentException> { NativeIroh.connect(endpoint, "not a key", alpn, 1_000) }
         } finally {
@@ -39,7 +56,7 @@ class IrohLibraryTests {
 
     @Test
     fun anUnreachableNodeTimesOut() {
-        val endpoint = NativeIroh.bind()
+        val endpoint = NativeIroh.bind(secret)
         try {
             assertFailsWith<IOException> { NativeIroh.connect(endpoint, unusedNode, alpn, 2_000) }
         } finally {
@@ -60,5 +77,7 @@ class IrohLibraryTests {
     private companion object {
         /** Ed25519 的基点，是个合法的公钥，没有哪台电脑拿它当地址。 */
         const val unusedNode = "5866666666666666666666666666666666666666666666666666666666666666"
+
+        val secret = ByteArray(32) { 3 }
     }
 }

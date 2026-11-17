@@ -2,8 +2,8 @@ package dev.runode.mobile.protocol
 
 import kotlinx.serialization.Serializable
 
-// 电脑上的 app 里各个终端摆在哪：窗口、工作区、标签和标签里的分屏，回 `Layout`。和宿主的
-// `WindowLayout` 等一一对应；序号一律从 1 开始，窗口按打开的先后，工作区、标签按界面上的先后，
+// 电脑上的 app 里各个终端摆在哪：窗口、工作区、标签和标签里的分屏，回 `Layout`。线上格式以
+// 宿主的 `runode_protocol::WindowLayout` 等为准；序号一律从 1 开始，窗口按打开的先后，工作区、标签按界面上的先后，
 // 分屏按标签里从左到右、从上到下。
 
 @Serializable

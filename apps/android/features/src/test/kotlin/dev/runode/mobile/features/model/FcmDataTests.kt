@@ -14,7 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
 private val sampleMachine = UUID.fromString("6F9619FF-8B86-D011-B42D-00C04FC964FF")
 private const val sampleSession = "0123456789abcdef0011223344556677"
 
-/** 宿主 `push::fcm_message` 照规格写出的样例里的 `data`，FCM 交给 App 的就是它。 */
+/** `runode_protocol::push::fcm_message` 照规格写出的样例里的 `data`，FCM 交给 App 的就是它。 */
 private fun sampleData(name: String): Map<String, String> {
     val repository = File(System.getProperty("runode.repo") ?: error("runode.repo is not set; run the tests through Gradle"))
     val text = repository.resolve("crates/protocol/tests/fixtures/push").resolve(name).readText()

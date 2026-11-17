@@ -353,7 +353,7 @@ class VTerminalTests {
         }
     }
 
-    /** 硬件键盘的 Shift+回车带着 Shift 编码，和桌面一样程序分得出它和回车；开着 Kitty 键盘协议时按协议编。 */
+    /** 硬件键盘的 Shift+回车带着 Shift 编码，程序分得出它和回车；开着 Kitty 键盘协议时按协议编。 */
     @Test
     fun shiftEnterFollowsTheKeyboardProtocol() = onMain {
         terminal().use { vt ->

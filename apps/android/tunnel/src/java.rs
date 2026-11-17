@@ -1,5 +1,5 @@
 //! Kotlin 的 `dev.runode.mobile.connection.IrohLibrary` 上的 native 方法，薄薄地包住 crate 根上的几个函数：
-//! 编号原样进出，出错时抛 `java.io.IOException`（`node` 不是公钥时抛 `IllegalArgumentException`），panic
+//! 编号原样进出，出错时抛 `java.io.IOException`（`node` 不是公钥、私钥不是 32 字节时抛 `IllegalArgumentException`），panic
 //! 抛 `RuntimeException`。
 
 use std::{io, time::Duration};
@@ -53,7 +53,7 @@ fn as_jbytes(bytes: &[u8]) -> &[i8] {
 }
 
 fn as_bytes(bytes: &[i8]) -> &[u8] {
-    // SAFETY: 同 `as_jbytes`，方向相反。
+    // SAFETY: i8 和 u8 大小、对齐都一样，任何位模式都合法；长度和生命周期照搬 `bytes`。
     unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), bytes.len()) }
 }
 
@@ -79,18 +79,34 @@ fn install_context(_env: &mut Env<'_>, _context: &JObject<'_>) -> jni::errors::R
     Ok(())
 }
 
-/// `bind(context: Any?): Long`：`context` 是 Application context，可以为空。
+/// `bind(context: Any?, secret: ByteArray): Long`：`context` 是 Application context，可以为空；`secret` 是端点的
+/// 32 字节私钥。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_runode_mobile_connection_IrohLibrary_bind<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     context: JObject<'local>,
+    secret: JByteArray<'local>,
 ) -> jlong {
     env.with_env(|env| {
         install_context(env, &context)?;
-        throwing(env, crate::bind())
+        let secret = env.convert_byte_array(&secret)?;
+        throwing(env, crate::bind(&secret))
     })
     .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// `networkChanged()`：本机网络可能变了，阻塞到所有端点都知道了。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_runode_mobile_connection_IrohLibrary_networkChanged<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) {
+    env.with_env(|_| -> jni::errors::Result<()> {
+        crate::network_change();
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 /// `connect(endpoint: Long, node: String, alpn: ByteArray, timeoutMillis: Long): Long`。

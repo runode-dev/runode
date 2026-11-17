@@ -126,11 +126,11 @@ data class SessionSection(
     val window: UInt? = null,
     /** 工作区里按标签、分屏的先后，一个标签都没有的工作区为空；后台那一节按宿主给的先后。 */
     val sessions: List<SessionInfo>,
-    /** 在这个工作区里新开终端时挨着的会话，见 `WorkspaceLayout.anchor`；后台那一节为空。 */
+    /** 在这个工作区里新开终端时挨着的会话（`WorkspaceLayout.anchor`）；后台那一节为空。 */
     val anchor: SessionId? = null,
 ) {
     sealed class Id {
-        /** 第 [window] 个窗口里的第 [index] 个工作区，序号见 [WindowLayout]。 */
+        /** 第 [window] 个窗口里的第 [index] 个工作区，序号是 [WindowLayout] 的序号。 */
         data class Workspace(val window: UInt, val index: UInt) : Id()
 
         /** 没有窗口在显示的会话（电脑上的 app 没开着时是所有会话）。 */
@@ -566,8 +566,8 @@ class SessionListModel(
     }
 
     /**
-     * 在工作区这一节里新开终端，[agent] 同 [spawn]：挨着它的 `anchor` 开新标签。一个标签都没有的工作区没有 `anchor`，
-     * 对它的目录发 `OpenWorkspace`：电脑上的 app 对已有这个目录的工作区在它里面新开标签。
+     * 在工作区这一节里新开终端：挨着它的 `anchor` 开新标签，[agent] 不为空时开好后在它的 shell 里起这家 agent。一个
+     * 标签都没有的工作区没有 `anchor`，对它的目录发 `OpenWorkspace`：电脑上的 app 对已有这个目录的工作区在它里面新开标签。
      */
     fun spawn(section: SessionSection, agent: InstalledAgent? = null) {
         val anchor = section.anchor

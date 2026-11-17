@@ -3,13 +3,22 @@ package dev.runode.mobile.protocol
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-/** 交给电脑图片和视频的这套消息的版本，宿主的 `protocol::media::MEDIA_VERSION`。 */
+/**
+ * 交给电脑图片和视频的这套消息的版本，要等于宿主的 `runode_protocol::media::MEDIA_VERSION`，
+ * 否则电脑回 `Incompatible` 后断开。
+ */
 const val mediaVersion: UInt = 1u
 
-/** 一个文件最多这么多字节，超了电脑回 [MediaHostMsg.Failed] 后断开；宿主的 `protocol::media::MAX_MEDIA_BYTES`。 */
+/**
+ * 一个文件最多这么多字节，要等于宿主的 `runode_protocol::media::MAX_MEDIA_BYTES`，否则手机放行的文件可能
+ * 被电脑回 [MediaHostMsg.Failed] 后断开。
+ */
 const val maxMediaBytes: Int = 200 shl 20
 
-/** 一帧 [FrameKind.Media] 的载荷最多这么多字节；宿主的 `protocol::media::MAX_MEDIA_FRAME`。 */
+/**
+ * 一帧 [FrameKind.Media] 的载荷最多这么多字节，要等于宿主的 `runode_protocol::media::MAX_MEDIA_FRAME`，否则
+ * 手机发的帧可能超了电脑的上限，被电脑断开。
+ */
 const val maxMediaFrame: Int = 1 shl 20
 
 /** 手机发给电脑的图片、视频消息。 */

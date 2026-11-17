@@ -4,19 +4,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.runode.mobile.connection.DeviceKeyStore
+import dev.runode.mobile.connection.IrohDialer
 import dev.runode.mobile.connection.MachineRecord
 import dev.runode.mobile.connection.MachineStore
+import dev.runode.mobile.connection.TunnelCloser
+import dev.runode.mobile.connection.deleteKeyAndTunnel
 import dev.runode.mobile.features.R
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
-/** 配对过的电脑：列出、改名、删除（连同 Keystore 里的设备私钥）。 */
+/** 配对过的电脑：列出、改名、删除（连同 Keystore 里的设备私钥和 iroh 端点私钥，经 [closeTunnel] 关掉它的端点）。 */
 class MachineListModel(
     private val store: MachineStore,
     private val keyStore: DeviceKeyStore,
     private val now: () -> Instant = { Instant.now() },
+    private val closeTunnel: TunnelCloser = { secret -> IrohDialer.shared.forget(secret) },
 ) {
     var machines by mutableStateOf<List<MachineRecord>>(emptyList())
         private set
@@ -72,7 +79,7 @@ class MachineListModel(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            runCatching { keyStore.deleteKey(machine.id) }
+            forgetKey(machine.id)
             load()
             throw e
         }
@@ -136,7 +143,11 @@ class MachineListModel(
     /** 记录删掉了才删私钥：删记录失败时电脑照样能用；删私钥失败只留下一把用不上的钥匙。 */
     private suspend fun remove(id: UUID) {
         store.remove(id)
-        runCatching { keyStore.deleteKey(id) }
+        forgetKey(id)
+    }
+
+    private suspend fun forgetKey(id: UUID) {
+        withContext(NonCancellable + Dispatchers.IO) { keyStore.deleteKeyAndTunnel(id).forEach(closeTunnel) }
     }
 
     /** 跑 [block]，成了返回真；出错返回假，协程撤销照样抛出去。 */

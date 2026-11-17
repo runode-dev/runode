@@ -20,8 +20,9 @@ use std::{
 };
 
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId,
-    endpoint::{Connection, RecvStream, SendStream, VarInt, presets},
+    Endpoint, EndpointAddr, EndpointId, SecretKey,
+    address_lookup::{DnsAddressLookup, PkarrResolver},
+    endpoint::{Builder, Connection, RecvStream, SendStream, VarInt, default_relay_mode, presets},
 };
 use tokio::runtime::Runtime;
 
@@ -52,6 +53,10 @@ impl<T> Handles<T> {
     fn remove(&self, id: i64) -> Option<Arc<T>> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner).remove(&id)
     }
+
+    fn all(&self) -> Vec<Arc<T>> {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner).values().cloned().collect()
+    }
 }
 
 /// 连接上开出的那条双向流。读和写各有一把锁，一读一写可以在两条线程上同时进行。
@@ -77,10 +82,39 @@ fn runtime() -> io::Result<&'static Runtime> {
     Ok(RUNTIME.get_or_init(|| built))
 }
 
-/// 建一个用 n0 的中继和地址查找的端点，返回它的编号。整个 app 共用一个就够了。
-pub(crate) fn bind() -> io::Result<i64> {
-    let endpoint = runtime()?.block_on(Endpoint::builder(presets::N0).bind()).map_err(io::Error::other)?;
+/// 用私钥 `secret`（32 字节的 Ed25519 种子）建一个端点，返回它的编号。`secret` 长度不对时报 `InvalidInput`。
+pub(crate) fn bind(secret: &[u8]) -> io::Result<i64> {
+    let builder = endpoint_builder(secret)?;
+    let endpoint = runtime()?.block_on(builder.bind()).map_err(io::Error::other)?;
     Ok(ENDPOINTS.insert(endpoint))
+}
+
+/// 用 n0 的中继，经 n0 的 pkarr 和 DNS 查电脑的地址；只解析、不发布手机自己的地址，电脑不拨手机。
+fn endpoint_builder(secret: &[u8]) -> io::Result<Builder> {
+    let secret = <[u8; 32]>::try_from(secret).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, format!("an iroh secret key is 32 bytes, got {}", secret.len()))
+    })?;
+    Ok(Endpoint::builder(presets::Minimal)
+        .secret_key(SecretKey::from_bytes(&secret))
+        .relay_mode(default_relay_mode())
+        .address_lookup(PkarrResolver::n0_dns())
+        .address_lookup(DnsAddressLookup::n0_dns()))
+}
+
+/// 告诉所有端点本机网络可能变了，它们重新探测地址、换掉绑在旧网络上的路径。iroh 在 Android 上自己察觉不到
+/// 网络变化。没有端点时什么也不做。
+pub(crate) fn network_change() {
+    let endpoints = ENDPOINTS.all();
+    if endpoints.is_empty() {
+        return;
+    }
+    if let Ok(runtime) = runtime() {
+        runtime.block_on(async {
+            for endpoint in endpoints {
+                endpoint.network_change().await;
+            }
+        });
+    }
 }
 
 /// 经编号是 `endpoint` 的端点拨公钥是 `node`（十六进制）的电脑，连上后开一条双向流，返回流的编号。`node` 不是
@@ -246,6 +280,40 @@ mod tests {
         let node = EndpointId::from_bytes(&[7; 32]).map_or_else(|_| "00".repeat(32), |id| id.to_string());
         let err = connect(endpoint, &node, ALPN, WAIT).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotConnected);
+    }
+
+    /// 锁定端点用的是传进来的私钥：同一把私钥建出的端点公钥不变。
+    #[test]
+    fn the_endpoint_uses_the_given_secret() {
+        let secret = [9; 32];
+        // 关掉中继和地址查找，测试不碰外网。
+        let builder = endpoint_builder(&secret).unwrap().relay_mode(iroh::RelayMode::Disabled).clear_address_lookup();
+        let endpoint = runtime().unwrap().block_on(builder.bind()).unwrap();
+        assert_eq!(endpoint.id(), SecretKey::from_bytes(&secret).public());
+        runtime().unwrap().block_on(endpoint.close());
+    }
+
+    /// 锁定长度不对的私钥报 `InvalidInput`，不建端点。
+    #[test]
+    fn a_short_secret_is_invalid_input() {
+        assert_eq!(bind(&[1; 31]).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    /// 锁定通知网络变化后开着的流照常收发。
+    #[test]
+    fn a_network_change_keeps_streams_working() {
+        let addr = serve(|mut send, mut recv| async move {
+            let mut got = [0; 2];
+            recv.read_exact(&mut got).await.unwrap();
+            send.write_all(&got).await.unwrap();
+            send.finish().unwrap();
+        });
+        let (endpoint, stream) = dial(addr);
+        network_change();
+        write(stream, b"ok").unwrap();
+        assert_eq!(read_exactly(stream, 2), b"ok");
+        close(stream);
+        close_endpoint(endpoint);
     }
 
     /// 锁定不是公钥的 `node` 报 `InvalidInput`，Kotlin 那边据此当成电脑报错了地址。

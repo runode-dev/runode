@@ -5,14 +5,12 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import dev.runode.mobile.protocol.Base64URL
 import java.security.KeyStore
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 远程桌面里替用户解开锁屏的电脑登录密码，每台电脑一个，只存在手机上。存和取都要用户当场验证身份：先拿
@@ -45,19 +43,16 @@ class MemoryUnlockPasswords : UnlockPasswordStore {
 
     override fun hasPassword(machine: UUID): Boolean = sealed.containsKey(machine)
 
-    override fun cipherForSaving(machine: UUID): Cipher =
-        Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
+    override fun cipherForSaving(machine: UUID): Cipher = Sealed.encrypter(key)
 
     override fun save(password: String, machine: UUID, cipher: Cipher) {
-        sealed[machine] = Sealed.seal(password, cipher)
+        sealed[machine] = Sealed.seal(password.encodeToByteArray(), cipher)
     }
 
-    override fun cipherForReading(machine: UUID): Cipher? = sealed[machine]?.let { stored ->
-        Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, stored.iv)) }
-    }
+    override fun cipherForReading(machine: UUID): Cipher? = sealed[machine]?.decrypter(key)
 
     override fun password(machine: UUID, cipher: Cipher): String =
-        sealed[machine]?.open(cipher) ?: throw LinkFailure.KeyStore("no unlock password for $machine")
+        sealed[machine]?.open(cipher)?.decodeToString() ?: throw LinkFailure.KeyStore("no unlock password for $machine")
 
     override fun deletePassword(machine: UUID) {
         sealed.remove(machine)
@@ -78,15 +73,15 @@ class KeystoreUnlockPasswords(context: Context, private val alias: String = "dev
 
     override fun cipherForSaving(machine: UUID): Cipher = keystore {
         try {
-            Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            Sealed.encrypter(key())
         } catch (_: KeyPermanentlyInvalidatedException) {
             forgetAll()
-            Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            Sealed.encrypter(key())
         }
     }
 
     override fun save(password: String, machine: UUID, cipher: Cipher) = keystore {
-        val sealed = Sealed.seal(password, cipher)
+        val sealed = Sealed.seal(password.encodeToByteArray(), cipher)
         preferences.edit().putString(machine.toString(), sealed.encoded()).apply()
     }
 
@@ -98,7 +93,7 @@ class KeystoreUnlockPasswords(context: Context, private val alias: String = "dev
             return@keystore null
         }
         try {
-            Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, stored.iv)) }
+            stored.decrypter(key)
         } catch (_: KeyPermanentlyInvalidatedException) {
             forgetAll()
             null
@@ -108,7 +103,7 @@ class KeystoreUnlockPasswords(context: Context, private val alias: String = "dev
     override fun password(machine: UUID, cipher: Cipher): String = keystore {
         val stored = preferences.getString(machine.toString(), null)?.let(Sealed::decode)
             ?: throw LinkFailure.KeyStore("no unlock password for $machine")
-        stored.open(cipher)
+        stored.open(cipher).decodeToString()
     }
 
     override fun deletePassword(machine: UUID) {
@@ -139,38 +134,7 @@ class KeystoreUnlockPasswords(context: Context, private val alias: String = "dev
         preferences.edit().clear().apply()
     }
 
-    private inline fun <T> keystore(block: () -> T): T = try {
-        block()
-    } catch (failure: LinkFailure) {
-        throw failure
-    } catch (error: Exception) {
-        throw LinkFailure.KeyStore(error.message ?: error.toString())
-    }
-
     private companion object {
         const val PROVIDER = "AndroidKeyStore"
-    }
-}
-
-private const val TRANSFORMATION = "AES/GCM/NoPadding"
-private const val TAG_BITS = 128
-
-/** 加密后的密码和它的 IV。 */
-private class Sealed(val iv: ByteArray, val ciphertext: ByteArray) {
-    fun open(cipher: Cipher): String = cipher.doFinal(ciphertext).decodeToString()
-
-    fun encoded(): String = Base64URL.encode(iv) + "." + Base64URL.encode(ciphertext)
-
-    companion object {
-        fun seal(password: String, cipher: Cipher): Sealed {
-            val ciphertext = cipher.doFinal(password.encodeToByteArray())
-            return Sealed(cipher.iv, ciphertext)
-        }
-
-        fun decode(text: String): Sealed? {
-            val iv = Base64URL.decode(text.substringBefore('.', "")) ?: return null
-            val ciphertext = Base64URL.decode(text.substringAfter('.', "")) ?: return null
-            return Sealed(iv, ciphertext)
-        }
     }
 }

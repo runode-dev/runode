@@ -80,7 +80,7 @@ class HostConnection(
     private val policy: ReconnectPolicy = ReconnectPolicy(),
     private val open: TransportOpener = { target, fingerprint -> TlsChannel.open(target, fingerprint) },
     /** 跨网络的那条路；为空时只在局域网里连。 */
-    private val tunnel: TunnelOpener? = { node, fingerprint -> IrohDialer.shared.open(node, fingerprint) },
+    private val tunnel: TunnelOpener? = { node, fingerprint, secret -> IrohDialer.shared.open(node, fingerprint, secret) },
     /** 电脑离线时除了等 Bonjour，也等本机网络恢复或变化（[NetworkChanges.await]）；默认不等。 */
     private val networkChange: suspend () -> Unit = { awaitCancellation() },
 ) : HostLink {
@@ -131,12 +131,13 @@ class HostConnection(
     override fun events(): Flow<HostEvent> = flow {
         val id = nextSubscriber.getAndIncrement()
         val subscriber = Subscriber()
-        withContext(confined) {
-            subscribers[id] = subscriber
-            subscriber.events.trySend(HostEvent.State(mutableState.value))
-            if (transport != null) subscriber.events.trySend(HostEvent.Ready(generation))
-        }
+        // 登记放在 try 里：取消落在登记之后、回到收集方之前时，也要撤掉登记。
         try {
+            withContext(confined) {
+                subscribers[id] = subscriber
+                subscriber.events.trySend(HostEvent.State(mutableState.value))
+                if (transport != null) subscriber.events.trySend(HostEvent.Ready(generation))
+            }
             for (event in subscriber.events) {
                 if (event is HostEvent.Frame) subscriber.backlog.addAndGet(-event.frame.payload.size)
                 emit(event)
@@ -309,18 +310,32 @@ class HostConnection(
         if (!offline) return delay(delay)
         val fingerprint = machine.fingerprint
         val earliest = failedAt + delay
+        // 找 Bonjour、等网络变化出了错时按普通退避等完就再试：错误不能抛出去，连接的协程没有异常处理器。
+        suspend fun orBackoff(block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                delayUntil(earliest)
+            }
+        }
         firstOf(
             {
-                // 连不上时它还公布着服务（电脑睡着、睡眠代理替它公布，或者组播通、连接被挡）：等「公布」会立刻返回，
-                // 退化成按退避一遍遍连；电脑醒来时记录也可能不变，干等 `offlineRetry` 又太久。所以这时按 `idleMaximum`
-                // 试一次，比退避稀，醒来后也不久就连上。
-                val published = discovery.locate(fingerprint, 2.seconds) != null
-                delayUntil(earliest)
-                if (published) delayUntil(failedAt + policy.idleMaximum) else discovery.awaitPresence(fingerprint)
+                orBackoff {
+                    // 连不上时它还公布着服务（电脑睡着、睡眠代理替它公布，或者组播通、连接被挡）：等「公布」会立刻返回，
+                    // 退化成按退避一遍遍连；电脑醒来时记录也可能不变，干等 `offlineRetry` 又太久。所以这时按 `idleMaximum`
+                    // 试一次，比退避稀，醒来后也不久就连上。
+                    val published = discovery.locate(fingerprint, 2.seconds) != null
+                    delayUntil(earliest)
+                    if (published) delayUntil(failedAt + policy.idleMaximum) else discovery.awaitPresence(fingerprint)
+                }
             },
             {
-                networkChange()
-                delayUntil(earliest)
+                orBackoff {
+                    networkChange()
+                    delayUntil(earliest)
+                }
             },
             { delay(retryAfter) },
         )

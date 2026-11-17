@@ -7,7 +7,10 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.put
 
-/** 远程桌面这套消息和画面格式的版本，宿主的 `protocol::screen::SCREEN_VERSION`。 */
+/**
+ * 远程桌面这套消息和画面格式的版本，要等于宿主的 `runode_protocol::screen::SCREEN_VERSION`，
+ * 否则电脑回 `Incompatible` 后断开。
+ */
 const val screenVersion: UInt = 2u
 
 /** 远程桌面的修饰键。 */
@@ -239,7 +242,7 @@ internal object ScreenHostMsgSerializer : DecodeOnlySerializer<ScreenHostMsg>("S
     }
 }
 
-/** 画面的编码，宿主的 `runode_types::screen::Codec`。 */
+/** 画面的编码，取值以宿主的 `runode_types::screen::Codec` 为准。 */
 enum class Codec(val wireName: String) {
     Hevc("hevc"),
 

@@ -175,7 +175,7 @@ class GatedPairing(
         return machine
     }
 
-    override fun discard(machine: MachineRecord) {
+    override suspend fun discard(machine: MachineRecord) {
         keys.deleteKey(machine.id)
     }
 }

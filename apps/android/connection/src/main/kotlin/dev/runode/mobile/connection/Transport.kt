@@ -200,7 +200,7 @@ class TlsChannel private constructor(
             chain?.firstOrNull()?.let { MessageDigest.getInstance("SHA-256").digest(it.encoded) }
 
         /**
-         * 手机静默消失（锁屏后被挂起、切网）时要能及时发现，和电脑那边的 keepalive 相当：空闲的连接靠 keepalive，
+         * 手机静默消失（锁屏后被挂起、切网）时要能及时发现：空闲的连接靠 keepalive，
          * 有数据没送到的靠重传超时。设不上时照常连，只是发现得慢。
          */
         private fun tuneKeepalive(socket: Socket) {

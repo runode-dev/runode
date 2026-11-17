@@ -25,7 +25,7 @@ class GateTests {
         val fbff = byteArrayOf(0xFB.toByte(), 0xFF.toByte())
         assertEquals("-_8", Base64URL.encode(fbff))
         assertContentEquals(fbff, Base64URL.decode("-_8"))
-        // 宿主的 `remote::decode_base64url` 只认不带填充的规范写法。
+        // 宿主的 `runode_protocol::remote::decode_base64url` 只认不带填充的规范写法。
         assertNull(Base64URL.decode("-_8="))
         assertNull(Base64URL.decode("-_9"))
         assertNull(Base64URL.decode("+/8"))

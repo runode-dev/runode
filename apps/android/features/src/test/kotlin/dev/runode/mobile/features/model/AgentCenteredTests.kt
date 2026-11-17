@@ -452,7 +452,7 @@ class QuickReplyTests {
     @Test fun textTooLongForOneMessageIsNotSent() {
         val reply = QuickReplyModel(waiting, link)
         val overhead = Frame.control(ClientMsg.Paste(UInt.MAX_VALUE, waiting, "")).payload.size
-        val longest = "a".repeat(Frame.maxControlPayload.toInt() - overhead)
+        val longest = "a".repeat(Frame.maxControlPayload - overhead)
         reply.draft = longest + "a"
         reply.sendDraft()
         assertTrue(link.sent.isEmpty())

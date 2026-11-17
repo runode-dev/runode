@@ -10,6 +10,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 
@@ -29,24 +32,72 @@ class PairingTests {
     }
     private val supply = TransportSupply()
 
-    private fun invitation(expiresAt: Instant = Instant.now().plusSeconds(300)) = PairingInvitation(
+    private fun invitation(expiresAt: Instant = Instant.now().plusSeconds(300), node: String? = null) = PairingInvitation(
         hostName = "Ethan 的 MacBook Pro",
         fingerprint = sampleMachine().fingerprint,
         secret = ByteArray(32) { 7 },
         port = 7866u,
         addresses = listOf("192.168.1.20"),
         expiresAt = expiresAt,
+        node = node,
     )
 
     @Test
-    fun discardingAPairingDeletesItsKey() {
+    fun discardingAPairingDeletesItsKey() = runBlocking<Unit> {
         val machine = sampleMachine()
         val other = sampleMachine()
         keys.generate(machine.id)
         keys.generate(other.id)
-        RemotePairing(keys, NoDiscovery).discard(machine)
+        val secret = keys.tunnelSecret(machine.id)
+        val closed = mutableListOf<List<Byte>>()
+        RemotePairing(keys, NoDiscovery, closeTunnel = { closed += it.toList() }).discard(machine)
         assertNull(keys.key(machine.id))
+        assertNull(keys.storedTunnelSecret(machine.id))
+        assertEquals(listOf(secret.toList()), closed)
         assertNotNull(keys.key(other.id), "other machines keep their keys")
+    }
+
+    /** 调用方已撤销、又在别的调度器上时，私钥照样删掉，端点也关掉。 */
+    @Test
+    fun discardingFromACancelledCallerClosesTheEndpoint() = runBlocking<Unit> {
+        val machine = sampleMachine()
+        keys.generate(machine.id)
+        val secret = keys.tunnelSecret(machine.id)
+        val closed = mutableListOf<List<Byte>>()
+        val pairing = RemotePairing(keys, NoDiscovery, closeTunnel = { synchronized(closed) { closed += it.toList() } })
+        launch {
+            cancel()
+            pairing.discard(machine)
+        }.join()
+        assertNull(keys.key(machine.id))
+        assertEquals(listOf(secret.toList()), synchronized(closed) { closed.toList() })
+    }
+
+    /** 局域网连不上时经 iroh 配对，用新记录的 iroh 端点私钥；没配成时删掉它、关掉它的端点。 */
+    @Test
+    fun aRefusedTunnelPairingClosesItsEndpoint() = test { scope ->
+        val tunnelled = FakeTransport(remoteAddress = null)
+        val used = mutableListOf<List<Byte>>()
+        val closed = mutableListOf<List<Byte>>()
+        val pairing = RemotePairing(
+            keys,
+            NoDiscovery,
+            open = supply.opener,
+            tunnel = { _, _, secret ->
+                synchronized(used) { used += secret.toList() }
+                tunnelled
+            },
+            closeTunnel = { synchronized(closed) { closed += it.toList() } },
+        )
+        val paired = scope.async { runCatching { pairing.pair(invitation(node = "abc"), "测试 Pixel") } }
+        val host = FakeHost(tunnelled)
+        host.challenge()
+        host.readControl()
+        host.send(GateMessage.Rejected(GateRejection.PairingInvalid))
+        assertEquals(LinkFailure.Rejected(GateRejection.PairingInvalid), paired.await().exceptionOrNull())
+        assertEquals(1, used.size)
+        assertEquals(used, synchronized(closed) { closed.toList() })
+        assertTrue(keys.isEmpty())
     }
 
     @Test

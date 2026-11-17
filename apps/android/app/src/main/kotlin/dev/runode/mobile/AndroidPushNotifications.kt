@@ -53,6 +53,13 @@ class AndroidPushNotifications private constructor(private val context: Context)
         return manager.areNotificationsEnabled()
     }
 
+    /**
+     * 向 FCM 取 token（`getToken`，换了的经 [RunodeMessagingService.onNewToken] 交来）。
+     *
+     * shortcut: 用的是 FCM 标了弃用的 token 登记；换成 `register()` 和 `onRegistered` 要在 manifest 里打开
+     * `firebase_messaging_installation_id_enabled`、换一套登记，核实过电脑端和推送中转认它交来的标识后再换。
+     */
+    @Suppress("DEPRECATION")
     override fun registerForRemoteNotifications() {
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) {

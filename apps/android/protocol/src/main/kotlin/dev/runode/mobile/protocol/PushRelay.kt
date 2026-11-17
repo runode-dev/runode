@@ -5,8 +5,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
- * 官方 App 为一台电脑向中转服务换推送句柄的请求体（宿主的 `push::RelayRegister`）。电脑只拿得到句柄，
- * 拿不到推送的 token。属性的先后就是写出来的键的先后，和宿主写的一样。
+ * 官方 App 为一台电脑向中转服务换推送句柄的请求体，线上格式以中转服务的 `runode_protocol::push::RelayRegister`
+ * 为准。电脑只拿得到句柄，拿不到推送的 token。属性的先后就是写出来的键的先后，按线上格式排，不能调换。
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -22,18 +22,21 @@ data class RelayRegister(
     @EncodeDefault(EncodeDefault.Mode.NEVER) val service: PushService = PushService.Apns,
 ) {
     companion object {
-        /** 宿主的 `push::RELAY_REGISTER`。 */
+        /** 要等于中转服务的 `runode_protocol::push::RELAY_REGISTER`，否则中转服务没有这个接口，换不到句柄。 */
         const val path: String = "/v1/register"
 
-        /** 宿主的 `push::OFFICIAL_BUNDLE`：只有这个 App 的推送经中转服务发。 */
+        /**
+         * 只有这个 App 的推送经中转服务发。要等于 `runode_protocol::push::OFFICIAL_BUNDLE`，否则电脑不把这个
+         * App 的推送交给中转服务。
+         */
         const val officialBundle: String = "dev.runode.mobile"
     }
 }
 
-/** 中转服务换句柄的回话（宿主的 `push::RelayHandle`）。 */
+/** 中转服务换句柄的回话，线上格式以中转服务的 `runode_protocol::push::RelayHandle` 为准。 */
 @Serializable
 data class RelayHandle(val handle: String)
 
-/** 中转服务出错时的响应体（宿主的 `push::PushError`）。 */
+/** 中转服务出错时的响应体，线上格式以中转服务的 `runode_protocol::push::PushError` 为准。 */
 @Serializable
 data class PushError(val reason: String)

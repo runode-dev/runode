@@ -186,7 +186,7 @@ fun TerminalScreen(
     // 之后电脑在布局变了时推 `LayoutChanged`，列表收到就重新要。
     LaunchedEffect(sessions) { sessions?.refreshLayout() }
     val cwd = sessions?.session(model.sessionId)?.meta?.cwd
-    LaunchedEffect(sessions, cwd) { if (cwd != null) sessions?.loadTasks(cwd) }
+    LaunchedEffect(sessions, cwd) { if (cwd != null) sessions.loadTasks(cwd) }
     LaunchedEffect(paneIds) { if (paneIds.isNotEmpty()) tabMates = paneIds }
     LaunchedEffect(model, model.isEnded) {
         if (model.isEnded && model.sessionId in tabMates) onPaneEnded(tabMates)

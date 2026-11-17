@@ -9,10 +9,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.put
 
-/** 宿主协议的版本，宿主的 `PROTOCOL_VERSION`。宿主在 `Hello` 里比对，对不上回 [HostMsg.Incompatible]。 */
+/**
+ * 宿主协议的版本，要等于宿主的 `runode_protocol::PROTOCOL_VERSION`：宿主在 `Hello` 里比对，对不上回
+ * [HostMsg.Incompatible]。
+ */
 const val protocolVersion: UInt = 4u
 
-/** 连上会话时要什么，宿主的 `AttachMode`。 */
+/** 连上会话时要什么，取值以宿主的 `runode_protocol::AttachMode` 为准。 */
 @Serializable
 enum class AttachMode {
     /** 同一个构建才解得了的快照；手机的构建和宿主不同，用不上。 */
@@ -25,7 +28,7 @@ enum class AttachMode {
     @SerialName("meta_only") MetaOnly,
 }
 
-/** [ClientMsg.Open] 的新终端放在桌面 app 里的哪里，宿主的 `Placement`。 */
+/** [ClientMsg.Open] 的新终端放在桌面 app 里的哪里，取值以宿主的 `runode_protocol::Placement` 为准。 */
 @Serializable
 enum class Placement {
     /** 紧跟在旁边那个终端的标签后面的新标签。 */
@@ -51,8 +54,8 @@ enum class ClientKind {
 }
 
 /**
- * 推送 token 所属的 APNs 环境，宿主的 `push::ApnsEnv`：App Store、TestFlight 装的是 `production`，
- * Xcode 直接装的是 `development`。
+ * 推送 token 所属的 APNs 环境，取值以 `runode_protocol::push::ApnsEnv` 为准：App Store、TestFlight
+ * 装的是 `production`，Xcode 直接装的是 `development`。
  */
 @Serializable
 enum class ApnsEnv {
@@ -61,8 +64,8 @@ enum class ApnsEnv {
 }
 
 /**
- * 推送经哪家的服务送到手机，宿主的 `push::PushService`：iPhone 是 `apns`，Android 是 `fcm`。是 [Apns] 时不写出来，
- * 只认 APNs 的电脑和中转照旧读得懂。
+ * 推送经哪家的服务送到手机，取值以 `runode_protocol::push::PushService` 为准：iPhone 是 `apns`，
+ * Android 是 `fcm`。是 [Apns] 时不写出来，只认 APNs 的电脑和中转照旧读得懂。
  */
 @Serializable
 enum class PushService {
@@ -72,8 +75,8 @@ enum class PushService {
 
 /**
  * 前端发给宿主的消息。只定义手机这个前端会发的几种；宿主对手机连接上的 `Shutdown`、交接、`UiReply`、
- * `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。JSON 的样子和宿主的
- * `ClientMsg` 一致，可缺省的字段也照宿主序列化的样子写出 `null`。
+ * `SetOptions`、`SetTheme` 只回 `Error`，这里故意不定义它们，手机就发不出去。线上格式以宿主的
+ * `runode_protocol::ClientMsg` 为准，可缺省的字段也照宿主序列化的样子写出 `null`。
  */
 @Serializable(with = ClientMsgSerializer::class)
 sealed class ClientMsg {
@@ -118,7 +121,7 @@ sealed class ClientMsg {
     ) : ClientMsg()
 
     /**
-     * 把第 [window] 个窗口里的第 [workspace] 个工作区改名为 [name]，序号见 [WindowLayout]、[WorkspaceLayout]。
+     * 把第 [window] 个窗口里的第 [workspace] 个工作区改名为 [name]，序号是 [WindowLayout]、[WorkspaceLayout] 的序号。
      * 宿主转给桌面的界面，办好回 [HostMsg.Done]，办不成回带编号的 `Error`。
      */
     data class RenameWorkspace(val req: UInt, val window: UInt, val workspace: UInt, val name: String) : ClientMsg()
@@ -134,7 +137,7 @@ sealed class ClientMsg {
 
     /**
      * 在电脑上按 [path]（为空时按新起的 shell 会拿到的 PATH）找 [programs] 这几个命令（个数不超过宿主的
-     * `protocol::MAX_FIND_COMMANDS`），宿主回 [HostMsg.Commands]。只发给在 `Welcome` 里说认得它的宿主。
+     * `runode_protocol::MAX_FIND_COMMANDS`），宿主回 [HostMsg.Commands]。只发给在 `Welcome` 里说认得它的宿主。
      */
     data class FindCommands(val req: UInt, val path: String?, val programs: List<String>) : ClientMsg()
 
@@ -383,8 +386,8 @@ data class HostErrorReason(
 
 
 /**
- * 宿主发给前端的消息，和宿主的 `HostMsg` 一一对应。不认识的种类读成 [Unknown]（宿主的 `#[serde(other)]`），
- * 认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的请求、交接、跑完的命令）只解出编号，
+ * 宿主发给前端的消息，线上格式以宿主的 `runode_protocol::HostMsg` 为准。不认识的种类读成 [Unknown]（宿主的
+ * `#[serde(other)]`），认识的种类缺了必填字段时整条解析失败。手机用不上的几种（界面转来的请求、交接、跑完的命令）只解出编号，
  * 内容不读；[Welcome] 只读 `keep_awake`、`shells` 和 `paste_path`。
  */
 @Serializable(with = HostMsgSerializer::class)
@@ -517,12 +520,12 @@ sealed class HostMsg {
 
     companion object {
         /**
-         * [Error.message] 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。宿主的
-         * `protocol::ERROR_BACKED_UP`，是认错误种类的约定。
+         * [Error.message] 以它开头：这条连接在宿主那边积压着，请求没办、会话还在，过一会儿再来。要是宿主的
+         * `runode_protocol::ERROR_BACKED_UP` 的开头，否则认不出这种错误。
          */
         const val backedUpPrefix: String = "the connection is backed up"
 
-        /** [Error.message] 以它开头：会话已经没了。宿主的 `protocol::ERROR_NO_SESSION`。 */
+        /** [Error.message] 以它开头：会话已经没了。要是宿主的 `runode_protocol::ERROR_NO_SESSION` 的开头，否则认不出这种错误。 */
         const val noSessionPrefix: String = "no session"
     }
 }

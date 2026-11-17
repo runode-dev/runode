@@ -7,6 +7,7 @@ import dev.runode.mobile.connection.MachineRecord
 import dev.runode.mobile.connection.MachineStore
 import dev.runode.mobile.connection.MemoryDeviceKeyStore
 import dev.runode.mobile.connection.MemoryMachineStore
+import dev.runode.mobile.connection.tunnelSecret
 import dev.runode.mobile.features.R
 import dev.runode.mobile.protocol.Agent
 import dev.runode.mobile.protocol.AgentKind
@@ -88,6 +89,21 @@ class MachineListModelTests {
         assertTrue(model.machines.isEmpty())
         assertEquals(listOf(machine.id), deleted)
         assertNull(keys.key(machine.id))
+    }
+
+    /** 删掉电脑时连同它的 iroh 端点私钥一起删，用这把私钥建的端点也关掉。 */
+    @Test fun deletingClosesTheTunnel() = runTest {
+        val store = MemoryMachineStore()
+        val keys = MemoryDeviceKeyStore()
+        val closed = mutableListOf<List<Byte>>()
+        val model = MachineListModel(store, keys, closeTunnel = { closed += it.toList() })
+        val machine = machineRecord()
+        keys.generate(machine.id)
+        val secret = keys.tunnelSecret(machine.id)
+        model.add(machine)
+        model.delete(machine.id)
+        assertEquals(listOf(secret.toList()), closed)
+        assertNull(keys.storedTunnelSecret(machine.id))
     }
 
     /** 改名只改名字：连接在列表不知道时记下的 node、lastAddress 不被列表里的旧副本盖掉。 */

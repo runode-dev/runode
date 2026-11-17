@@ -16,7 +16,6 @@ import java.net.InetAddress
 import java.util.concurrent.Executor
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
@@ -33,19 +32,26 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** [HostDiscovery.awaitPresence] 一次找多久。 */
+internal val presenceSearch: Duration = 10.seconds
+
+/** [HostDiscovery.awaitPresence] 一次没找到时歇多久再找。 */
+internal val presencePause: Duration = 30.seconds
+
 /** 按证书指纹在局域网里找电脑现在的地址。 */
 interface HostDiscovery {
     /** [timeout] 内找到 TXT 里 `fp` 对得上的服务就返回它，找不到返回空。 */
     suspend fun locate(fingerprint: CertificateFingerprint, timeout: Duration): TransportTarget?
 
     /**
-     * 一直等到这台电脑在局域网里公布服务（电脑离线时连接据此知道它回来了），只有取消才提前返回。默认一直找到为止；
-     * 找不了（比如没有 Wi-Fi）时 [locate] 会马上返回空，歇一会儿再找，不空转。
+     * 一直等到这台电脑在局域网里公布服务（电脑离线时连接据此知道它回来了），只有取消才提前返回。默认每次找
+     * [presenceSearch]，没找到（找不了时 [locate] 马上返回空，比如没有 Wi-Fi）歇 [presencePause] 再找：找的时候拿着
+     * 组播锁费电，电脑一直不回来时不一直拿着，代价是电脑在歇着的那段里回来要等到下一段才知道。
      */
     suspend fun awaitPresence(fingerprint: CertificateFingerprint) {
         while (currentCoroutineContext().isActive) {
-            if (locate(fingerprint, 1.hours) != null) return
-            delay(30.seconds)
+            if (locate(fingerprint, presenceSearch) != null) return
+            delay(presencePause)
         }
     }
 }

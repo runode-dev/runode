@@ -71,7 +71,7 @@ internal class FrameReader(val transport: FrameTransport, val decoder: FrameDeco
  * （[timeout]）走完，单帧载荷不超过 [Frame.gateMaxPayload]；超时或被取消时关掉连接。
  */
 object GateClient {
-    /** 宿主的 `remote::GATE_TIMEOUT`。 */
+    /** 要等于宿主的 `runode_protocol::remote::GATE_TIMEOUT`。 */
     val timeout: Duration = 10.seconds
 
     suspend fun run(transport: FrameTransport, credential: GateCredential, timeout: Duration = GateClient.timeout): GateOutcome =

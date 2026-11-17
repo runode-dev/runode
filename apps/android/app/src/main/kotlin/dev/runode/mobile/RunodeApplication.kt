@@ -8,6 +8,7 @@ import dev.runode.mobile.connection.AndroidKeyStoreDeviceKeys
 import dev.runode.mobile.connection.ClientIdentity
 import dev.runode.mobile.connection.FileMachineStore
 import dev.runode.mobile.connection.HostConnection
+import dev.runode.mobile.connection.IrohDialer
 import dev.runode.mobile.connection.KeystoreUnlockPasswords
 import dev.runode.mobile.connection.MediaConnection
 import dev.runode.mobile.connection.NativeIroh
@@ -52,6 +53,7 @@ class RunodeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         NativeIroh.context = applicationContext
+        IrohDialer.shared.followNetwork(applicationContext)
     }
 
     /** 进程里的那份 [AppModel]；还没建时按 [demo]（演示参数，为空时是正常启动）建。 */
@@ -66,7 +68,7 @@ class RunodeApplication : Application() {
 
     private fun real(): AppModel {
         val context: Context = applicationContext
-        val keyStore = AndroidKeyStoreDeviceKeys()
+        val keyStore = AndroidKeyStoreDeviceKeys(context)
         val store = FileMachineStore(FileMachineStore.defaultFile(context))
         val discovery = NsdDiscovery(context)
         val network = NetworkChanges(context)

@@ -321,10 +321,12 @@ class AgentLauncherTests {
         class Launcher(val label: String, val programs: List<String>, val kind: String)
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     /** 菜单里的各家和宿主那边一样：取自 `runode_agent` 的测试 `launcher_fixture` 生成的样例。 */
     @Test fun matchesTheHostLaunchers() {
         val fixture = File(System.getProperty("runode.repo"), "crates/agent/tests/fixtures/launchers.json")
-        val launchers = Json { ignoreUnknownKeys = true }.decodeFromString<Root>(fixture.readText()).launchers
+        val launchers = json.decodeFromString<Root>(fixture.readText()).launchers
         assertTrue(launchers.isNotEmpty())
         assertEquals(launchers.map { it.label }, AgentLauncher.all.map { it.label })
         assertEquals(launchers.map { it.programs }, AgentLauncher.all.map { it.programs })

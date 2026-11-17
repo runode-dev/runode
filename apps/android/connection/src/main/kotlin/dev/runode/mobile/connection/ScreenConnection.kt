@@ -71,7 +71,7 @@ class ScreenConnection private constructor(
             keyStore: DeviceKeyStore,
             discovery: HostDiscovery,
             open: TransportOpener = { target, fingerprint -> TlsChannel.open(target, fingerprint) },
-            tunnel: TunnelOpener? = { node, fingerprint -> IrohDialer.shared.open(node, fingerprint) },
+            tunnel: TunnelOpener? = { node, fingerprint, secret -> IrohDialer.shared.open(node, fingerprint, secret) },
         ): ScreenConnection = dial(
             machine,
             keyStore,

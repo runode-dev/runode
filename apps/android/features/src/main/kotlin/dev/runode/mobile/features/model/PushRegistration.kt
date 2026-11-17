@@ -158,7 +158,7 @@ class PushRegistration(
     /** 这台电脑连上了（`HostEvent.Ready`）：登记一次；打开着提醒时先看系统还允不允许发通知，有了结果再登记。 */
     internal fun connected(machine: MachineRecord, link: HostLink) {
         peers[machine.id] = Peer(machine.name, link)
-        // 删掉了、等着注销的（见 `unregister`），连上了也不再登记。
+        // 删掉了、等着注销的，连上了也不再登记。
         if (machine.deletedAt != null) leaving += machine.id
         if (enabled) authorize(listOf(machine.id)) else register(machine.id)
     }

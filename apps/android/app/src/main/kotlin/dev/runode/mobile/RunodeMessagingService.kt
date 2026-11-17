@@ -7,9 +7,12 @@ import dev.runode.mobile.features.model.PushMessage
 
 /**
  * FCM 交来的 token 和消息。token 交给 [AndroidPushNotifications]，由 `PushRegistration` 向各台电脑登记；消息只带数据
- * （宿主的 `push::fcm_message`），照 [PushMessage] 拼成通知，App 在前台时先问 [AndroidPushNotifications.shows] 出不出。
+ * （`runode_protocol::push::fcm_message`），照 [PushMessage] 拼成通知，App 在前台时先问
+ * [AndroidPushNotifications.shows] 出不出。
  */
 class RunodeMessagingService : FirebaseMessagingService() {
+    /** FCM 换了 token 时经这里交来；用哪套登记由 [AndroidPushNotifications.registerForRemoteNotifications] 定。 */
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onNewToken(token: String) {
         AndroidPushNotifications.shared(this)?.received(token)
     }

@@ -3,7 +3,10 @@ package dev.runode.mobile.protocol
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
-/** 交给电脑识别的这套消息和录音格式的版本，宿主的 `protocol::speech::SPEECH_VERSION`。 */
+/**
+ * 交给电脑识别的这套消息和录音格式的版本，要等于宿主的 `runode_protocol::speech::SPEECH_VERSION`，
+ * 否则电脑回 `Incompatible` 后断开。
+ */
 const val speechVersion: UInt = 1u
 
 /** [FrameKind.Audio] 的采样率：载荷是这个采样率的单声道 16 位小端 PCM。 */

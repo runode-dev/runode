@@ -109,7 +109,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var refreshScheduled = false
 
-    /** 下一次刷新最早在这时候（[SystemClock.uptimeMillis]），见 [scheduleRefresh]。 */
+    /** 下一次刷新最早在这时候（[SystemClock.uptimeMillis]）。 */
     private var nextRefreshAt = 0L
 
     /** 上次刷新以来 [onDraw] 一共花的时间，[scheduleRefresh] 按它拉开两次刷新。 */
@@ -226,7 +226,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
         scheduleBlink()
     }
 
-    /** 输入法看到的文档，只装着组字中的文字，见 [TerminalInputConnection]。 */
+    /** 输入法看到的文档，只装着组字中的文字。 */
     internal val document = SpannableStringBuilder()
 
     /** 硬件键盘上按过、还没和下一个字合成的死键附加符号。 */
@@ -346,7 +346,7 @@ class TerminalView(context: Context) : View(context), TerminalDisplay {
             invalidate()
             return
         }
-        // 程序在同步输出、改尺寸后还在重画：留着上一帧，一会儿再看（见 VTerminal.isRenderHeld）。
+        // 程序在同步输出、改尺寸后还在重画：留着上一帧，一会儿再看。
         if (terminal.isRenderHeld) {
             mainHandler.removeCallbacks(heldTask)
             mainHandler.postDelayed(heldTask, HELD_RETRY_MS)

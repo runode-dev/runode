@@ -4,7 +4,7 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 
 /**
- * 帧的类型，和宿主的 `runode_protocol::FrameKind` 一一对应。帧头格式是冻结的：
+ * 帧的类型，取值以宿主的 `runode_protocol::FrameKind` 为准。帧头格式是冻结的：
  * `u32 LE 载荷长度 | u8 类型 | u32 LE 通道 | 载荷`。
  */
 enum class FrameKind(val rawValue: UByte) {
@@ -20,13 +20,13 @@ enum class FrameKind(val rawValue: UByte) {
     /** 快照或 VT 重放的一段，以 [HostMsg.SnapshotEnd] 结束。 */
     Snapshot(3u),
 
-    /** 远程桌面编好的一帧画面，载荷见 [VideoFrame.Companion.invoke]。 */
+    /** 远程桌面编好的一帧画面（[VideoFrame]）。 */
     Video(4u),
 
-    /** 交给电脑识别的一段录音，载荷见 [speechSampleRate]。 */
+    /** 交给电脑识别的一段录音。 */
     Audio(5u),
 
-    /** 交给电脑的一张图片或一段视频的一段，载荷不超过 [maxMediaFrame]，见 [MediaClientMsg.Media]。 */
+    /** 交给电脑的一张图片或一段视频的一段（[MediaClientMsg.Media]），载荷不超过 [maxMediaFrame]。 */
     Media(6u),
     ;
 
@@ -68,13 +68,13 @@ class Frame(
         /** 帧头的字节数：载荷长度、类型、通道。 */
         const val headerLength: Int = 9
 
-        /** 载荷上限，和宿主的 `MAX_PAYLOAD` 一样；再长就是对面出了错。 */
+        /** 载荷上限，要等于宿主的 `runode_protocol::MAX_PAYLOAD`；再长就是对面出了错。 */
         const val maxPayload: UInt = 67_108_864u
 
-        /** 手机发的控制帧载荷的上限，和电脑那边远程访问的 `MAX_CONTROL_PAYLOAD` 一样；超了电脑断开整条连接。 */
+        /** 手机发的控制帧载荷的上限，要等于 `runode_remote` 的 `MAX_CONTROL_PAYLOAD`，超了电脑断开整条连接。 */
         const val maxControlPayload: Int = 1 shl 20
 
-        /** 门禁阶段单帧载荷的上限，宿主的 `remote::GATE_MAX_PAYLOAD`。 */
+        /** 门禁阶段单帧载荷的上限，要等于宿主的 `runode_protocol::remote::GATE_MAX_PAYLOAD`。 */
         const val gateMaxPayload: UInt = 16_384u
 
         /** 一条控制消息，走通道 0。 */

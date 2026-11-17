@@ -7,13 +7,19 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 
-/** 经 iroh 按电脑的公钥（[MachineRecord.node]）开一条连接。 */
-typealias TunnelOpener = suspend (node: String, fingerprint: CertificateFingerprint) -> FrameTransport
+/** 经 iroh 按电脑的公钥（[MachineRecord.node]）开一条连接，手机这头的端点用私钥 `secret`。 */
+typealias TunnelOpener = suspend (node: String, fingerprint: CertificateFingerprint, secret: ByteArray) -> FrameTransport
+
+/** 关掉用私钥 `secret` 建的 iroh 端点，经它开着的连接一起断掉。 */
+typealias TunnelCloser = (secret: ByteArray) -> Unit
 
 /** iroh 比局域网的几条路晚这么久才拨，在同一个局域网里时直连先到。 */
 internal val tunnelDelay: Duration = 500.milliseconds
@@ -58,7 +64,8 @@ internal suspend fun <C : Any> dial(
         if (tunnel != null && node != null) {
             pending += async {
                 delay(tunnelDelay)
-                attempt { tunnel(node, fingerprint) }
+                val secret = withContext(Dispatchers.IO) { keyStore.tunnelSecret(machine.id) }
+                attempt { tunnel(node, fingerprint, secret) }
             }
         }
         val all = pending.toList()
@@ -66,29 +73,39 @@ internal suspend fun <C : Any> dial(
         var failure: Throwable? = null
         var fatal: LinkFailure? = null
         // 有了结果也把别的等完：它们可能也连上了，要关掉，不能留着没人读的连接。
-        while (pending.isNotEmpty()) {
-            val done = select { pending.forEach { attempt -> attempt.onJoin { attempt } } }
-            pending.remove(done)
-            val result = runCatching { done.await() }
-            val error = result.exceptionOrNull()
-            when {
-                error == null -> {
-                    val connection = result.getOrThrow()
-                    if (winner == null && fatal == null) {
-                        winner = connection
-                        all.forEach { it.cancel() }
-                    } else {
-                        close(connection)
+        try {
+            while (pending.isNotEmpty()) {
+                val done = select { pending.forEach { attempt -> attempt.onJoin { attempt } } }
+                pending.remove(done)
+                val result = runCatching { done.await() }
+                val error = result.exceptionOrNull()
+                when {
+                    error == null -> {
+                        val connection = result.getOrThrow()
+                        if (winner == null && fatal == null) {
+                            winner = connection
+                            all.forEach { it.cancel() }
+                        } else {
+                            close(connection)
+                        }
                     }
+                    error is CancellationException -> {}
+                    error is LinkFailure && error.isFatal && winner == null -> {
+                        if (fatal == null) fatal = error
+                        all.forEach { it.cancel() }
+                    }
+                    failure == null || failure == LinkFailure.NoAddress ||
+                        error == LinkFailure.Rejected(GateRejection.RateLimited) -> failure = error
                 }
-                error is CancellationException -> {}
-                error is LinkFailure && error.isFatal && winner == null -> {
-                    if (fatal == null) fatal = error
-                    all.forEach { it.cancel() }
-                }
-                failure == null || failure == LinkFailure.NoAddress ||
-                    error == LinkFailure.Rejected(GateRejection.RateLimited) -> failure = error
             }
+        } catch (error: Throwable) {
+            // 等着收尾时被取消：选出的那条和收尾时也连上的都没人要了，一样关掉。
+            winner?.let(close)
+            all.forEach { it.cancel() }
+            withContext(NonCancellable) {
+                for (attempt in pending) runCatching { attempt.await() }.getOrNull()?.let(close)
+            }
+            throw error
         }
         fatal?.let { throw it }
         winner ?: throw (failure ?: LinkFailure.NoAddress)

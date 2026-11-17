@@ -5,8 +5,8 @@ import dev.runode.mobile.features.R
 import dev.runode.mobile.protocol.SessionLink
 
 /**
- * 电脑经中转、FCM 推来的一条通知：宿主 `push::fcm_message` 的 `data`，值都是字符串。FCM 只送数据，通知由 App 用自己的
- * 文案出：标题按 [kind] 和 agent 定，副标题是会话标题和电脑名，正文是屏幕上的几行或任务的结果。
+ * 电脑经中转、FCM 推来的一条通知：`runode_protocol::push::fcm_message` 的 `data`，值都是字符串。FCM 只送数据，
+ * 通知由 App 用自己的文案出：标题按 [kind] 和 agent 定，副标题是会话标题和电脑名，正文是屏幕上的几行或任务的结果。
  */
 data class PushMessage(
     val link: SessionLink,
@@ -16,7 +16,7 @@ data class PushMessage(
     /** 用换行连着的几行；没有时为空。 */
     val body: String,
 ) {
-    /** 宿主的 `push::NotificationKind`。 */
+    /** 取值以 `runode_protocol::push::NotificationKind` 为准。 */
     enum class Kind(val wire: String) {
         Blocked("blocked"),
         TodoDone("todo_done"),

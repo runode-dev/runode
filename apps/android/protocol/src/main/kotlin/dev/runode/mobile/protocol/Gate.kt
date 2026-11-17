@@ -10,9 +10,12 @@ import kotlinx.serialization.json.put
 
 // 远程访问的门禁：TLS 握手之后、`Hello` 之前在同一条连接上来回的几条消息。都是通道 0 的
 // `FrameKind.Control` 帧，载荷是带 `type` 字段的 JSON，二进制字段一律 base64url 不带填充。
-// 字节格式以宿主的 `protocol::remote` 为准。
+// 线上格式以宿主的 `runode_protocol::remote` 为准。
 
-/** 门禁的版本。宿主的 `remote_challenge` 里报的版本不是它时断开，提示升级。 */
+/**
+ * 门禁的版本，要等于宿主的 `runode_protocol::remote::GATE_VERSION`，否则宿主的 `remote_challenge` 里报的
+ * 版本不是它，手机断开、提示升级。
+ */
 const val gateVersion: UInt = 1u
 
 /** 电脑在 Bonjour TXT 记录里写门禁版本的键。 */
@@ -21,7 +24,7 @@ const val bonjourVersionKey: String = "v"
 /** 电脑在 Bonjour TXT 记录里写证书指纹（base64url）的键。 */
 const val bonjourFingerprintKey: String = "fp"
 
-/** 跨网络连接的 ALPN，宿主的 `remote::TUNNEL_ALPN`。 */
+/** 跨网络连接的 ALPN，要等于宿主的 `runode_protocol::remote::TUNNEL_ALPN`，否则跨网络连不上。 */
 const val tunnelALPN: String = "runode/remote/1"
 
 /** 宿主为什么拒绝。不认识的取值读成 [Unknown]，按通用失败处理。 */

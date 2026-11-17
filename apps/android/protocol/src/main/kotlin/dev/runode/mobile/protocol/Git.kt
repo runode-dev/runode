@@ -10,7 +10,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * 请宿主在一个会话所在的仓库里办的 git 操作，宿主的 `protocol::git::GitRequest`，放在 [ClientMsg.Git] 里发。
+ * 请宿主在一个会话所在的仓库里办的 git 操作，线上格式以宿主的 `runode_protocol::git::GitRequest` 为准，
+ * 放在 [ClientMsg.Git] 里发。
  * 宿主按会话 shell 当前的目录找仓库；改仓库的操作办完回改完后的 [GitStatus]。
  */
 @Serializable(with = GitRequestSerializer::class)

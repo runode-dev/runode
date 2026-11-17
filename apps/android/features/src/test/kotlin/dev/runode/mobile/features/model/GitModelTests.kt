@@ -364,7 +364,7 @@ class GitFileTreeTests {
     }
 }
 
-/** 成对改动的行里改了哪些字，和电脑上 `changed_words` 的测试对得上。 */
+/** 成对改动的行里改了哪些字，和电脑上 `runode_git::changed_words` 的测试对得上。 */
 class GitWordChangesTests {
     private fun changed(old: String, new: String): Pair<List<String>, List<String>> {
         val (a, b) = Presentation.gitChangedWords(old, new)
