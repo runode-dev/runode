@@ -35,11 +35,11 @@ impl SettingsView {
     pub(super) fn render_paired_machines(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let machines = paired::machines();
         let rows = div().flex().flex_col();
+        let add = Button::new("paired-machines-add", rust_i18n::t!("paired.settings_add").into_owned())
+            .variant(ButtonVariant::Secondary)
+            .on_press(cx, |_, _, cx| crate::window::add_remote_host(true, cx));
         if machines.is_empty() {
             let text = rust_i18n::t!("paired.settings_empty").into_owned();
-            let add = Button::new("paired-machines-empty-add", rust_i18n::t!("paired.settings_add").into_owned())
-                .variant(ButtonVariant::Secondary)
-                .on_press(cx, |_, _, cx| crate::window::add_remote_host(true, cx));
             return rows.child(
                 div()
                     .flex()
@@ -63,6 +63,7 @@ impl SettingsView {
             let used = in_use.contains(&HostId::Paired(machine.id.clone()));
             self.render_paired_machine(machine, used, theme, cx)
         }))
+        .child(div().flex().justify_end().py(px(12.)).child(add))
     }
 
     fn render_paired_machine(

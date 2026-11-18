@@ -23,11 +23,11 @@ impl SettingsView {
     pub(super) fn render_ssh_hosts(&mut self, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let hosts = ssh::remotes();
         let rows = div().flex().flex_col();
+        let add = Button::new("ssh-hosts-add", rust_i18n::t!("workspace.host_add").into_owned())
+            .variant(ButtonVariant::Secondary)
+            .on_press(cx, |_, _, cx| crate::window::add_remote_host(false, cx));
         if hosts.is_empty() {
             let text = rust_i18n::t!("settings.ssh_hosts.empty").into_owned();
-            let add = Button::new("ssh-hosts-empty-add", rust_i18n::t!("workspace.host_add").into_owned())
-                .variant(ButtonVariant::Secondary)
-                .on_press(cx, |_, _, cx| crate::window::add_remote_host(false, cx));
             return rows.child(
                 div()
                     .flex()
@@ -49,6 +49,7 @@ impl SettingsView {
         let in_use = (self.hosts_in_use)(cx);
         let in_use = |host: &RemoteHost| in_use.contains(&HostId::Ssh(host.name.clone()));
         rows.children(hosts.iter().map(|host| self.render_ssh_host(host, in_use(host), theme, cx)))
+            .child(div().flex().justify_end().py(px(12.)).child(add))
     }
 
     fn render_ssh_host(
