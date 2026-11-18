@@ -75,9 +75,6 @@ impl Host {
         }
         let stream = UnixStream::connect(socket)
             .map_err(|err| TakeOverError::Failed(format!("cannot connect to {}: {err}", socket.display())))?;
-        stream
-            .set_read_timeout(Some(RECEIVE_TIMEOUT))
-            .map_err(|err| TakeOverError::Failed(format!("cannot set up the connection: {err}")))?;
         let (sessions, old_pid) = handshake(&self.shared, &stream)?;
         let begun_at = Instant::now();
         let our_format = options.snapshot_format.unwrap_or(self.shared.snapshot_format);
@@ -196,6 +193,15 @@ impl Host {
 /// 或者交接期间被接受的连接都这样）。收到它或者 `HandoffRefused { Busy }` 都当作别人正在交接。
 fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::pid_t>), TakeOverError> {
     let failed = |what: &str, err: &dyn std::fmt::Display| TakeOverError::Failed(format!("{what}: {err}"));
+    // 对端发完消息就关掉连接时，设 socket 选项（macOS 上报 `EINVAL`）和写都会出错，已经到了的消息仍读得到。
+    let busy_or = |what: &str, err: &dyn std::fmt::Display| {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        match receive_message(stream) {
+            Ok(HostMsg::Goodbye { reason: GoodbyeReason::Handoff }) => TakeOverError::Refused(HandoffRefusal::Busy),
+            _ => failed(what, err),
+        }
+    };
+    stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).map_err(|err| busy_or("cannot set up the connection", &err))?;
     send(
         stream,
         &ClientMsg::Hello {
@@ -207,7 +213,7 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
             device: None,
         },
     )
-    .map_err(|err| failed("cannot greet the old host", &err))?;
+    .map_err(|err| busy_or("cannot greet the old host", &err))?;
     let old_pid = match receive_message(stream).map_err(|err| failed("no answer from the old host", &err))? {
         HostMsg::Welcome { host_pid, .. } => old_host_pid(stream, host_pid),
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => {
@@ -216,17 +222,7 @@ fn handshake(shared: &Shared, stream: &UnixStream) -> Result<(u32, Option<libc::
         other => return Err(TakeOverError::Failed(format!("unexpected answer to hello: {other:?}"))),
     };
     let handoff = ClientMsg::Handoff { min_format: OLDEST_READABLE_HANDOFF_FORMAT, max_format: HANDOFF_FORMAT };
-    if let Err(err) = send(stream, &handoff) {
-        // 旧宿主开始把会话交给别的新宿主时给这条连接发了 `Goodbye { Handoff }` 就关掉它，请求可能写不出去
-        // （`EPIPE`）：收下已经到了的那条再定。
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-        return match receive_message(stream) {
-            Ok(HostMsg::Goodbye { reason: GoodbyeReason::Handoff }) => {
-                Err(TakeOverError::Refused(HandoffRefusal::Busy))
-            }
-            _ => Err(failed("cannot ask for the handoff", &err)),
-        };
-    }
+    send(stream, &handoff).map_err(|err| busy_or("cannot ask for the handoff", &err))?;
     match receive_message(stream).map_err(|err| failed("no answer to the handoff", &err))? {
         HostMsg::HandoffRefused { reason } => Err(TakeOverError::Refused(reason)),
         HostMsg::Goodbye { reason: GoodbyeReason::Handoff } => Err(TakeOverError::Refused(HandoffRefusal::Busy)),
@@ -605,5 +601,15 @@ mod tests {
         let oversized = [AtPrompt { id: SessionId(1), len: 99 }];
         let got = unwritten(vec![SessionId(1)], &oversized, &[b"ls\r"]);
         assert_eq!(got[&SessionId(1)], Unwritten { now: b"ls\r".to_vec(), at_prompt: Vec::new() });
+    }
+
+    /// 旧宿主正在交给别的新宿主：发了 `Goodbye { Handoff }` 就关掉连接，这边还没打招呼。算忙，不算失败。
+    #[test]
+    fn a_host_that_said_goodbye_and_hung_up_is_busy() {
+        let (old, new) = UnixStream::pair().unwrap();
+        write_control(&mut &old, &HostMsg::Goodbye { reason: GoodbyeReason::Handoff }).unwrap();
+        drop(old);
+        let host = crate::Host::new(BuildId("new".into()));
+        assert!(matches!(handshake(&host.shared, &new), Err(TakeOverError::Refused(HandoffRefusal::Busy))));
     }
 }
