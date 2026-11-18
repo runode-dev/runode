@@ -254,7 +254,10 @@ fn job_log_fixture(job: u32) -> String {
 fn watch_ci_fires_for_a_failed_job_while_the_run_goes_on() {
     let sandbox = Sandbox::new("ci-failed-job");
     sandbox.fixture("run-list", &format!("96\tCI\t{SHA}\tin_progress\t\n95\tCI\t{SHA}\tcompleted\tsuccess\n"));
-    sandbox.fixture("run-view-96", "801\ttest\tfailure\n802\tcheck-windows\t\n803\tlint\ttimed_out\n804\tcheck\tsuccess\n");
+    sandbox.fixture(
+        "run-view-96",
+        "801\ttest\tfailure\n802\tcheck-windows\t\n803\tlint\ttimed_out\n804\tcheck\tsuccess\n",
+    );
     sandbox.fixture(
         &job_log_fixture(801),
         "\u{feff}2024-05-01T10:00:00.1Z running tests\n2024-05-01T10:00:01.2Z test boom ... FAILED\n\
