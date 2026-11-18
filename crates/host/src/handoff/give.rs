@@ -153,6 +153,8 @@ pub(crate) fn give(
     let commit_sent = late.is_empty() && {
         let sent = commit_part(&pending).map_err(|err| io::Error::other(err.to_string())).and_then(|data| {
             stream.set_write_timeout(Some(DONE_TIMEOUT))?;
+            // 读超时要在发出 `Commit` 之前设好：macOS 上对端断开后设 socket 选项报 EINVAL，而新宿主确认完就会断开。
+            stream.set_read_timeout(Some(DONE_TIMEOUT))?;
             fd_passing::send_with_fds(stream, &data, &[])
         });
         if let Err(err) = &sent {
@@ -500,21 +502,20 @@ fn release(handles: &[(SessionId, Handle)], handed: &[SessionId], within: Durati
     released
 }
 
-/// 提交后等新宿主回 `HandoffDone`，整条收下来最多 `DONE_TIMEOUT`。等到了返回 true；没回就断开（新宿主
-/// 总是先回 `HandoffDone` 再断开）、超时或者说了别的都是 false。回话分几次慢慢到时
+/// 提交后等新宿主回 `HandoffDone`，整条收下来最多 `DONE_TIMEOUT`，每次读的超时由调用方事先设好。等到了返回
+/// true；没回就断开（新宿主总是先回 `HandoffDone` 再断开）、超时或者说了别的都是 false。回话分几次慢慢到时
 /// `SO_RCVTIMEO` 每次都不超时，所以整段由看门狗管；它动过手的话收到了也是 false：新宿主已经被杀了，会话要
 /// 接回来。起不了看门狗时只靠 `SO_RCVTIMEO`：`Commit` 已经发出，不为这个杀掉可能好好的新宿主。
 fn wait_for_done(stream: &UnixStream, reader: &mut BufReader<&UnixStream>) -> bool {
     let watchdog = Watchdog::arm(stream, Instant::now() + DONE_TIMEOUT)
         .inspect_err(|err| tracing::warn!("cannot watch the wait for the new host's confirmation: {err}"))
         .ok();
-    let done = stream.set_read_timeout(Some(DONE_TIMEOUT)).is_ok()
-        && match read_frame(reader) {
-            Ok(Some(frame)) if frame.kind == FrameKind::Control => {
-                matches!(frame.message::<ClientMsg>(), Ok(ClientMsg::HandoffDone))
-            }
-            Ok(_) | Err(_) => false,
-        };
+    let done = match read_frame(reader) {
+        Ok(Some(frame)) if frame.kind == FrameKind::Control => {
+            matches!(frame.message::<ClientMsg>(), Ok(ClientMsg::HandoffDone))
+        }
+        Ok(_) | Err(_) => false,
+    };
     let fired = watchdog.is_some_and(Watchdog::disarm);
     done && !fired
 }
@@ -683,6 +684,16 @@ mod tests {
         for (_, thread) in sessions {
             thread.join().unwrap();
         }
+    }
+
+    /// 新宿主回完 `HandoffDone` 就断开，读到的时候连接已经断了：照样算确认了接手。
+    #[test]
+    fn done_counts_when_the_new_host_has_already_hung_up() {
+        let (old, new) = UnixStream::pair().unwrap();
+        runode_protocol::write_control(&mut &new, &ClientMsg::HandoffDone).unwrap();
+        drop(new);
+        let mut reader = BufReader::new(&old);
+        assert!(wait_for_done(&old, &mut reader));
     }
 
     /// 单独跑、在监听、开着看板的宿主，和看板上一张不要工作树、agent 是 `true` 的任务。
