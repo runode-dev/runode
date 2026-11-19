@@ -45,6 +45,7 @@ pub const KEYS: &[&[&str]] = &[
     ],
     &["prevent-sleep"],
     &["file-tree-preview-click", "preview-font-size"],
+    &["language-server"],
     &["task-placement", "task-split-fold"],
     &["git-auto-fetch"],
     &[
@@ -418,6 +419,9 @@ impl Config {
             }
             "ssh-restore-on-launch" => {
                 self.ssh_restore_on_launch = or_default(empty, defaults.ssh_restore_on_launch, || parse_bool(value))?;
+            }
+            "language-server" => {
+                self.language_server = or_default(empty, defaults.language_server, || parse_bool(value))?;
             }
             "git-auto-fetch" => {
                 self.git_auto_fetch = or_default(empty, defaults.git_auto_fetch, || parse_bool(value))?;
@@ -1040,6 +1044,13 @@ unknown-key = whatever
         assert_eq!(load(&["ssh-control-persist = 60\nssh-control-persist ="]).ssh_control_persist, None);
         assert!(d.ssh_restore_on_launch);
         assert!(!load(&["ssh-restore-on-launch = false"]).ssh_restore_on_launch);
+    }
+
+    #[test]
+    fn language_server_defaults_to_true() {
+        assert!(Config::default().language_server);
+        assert!(!load(&["language-server = false"]).language_server);
+        assert!(load(&["language-server = false\nlanguage-server ="]).language_server);
     }
 
     #[test]

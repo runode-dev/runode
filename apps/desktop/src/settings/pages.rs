@@ -277,6 +277,7 @@ impl Page {
             Self::Files => &[
                 Row("file-tree-preview-click", Choice),
                 Row("preview-font-size", Text(80.)),
+                Row("language-server", Switch),
                 Section("git"),
                 Row("git-auto-fetch", Switch),
             ],

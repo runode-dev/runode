@@ -13,6 +13,7 @@ ONLY = {
     "runode-git": set(),
     "runode-files": set(),
     "runode-preview": set(),
+    "runode-lsp": set(),
     "runode-update": set(),
     "runode-protocol": {"runode-types"},
     "runode-agent": {"runode-types"},

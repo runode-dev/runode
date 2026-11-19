@@ -149,6 +149,9 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "ssh-restore-on-launch" => {
             "Connect to SSH hosts right away when Runode reopens workspaces and terminals that are on them: true (default), false. With false, they wait until you click Reconnect, so launching Runode does not ask for passwords or security keys. Takes effect from the next launch."
         }
+        "language-server" => {
+            "Completions, hover documentation, go to definition and diagnostics in the preview pane's editor, from the language servers installed on this computer: true (default), false. Runode runs rust-analyzer, gopls, typescript-language-server, pyright-langserver, clangd, sourcekit-lsp or zls when the one for the file is on your PATH, and installs none itself. Files of projects on SSH hosts get none. Takes effect for files opened afterwards."
+        }
         "git-auto-fetch" => {
             "Fetch from the remotes in the background every few minutes while the Git panel is showing, so the commits behind and the remote branches in the graph keep up: true (default), false. Only the repository in the panel and the submodules and nested repositories inside it are fetched, and only while the window is in front. With false, fetch from the panel's menu or with Sync. Takes effect right away."
         }

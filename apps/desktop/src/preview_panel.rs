@@ -23,6 +23,7 @@
 mod body;
 mod diff;
 mod edit;
+mod lsp;
 mod markdown;
 mod marks;
 mod picture;
@@ -501,6 +502,8 @@ fn shown_width(line: &str, cell_width: fn(char) -> u8) -> usize {
 pub struct PreviewPanel {
     /// 各 workspace 的标签，没开过预览的 workspace 不在表里。
     workspaces: HashMap<WorkspaceId, PreviewTabs>,
+    /// 各 workspace 里给编辑器起的语言服务器。
+    servers: lsp::Servers,
     /// 显示的是哪个 workspace 的标签。
     ws: WorkspaceId,
     input: Input,
@@ -542,6 +545,7 @@ impl PreviewPanel {
     pub fn new(cell_width: fn(char) -> u8, window: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
         Self {
             workspaces: HashMap::new(),
+            servers: lsp::Servers::default(),
             ws: 0,
             input: Input::default(),
             focus: cx.focus_handle(),

@@ -175,6 +175,8 @@ pub struct Config {
     pub ssh_control_persist: Option<u32>,
     /// 启动时恢复的工作区和终端在 SSH 主机上的，马上连那台主机；关着时等用户点重连。
     pub ssh_restore_on_launch: bool,
+    /// 预览栏的编辑器用这台电脑上装着的语言服务器做补全、悬停说明、跳到定义和诊断。之后打开的文件起算数。
+    pub language_server: bool,
     /// Git 面板显示着时定时在后台抓取远端，落后数和图表里的远端分支跟得上远端。改了马上算数。
     pub git_auto_fetch: bool,
     /// 启动后和之后每隔几个小时查一次新版本，有了就在后台下载好、退出时装上；关着时只在菜单里点
@@ -283,6 +285,7 @@ impl Default for Config {
             ssh_program: None,
             ssh_control_persist: None,
             ssh_restore_on_launch: true,
+            language_server: true,
             git_auto_fetch: true,
             auto_update: true,
             developer_mode: false,

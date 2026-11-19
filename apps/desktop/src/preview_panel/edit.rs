@@ -42,7 +42,7 @@ pub(super) const UNSAVED_SAVE: usize = 0;
 pub(super) const UNSAVED_DISCARD: usize = 1;
 
 pub(super) struct Editor {
-    area: Entity<EditorState>,
+    pub(super) area: Entity<EditorState>,
     /// 读进来或上次存下的文字（换行是 `\n`），和输入框里的比就知道改没改。
     saved: String,
     dirty: bool,
@@ -55,6 +55,8 @@ pub(super) struct Editor {
     saving: bool,
     /// 开着的「跳到行号」输入条。
     go_to_line: Option<(Entity<InputState>, Subscription)>,
+    /// 这个文件在语言服务器上开着的文档；没有可用的服务器时为空。
+    pub(super) lsp: Option<super::lsp::Document>,
     _changed: Subscription,
 }
 
@@ -239,6 +241,10 @@ impl PreviewPanel {
                 && let Some(preview) = this.editing_tab_mut(&area)
                 && let Some(editor) = &mut preview.editor
             {
+                if let Some(document) = &mut editor.lsp {
+                    document.changed(area.read(cx).text());
+                    document.show_diagnostics(&area, cx);
+                }
                 editor.dirty = !same(area.read(cx).text(), &editor.saved);
                 // 改过的临时标签固定下来，免得打开别的文件时连同没存的修改一起被换掉。
                 preview.pinned |= editor.dirty;
@@ -254,8 +260,10 @@ impl PreviewPanel {
             stamp: source.stamp,
             saving: false,
             go_to_line: None,
+            lsp: None,
             _changed: changed,
         });
+        self.attach_language_server(ws, path, cx);
         cx.notify();
         Some(area)
     }
@@ -301,6 +309,11 @@ impl PreviewPanel {
                     }
                     area.update(cx, |area, cx| area.set_value(source.text.clone(), window, cx));
                     if let Some(editor) = this.editor_mut(&area) {
+                        // 整篇换掉不算用户的改动，编辑器不报，语言服务器那边自己告诉。
+                        if let Some(document) = &mut editor.lsp {
+                            document.changed(&Rope::from(source.text.as_str()));
+                            document.show_diagnostics(&area, cx);
+                        }
                         (editor.saved, editor.stamp, editor.crlf, editor.bom) =
                             (source.text, source.stamp, source.crlf, source.bom);
                     }
@@ -417,6 +430,9 @@ impl PreviewPanel {
                         editor.dirty = !same(area.read(cx).text(), &text);
                         editor.saved = text;
                         editor.stamp = stamp;
+                        if let Some(document) = &editor.lsp {
+                            document.saved();
+                        }
                         cx.notify();
                         true
                     }

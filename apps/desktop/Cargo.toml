@@ -55,6 +55,7 @@ gpui.workspace = true
 # 不开 font-kit 时，gpui_macos 退回到空实现的文字系统，一个字形都画不出来。
 gpui_platform = { workspace = true, features = ["font-kit"] }
 gpui-component.workspace = true
+runode-lsp.workspace = true
 anyhow.workspace = true
 futures.workspace = true
 # 和宿主的连接设 socket 缓冲。

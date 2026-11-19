@@ -30,6 +30,7 @@ deny = [
     ], reason = "只有 app 和它的部件库 runode-ui 能依赖界面框架，其余 crate 不碰 GPUI" },
     { crate = "gpui-pre-platform", wrappers = ["runode"], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
     { crate = "gpui-component", wrappers = ["runode"], reason = "代码编辑器只有 app 的预览栏用，部件库 runode-ui 不依赖它" },
+    { crate = "runode-lsp", wrappers = ["runode"], reason = "语言服务器只有 app 的预览栏编辑器用" },
     { crate = "tree-sitter", wrappers = ["gpui-component"], reason = "代码编辑器的语法分析只经 gpui-component 用；只读预览的高亮在 runode-preview 里" },
     # 各平台层也是界面框架，只经 gpui-pre-platform 用；Apple 和 wgpu 的公共部分由平台层自己依赖（Linux 的 x11、wayland 后端用 wgpu 画）。
     { crate = "gpui-pre-macos", wrappers = ["gpui-pre-platform"], reason = "只有 app 能依赖界面框架，其余 crate 不碰 GPUI" },
