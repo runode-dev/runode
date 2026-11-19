@@ -229,6 +229,7 @@ fn client_messages_round_trip() {
             from: Some(ID),
         },
         ClientMsg::Reveal { req: 11, id: ID },
+        ClientMsg::OpenPaths { req: 19, paths: vec!["/Users/me/dev".into(), "/tmp/笔记.md".into()] },
         ClientMsg::MovePane { req: 17, id: ID, placement: Placement::Tab, near: None, focus: false },
         ClientMsg::SwapPanes { req: 18, a: ID, b: SessionId(3), focus: true },
         ClientMsg::ListDirs { req: 12, path: None },

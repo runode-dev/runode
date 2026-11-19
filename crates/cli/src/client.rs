@@ -150,6 +150,13 @@ pub(crate) struct Connection {
     pub(crate) board: u32,
 }
 
+/// 请连着宿主的 app 界面打开 `paths`；连不上宿主时不拉起它。
+pub(crate) fn open_paths(paths: &[std::path::PathBuf], env: &Env) -> Result<()> {
+    let connection = Connection::open_by(env, Instant::now() + REPLY_TIMEOUT)?;
+    let req = connection.req();
+    connection.request_done(&ClientMsg::OpenPaths { req, paths: paths.to_vec() })
+}
+
 impl Connection {
     /// 连上宿主并握手；连不上、给了 `Env::launch_host` 时先拉起宿主。
     pub(crate) fn open(env: &Env) -> Result<Self> {

@@ -201,6 +201,14 @@ fn handle(host: &HostId, request: ClientMsg, cx: &mut App) -> Reply {
             }
             None => fail(req, format!("no runode window shows session {id}")),
         },
+        // 路径是发请求那台机器上的，只办本机宿主转来的。
+        ClientMsg::OpenPaths { req, paths } => {
+            if matches!(host, HostId::Local) && super::open_in_front(paths, cx) {
+                HostMsg::Done { req }
+            } else {
+                fail(req, "there is no Runode window to open them in".into())
+            }
+        }
         ClientMsg::MovePane { req, id, placement, near, focus } => {
             let Some((window, pane)) = find_session(host, id, cx) else {
                 return Reply::Now(fail(req, format!("no runode window shows session {id}")));

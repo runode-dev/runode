@@ -180,3 +180,27 @@ fn move_and_swap_name_the_sessions_to_the_app() {
         ]
     );
 }
+
+/// 界面打开了为真；宿主说没有窗口、宿主没在跑时为假。
+#[test]
+fn open_in_app_tells_whether_a_window_took_the_paths() {
+    let paths = [std::path::PathBuf::from("/tmp/notes.md")];
+    let fake = FakeHost::start("open-paths", |message| match message {
+        ClientMsg::OpenPaths { req, .. } => vec![HostMsg::Done { req: *req }],
+        _ => vec![],
+    });
+    assert!(runode_cli::open_in_app(&paths, &fake.env));
+    assert!(controls(&fake).contains(&ClientMsg::OpenPaths { req: 1, paths: paths.to_vec() }));
+
+    let headless = FakeHost::start("open-paths-headless", |message| match message {
+        ClientMsg::OpenPaths { req, .. } => {
+            vec![HostMsg::Error { req: Some(*req), id: None, message: "no window".into(), reason: None }]
+        }
+        _ => vec![],
+    });
+    assert!(!runode_cli::open_in_app(&paths, &headless.env));
+
+    let mut gone = headless.env;
+    gone.socket = Some(std::env::temp_dir().join("runode-no-such-host.sock"));
+    assert!(!runode_cli::open_in_app(&paths, &gone));
+}

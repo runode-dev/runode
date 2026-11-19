@@ -237,6 +237,9 @@ pub enum ClientMsg {
     },
     /// 在 app 里切到显示这个会话的分屏，激活它的窗口，回 `Done`。
     Reveal { req: u32, id: SessionId },
+    /// 在 app 最前面的窗口里打开宿主这台电脑上的 `paths`（绝对路径）：文件夹各开成一个工作区，文件开在预览栏里，
+    /// 窗口提到前面。宿主转给 app 的界面，回 `Done`；没有界面连着时回 `Error`。
+    OpenPaths { req: u32, paths: Vec<PathBuf> },
     /// 在 app 里把会话 `id` 的分屏挪到会话 `near` 的分屏旁边，照 `placement` 放，宿主转给
     /// app 的界面，回 `Done`。`near` 为空时是最前面那个窗口当前的分屏。两个分屏要在同一个窗口里；分屏摆法
     /// 下 `near` 不能是 `id` 自己。`focus` 为假时不切过去。没有界面连着时回 `Error`。
@@ -715,8 +718,8 @@ pub enum HostMsg {
         req: u32,
         found: Vec<Option<String>>,
     },
-    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`Layout`；没有界面
-    /// 连着时除 `Reveal` 外宿主自己办），只发给登记为界面的连接（`Hello` 里 `client` 是 `Desktop` 的）。
+    /// 宿主转给界面去办的请求（`Open`、`OpenWorkspace`、`RenameWorkspace`、`Reveal`、`OpenPaths`、`Layout`；
+    /// 没有界面连着时除 `Reveal`、`OpenPaths` 外宿主自己办），只发给登记为界面的连接（`Hello` 里 `client` 是 `Desktop` 的）。
     /// 有几个时，发请求的一方在 `Hello` 里报了所在的会话的，发给连着那个会话的界面里最近和它交互过的，
     /// 挑不出来时发给最近连上的那个。`request` 原样带着发请求一方的 `req`；界面办完了用
     /// `ClientMsg::UiReply` 带着同一个 `ui` 回话。

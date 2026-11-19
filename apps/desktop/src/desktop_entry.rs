@@ -78,7 +78,7 @@ fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     runode_paths::replace_file(path, contents)
 }
 
-/// 指向 AppImage `image` 的菜单项：模板的 `Exec` 换成它，加上 `TryExec`（文件没了时菜单不显示这一项）和
+/// 指向 AppImage `image` 的菜单项：模板的 `Exec` 里的程序换成它、参数留着，加上 `TryExec`（文件没了时菜单不显示这一项）和
 /// `MANAGED`。路径里有控制字符、不是 UTF-8 时写不出来。
 fn entry_for(image: &Path) -> Option<String> {
     let path = image.to_str()?;
@@ -87,7 +87,8 @@ fn entry_for(image: &Path) -> Option<String> {
     let mut replaced = false;
     for line in TEMPLATE.lines() {
         if line.starts_with("Exec=") {
-            out.push_str(&format!("TryExec={}\nExec={exec}\n", path.replace('\\', "\\\\")));
+            let args = line.split_once(' ').map_or("", |(_, args)| args);
+            out.push_str(&format!("TryExec={}\nExec={exec} {args}\n", path.replace('\\', "\\\\")));
             replaced = true;
         } else {
             out.push_str(line);
@@ -129,7 +130,8 @@ mod tests {
     fn the_entry_runs_the_appimage() {
         let entry = entry_for(Path::new("/home/me/Apps/Runode 1.AppImage")).unwrap();
         assert!(entry.contains("\nTryExec=/home/me/Apps/Runode 1.AppImage\n"));
-        assert!(entry.contains("\nExec=\"/home/me/Apps/Runode 1.AppImage\"\n"));
+        assert!(entry.contains("\nExec=\"/home/me/Apps/Runode 1.AppImage\" --open %F\n"));
+        assert!(entry.contains("\nMimeType=text/plain;inode/directory;\n"));
         assert!(!entry.contains("Exec=runode"));
         assert!(entry.contains(&format!("\nStartupWMClass={}\n", runode_update::BUNDLE_ID)));
         assert!(entry.ends_with(&format!("{MANAGED}\n")));

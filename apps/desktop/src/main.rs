@@ -71,6 +71,19 @@ use crate::window::{open_window, open_window_with};
 /// 窗口里一个 workspace 的标识，由窗口给，挪动位置后不变；各页按它分开记每个 workspace 的状态。
 pub type WorkspaceId = u64;
 
+/// `--open` 等别的进程开出的窗口连上宿主的上限。
+const OPEN_HAND_OVER_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// 打开 `Dirs::open_lock_file`；没有地方放时为 `None`。
+fn open_lock(dirs: &runode_paths::Dirs) -> Option<std::fs::File> {
+    dirs.create_runtime_dir().ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(dirs.open_lock_file()?).ok()
+}
+
 fn main() {
     // ssh 调 askpass 时只给一句提示当参数，先于一切参数认出来，免得被当成子命令。
     if let Some(code) = runode_ssh::askpass::run_if_requested() {
@@ -139,7 +152,34 @@ fn main() {
     {
         std::process::exit(screen_process::guard(pid));
     }
-    if runode_cli::wants_cli(&args) {
+    // 系统的「打开方式」交来的文件和文件夹（`--open 路径…`）：app 开着就交给它，没开着就接着往下开窗口来打开。
+    // 不带路径时是从应用菜单启动的。
+    let open: Option<Vec<std::path::PathBuf>> = args
+        .first()
+        .is_some_and(|arg| arg == "--open")
+        .then(|| args[1..].iter().filter_map(|path| std::path::absolute(path).ok()).collect());
+    let _opening = match open.as_deref() {
+        Some(paths) if !paths.is_empty() => {
+            let env = runode_cli::Env::from_process(env!("RUNODE_BUILD"));
+            if runode_cli::open_in_app(paths, &env) {
+                return;
+            }
+            let lock = open_lock(&env.dirs);
+            // 系统给每个选中的文件各起一个进程时（Windows），拿到锁的开窗口，别的等它的窗口连上宿主再交给它。
+            if lock.as_ref().is_some_and(|lock| matches!(lock.try_lock(), Err(std::fs::TryLockError::WouldBlock))) {
+                let deadline = std::time::Instant::now() + OPEN_HAND_OVER_WAIT;
+                while std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    if runode_cli::open_in_app(paths, &env) {
+                        return;
+                    }
+                }
+            }
+            lock
+        }
+        _ => None,
+    };
+    if open.is_none() && runode_cli::wants_cli(&args) {
         // 界面程序没有控制台：接上终端的，输出才看得见（shell 不等它跑完，正经用 `rn`）。
         #[cfg(windows)]
         // SAFETY: 只是接上父进程的控制台，没有指针参数。
@@ -179,8 +219,14 @@ fn main() {
 
     let app = application().with_assets(ui::icons::Assets);
     // 启动时系统交来的文件在 `run` 的回调之前就到。
-    let (opened, open_urls) = futures::channel::mpsc::unbounded();
-    app.on_open_urls(move |urls| _ = opened.unbounded_send(urls));
+    let (opened, open_paths) = futures::channel::mpsc::unbounded();
+    if let Some(paths) = open {
+        _ = opened.unbounded_send(paths);
+    }
+    app.on_open_urls(move |urls| {
+        let paths = urls.iter().filter_map(|url| runode_lsp::uri::to_path(&url.parse().ok()?)).collect();
+        _ = opened.unbounded_send(paths);
+    });
     app.run(|cx: &mut App| {
         startup::mark("app_run");
         // 系统通知认这个身份：Windows 上是 AppUserModelID，Linux 上是通知里的程序名。macOS 上由 .app 的
@@ -252,7 +298,7 @@ fn main() {
         window::watch_devices(cx);
         window::watch_todos(cx);
         window::watch_status(cx);
-        window::serve_open_urls(open_urls, cx);
+        window::serve_open_paths(open_paths, cx);
         cx.activate(true);
         host_client::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。

@@ -158,6 +158,12 @@ impl Dirs {
         fits_sun_path(&path).then_some(path)
     }
 
+    /// `runode --open` 找不到开着的 app、自己开窗口时一直锁着的锁，在 `runtime_dir` 里：同时被叫来打开文件的几个
+    /// 进程里只有一个开窗口。
+    pub fn open_lock_file(&self) -> Option<PathBuf> {
+        Some(self.runtime_dir()?.join("open.lock"))
+    }
+
     /// 保证只有一个采集进程的锁文件，和 socket 放在一起。
     pub fn screen_lock_file(&self) -> Option<PathBuf> {
         Some(self.runtime_dir()?.join(format!("{SCREEN_NAME}.lock")))

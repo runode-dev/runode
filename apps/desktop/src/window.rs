@@ -1095,26 +1095,30 @@ fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
     div().id("panes").size_full().aria_hidden(covered).child(panes)
 }
 
-/// 系统交来打开的文件和文件夹（`urls` 里一批批的 file URL：访达的「打开方式」、拖到程序坞图标上）在最前面的
-/// 窗口里打开。
-pub fn serve_open_urls(mut urls: futures::channel::mpsc::UnboundedReceiver<Vec<String>>, cx: &mut App) {
+/// 系统交来打开的一批批文件和文件夹（「打开方式」、拖到程序坞图标上）在最前面的窗口里打开。
+pub fn serve_open_paths(mut batches: futures::channel::mpsc::UnboundedReceiver<Vec<PathBuf>>, cx: &mut App) {
     cx.spawn(async move |cx| {
-        while let Some(batch) = futures::StreamExt::next(&mut urls).await {
-            let paths: Vec<PathBuf> =
-                batch.iter().filter_map(|url| runode_lsp::uri::to_path(&url.parse().ok()?)).collect();
+        while let Some(paths) = futures::StreamExt::next(&mut batches).await {
             cx.update(|cx| {
-                let Some(handle) = front_window(cx) else { return };
-                let opened = handle.update(cx, |view, window, cx| {
-                    window.activate_window();
-                    view.open_paths(paths, true, window, cx);
-                });
-                if let Err(err) = opened {
-                    tracing::warn!("failed to open the files handed over by the system: {err:#}");
+                if !open_in_front(paths, cx) {
+                    tracing::warn!("no window to open the files handed over by the system in");
                 }
             });
         }
     })
     .detach();
+}
+
+/// 把最前面的窗口提到前面，在里面打开本机的 `paths`；没有窗口时为假。
+fn open_in_front(paths: Vec<PathBuf>, cx: &mut App) -> bool {
+    front_window(cx).is_some_and(|handle| {
+        handle
+            .update(cx, |view, window, cx| {
+                window.activate_window();
+                view.open_paths(paths, true, window, cx);
+            })
+            .is_ok()
+    })
 }
 
 impl WindowView {

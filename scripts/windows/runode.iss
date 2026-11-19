@@ -55,6 +55,24 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
   ValueName: "Runode Host"; Flags: dontcreatekey uninsdeletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; \
   ValueName: "Runode"; Flags: dontcreatekey uninsdeletevalue
+; 文件的「打开方式」里列出 Runode；文件夹和文件夹空白处的右键菜单加一项。%V 后面的 \. 是为了盘符根目录：
+; 它以反斜杠结尾，直接跟引号会把引号转义掉。
+Root: HKCU; Subkey: "Software\Classes\Applications\runode.exe"; ValueType: string; \
+  ValueName: "FriendlyAppName"; ValueData: "Runode"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\runode.exe\shell\open\command"; ValueType: string; \
+  ValueData: """{app}\runode.exe"" --open ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Runode"; ValueType: string; \
+  ValueData: "Open with Runode"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Runode"; ValueType: string; \
+  ValueName: "Icon"; ValueData: """{app}\runode.exe"""
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\Runode\command"; ValueType: string; \
+  ValueData: """{app}\runode.exe"" --open ""%V\."""
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Runode"; ValueType: string; \
+  ValueData: "Open with Runode"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Runode"; ValueType: string; \
+  ValueName: "Icon"; ValueData: """{app}\runode.exe"""
+Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Runode\command"; ValueType: string; \
+  ValueData: """{app}\runode.exe"" --open ""%V\."""
 
 [Run]
 ; 交互安装时问一句要不要打开；静默安装（自动更新、脚本）直接打开，/NORUN 不打开。

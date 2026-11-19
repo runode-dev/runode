@@ -462,6 +462,12 @@ fn window_requests_go_to_the_desktop_connection() {
     assert_eq!(forwarded, open);
     assert_eq!(cli.reply(), HostMsg::Opened { req: 7, id: SessionId(10) });
 
+    let open_paths = ClientMsg::OpenPaths { req: 6, paths: vec!["/tmp/notes.md".into()] };
+    cli.send(&open_paths);
+    let forwarded = answer_ui(&mut desktop, |_| HostMsg::Done { req: 6 });
+    assert_eq!(forwarded, open_paths);
+    assert_eq!(cli.reply(), HostMsg::Done { req: 6 });
+
     cli.send(&ClientMsg::Reveal { req: 5, id: SessionId(9) });
     let HostMsg::UiRequest { ui, request } = desktop.reply() else { panic!("expected a ui request") };
     assert_eq!(*request, ClientMsg::Reveal { req: 5, id: SessionId(9) });

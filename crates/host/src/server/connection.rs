@@ -523,6 +523,7 @@ impl Connection {
             | ClientMsg::OpenWorkspace { req, .. }
             | ClientMsg::RenameWorkspace { req, .. }
             | ClientMsg::Reveal { req, .. }
+            | ClientMsg::OpenPaths { req, .. }
             | ClientMsg::MovePane { req, .. }
             | ClientMsg::SwapPanes { req, .. } => {
                 self.to_ui(req, message);

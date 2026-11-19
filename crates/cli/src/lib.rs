@@ -95,6 +95,12 @@ pub fn complete(args: &[String], index: usize, env: &Env, out: &mut dyn Write) -
     }
 }
 
+/// 请开着的 app 在最前面的窗口里打开 `paths`（绝对路径），办成了为真。宿主没在跑、没有 app 的界面连着它时为假，
+/// 不拉起宿主。
+pub fn open_in_app(paths: &[PathBuf], env: &Env) -> bool {
+    client::open_paths(paths, env).is_ok()
+}
+
 /// 可执行文件收到这些参数时走命令行：有参数，而且不是 macOS 启动 app 时自己加的那些
 /// （`-psn_…` 进程序列号，`-NS…`、`-Apple…` 这类用户默认值）。
 pub fn wants_cli(args: &[OsString]) -> bool {

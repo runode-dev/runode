@@ -145,6 +145,9 @@ fn mobile_devices_cannot_answer_for_the_window_but_desktops_can() {
     assert_eq!(theme.remote_refusal(DeviceKind::Desktop), None);
     let shutdown = ClientMsg::Shutdown { kill_sessions: false };
     assert!(shutdown.remote_refusal(DeviceKind::Desktop).is_some());
+    let open = ClientMsg::OpenPaths { req: 1, paths: vec!["/tmp".into()] };
+    assert!(open.remote_refusal(DeviceKind::Mobile).is_some());
+    assert!(open.remote_refusal(DeviceKind::Desktop).is_some());
 }
 
 #[test]

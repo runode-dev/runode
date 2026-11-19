@@ -132,9 +132,9 @@ pub fn bonjour_txt(fingerprint: &[u8; FINGERPRINT_LEN]) -> [(&'static str, Strin
 pub const PAIRING_URI_PREFIX: &str = "runode://pair?";
 
 impl crate::ClientMsg {
-    /// 经远程访问连来的 `kind` 设备不能发的请求：管宿主本身的谁都不能发，只有桌面才该做的（替窗口回话、
-    /// 改宿主的选项和终端主题）手机不能发。返回「不能做什么」那半句，宿主回的 `HostMsg::Error` 写成
-    /// `a remote device cannot <这半句>`；能发的为 `None`。挡下的几种都不带 `req` 和会话。每种消息都列出来、
+    /// 经远程访问连来的 `kind` 设备不能发的请求：管宿主本身的谁都不能发，叫窗口打开这台电脑上的路径的（`OpenPaths`）
+    /// 也是，只有桌面才该做的（替窗口回话、改宿主的选项和终端主题）手机不能发。返回「不能做什么」那半句，宿主回的 `HostMsg::Error` 写成
+    /// `a remote device cannot <这半句>`；能发的为 `None`。回的 `Error` 不带 `req` 和会话。每种消息都列出来、
     /// 不用通配：新加的消息在这里定下远程设备能不能发。
     pub fn remote_refusal(&self, kind: DeviceKind) -> Option<&'static str> {
         use crate::ClientMsg::*;
@@ -142,6 +142,7 @@ impl crate::ClientMsg {
         match self {
             Shutdown { .. } => Some("shut the host down"),
             Handoff { .. } | HandoffReady | HandoffAbort { .. } | HandoffDone => Some("hand the host over"),
+            OpenPaths { .. } => Some("open files in the runode window"),
             UiReply { .. } if mobile => Some("answer for the runode window"),
             SetOptions { .. } if mobile => Some("change the host's options"),
             SetTheme { .. } if mobile => Some("change the terminal theme"),
