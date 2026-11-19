@@ -13,7 +13,7 @@ use std::{
 use portable_pty::CommandBuilder;
 use runode_types::{
     settings::TermSettings,
-    shell::{IntegrationMode, Shell},
+    shell::{IntegrationMode, Shell, powershell_literal},
 };
 
 /// 集成脚本定义的函数：换成一个新的 shell，重新读用户配置，集成和报告口令照旧。
@@ -115,9 +115,9 @@ pub fn prepare(
             if cfg!(unix) {
                 cmd.arg("-l");
             }
-            let script = dir.join("powershell/runode.ps1").display().to_string().replace('\'', "''");
+            let script = powershell_literal(&dir.join("powershell/runode.ps1").display().to_string());
             cmd.args(["-NoExit", "-Command"]);
-            cmd.arg(format!("Invoke-Expression ([IO.File]::ReadAllText('{script}'))"));
+            cmd.arg(format!("Invoke-Expression ([IO.File]::ReadAllText({script}))"));
             true
         }
         Some((Shell::Cmd, _)) => false,
@@ -437,12 +437,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// PowerShell 读完用户的 profile 再经 Invoke-Expression 执行集成脚本，路径里的单引号写成两个。
+    /// PowerShell 读完用户的 profile 再经 Invoke-Expression 执行集成脚本，路径里的单引号和它当成单引号的弯引号写成两个。
     #[test]
     fn powershell_runs_the_integration_after_its_profile() {
         let home = std::env::temp_dir().join(format!("runode-shell-integration-ps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        let quoted = home.join("o'brien");
+        let quoted = home.join("o'brien’s");
         let dirs = runode_paths::Dirs::from_vars(|key| (key == "HOME").then(|| quoted.clone().into()));
         let mut cmd = CommandBuilder::new("pwsh");
         cmd.env_clear();
@@ -452,7 +452,7 @@ mod tests {
         let argv: Vec<_> = cmd.get_argv().iter().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
         let command = format!(
             "Invoke-Expression ([IO.File]::ReadAllText('{}'))",
-            script.display().to_string().replace('\'', "''")
+            script.display().to_string().replace('\'', "''").replace('’', "’’")
         );
         let login = if cfg!(unix) { vec!["-l".to_owned()] } else { Vec::new() };
         assert_eq!(argv, [login, vec!["-NoExit".into(), "-Command".into(), command]].concat());

@@ -141,6 +141,20 @@ pub enum Quoting {
     Nushell,
 }
 
+/// `text` 写成 PowerShell 的单引号字符串：里面什么都不展开，单引号写两遍，它当成单引号的 `‘’‚‛` 也写两遍。
+pub fn powershell_literal(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('\'');
+    for c in text.chars() {
+        if matches!(c, '\'' | '‘' | '’' | '‚' | '‛') {
+            quoted.push(c);
+        }
+        quoted.push(c);
+    }
+    quoted.push('\'');
+    quoted
+}
+
 impl Quoting {
     /// 终端前台的 shell 的写法；前台不是 shell 或者认不出时按 `Quoting::platform`。
     pub fn of_session(meta: &SessionMeta) -> Self {
@@ -199,18 +213,7 @@ impl Quoting {
         match self {
             Self::Posix => format!("'{}'", text.replace('\'', r"'\''")),
             Self::Fish => format!("'{}'", text.replace('\\', r"\\").replace('\'', r"\'")),
-            Self::PowerShell => {
-                let mut quoted = String::with_capacity(text.len() + 2);
-                quoted.push('\'');
-                for c in text.chars() {
-                    if matches!(c, '\'' | '‘' | '’' | '‚' | '‛') {
-                        quoted.push(c);
-                    }
-                    quoted.push(c);
-                }
-                quoted.push('\'');
-                quoted
-            }
+            Self::PowerShell => powershell_literal(text),
             Self::Elvish => format!("'{}'", text.replace('\'', "''")),
             Self::Cmd => format!("\"{text}\""),
             Self::Nushell if !text.contains('\'') => format!("'{text}'"),

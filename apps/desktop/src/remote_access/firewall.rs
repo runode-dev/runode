@@ -145,7 +145,10 @@ pub fn allow(exe: &Path) -> io::Result<()> {
 
 /// `-EncodedCommand` 的参数：开头给 `$exe` 赋上 `exe`，接着是 `ALLOW`。
 fn encode_script(exe: &str) -> String {
-    runode_ssh::bootstrap::windows::encoded_command(&format!("$exe = '{}'\n{ALLOW}", exe.replace('\'', "''")))
+    runode_ssh::bootstrap::windows::encoded_command(&format!(
+        "$exe = {}\n{ALLOW}",
+        runode_types::shell::powershell_literal(exe)
+    ))
 }
 
 #[cfg(test)]
@@ -154,11 +157,11 @@ mod tests {
 
     #[test]
     fn the_program_path_stays_literal() {
-        let script = encode_script(r"C:\100%USERNAME%\it's\runode.exe");
+        let script = encode_script(r"C:\100%USERNAME%\it's\o’brien\runode.exe");
         let bytes: Vec<u8> = (0..script.len()).step_by(4).flat_map(|i| decode_group(&script[i..i + 4])).collect();
         let units: Vec<u16> = bytes.chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
         let decoded = String::from_utf16(&units).unwrap();
-        assert!(decoded.starts_with("$exe = 'C:\\100%USERNAME%\\it''s\\runode.exe'\n"));
+        assert!(decoded.starts_with("$exe = 'C:\\100%USERNAME%\\it''s\\o’’brien\\runode.exe'\n"));
     }
 
     fn decode_group(group: &str) -> Vec<u8> {
