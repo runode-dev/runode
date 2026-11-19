@@ -99,10 +99,21 @@ pub(super) async fn inspect_dir(dir: PathBuf) -> (bool, PathBuf) {
     crate::fs_probe::off_thread(move || (dir.is_dir(), canonical_dir(&dir)), fallback).await
 }
 
-/// 拖进来的路径里是目录的那些，在单独的线程上看（`fs_probe::off_thread`）：访达里还开着已经断掉的网络卷时，
-/// 拖出来的东西一看就卡住。起不了线程时当作都不是目录。
-pub(super) async fn dropped_dirs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    crate::fs_probe::off_thread(move || paths.into_iter().filter(|path| path.is_dir()).collect(), Vec::new()).await
+/// 把 `paths` 分成目录和文件（各带规范化后的路径），别的不要；在单独的线程上看（`fs_probe::off_thread`）：
+/// 访达里还开着已经断掉的网络卷时，拖出来的东西一看就卡住。起不了线程时当作什么都不是。
+pub(super) async fn sort_paths(paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<(PathBuf, PathBuf)>) {
+    let sort = move || {
+        let (dirs, rest): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| path.is_dir());
+        let files = rest.into_iter().filter(|path| path.is_file());
+        (dirs, files.map(|path| (path.clone(), std::fs::canonicalize(&path).unwrap_or(path))).collect())
+    };
+    crate::fs_probe::off_thread(sort, Default::default()).await
+}
+
+/// `dirs`（各带一个标记）里包着 `file` 的目录的标记，一层套一层时取最里面的。
+pub(super) fn innermost<'a, T>(dirs: impl Iterator<Item = (T, &'a Path)>, file: &Path) -> Option<T> {
+    let around = dirs.filter(|(_, dir)| file.starts_with(dir));
+    around.max_by_key(|(_, dir)| dir.components().count()).map(|(mark, _)| mark)
 }
 
 /// 组是 `key` 的一项放进列表（各项的组依次是 `keys`）时落在第几个：同一组的要挨在一起。已经有这一组时，
@@ -1196,6 +1207,15 @@ mod tests {
     use super::*;
 
     const NONE: [u32; 0] = [];
+
+    #[test]
+    fn files_belong_to_the_innermost_directory_around_them() {
+        let dirs = ["/p", "/p/sub", "/q", "/p/su"].map(Path::new);
+        let owner = |file: &str| innermost(dirs.into_iter().enumerate(), Path::new(file));
+        assert_eq!(owner("/p/sub/a.rs"), Some(1));
+        assert_eq!(owner("/p/subway/a.rs"), Some(0));
+        assert_eq!(owner("/r/a.rs"), None);
+    }
 
     #[test]
     fn new_workspaces_join_their_host_group() {

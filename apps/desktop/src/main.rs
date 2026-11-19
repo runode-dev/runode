@@ -177,7 +177,11 @@ fn main() {
     #[cfg(target_os = "linux")]
     desktop_entry::refresh();
 
-    application().with_assets(ui::icons::Assets).run(|cx: &mut App| {
+    let app = application().with_assets(ui::icons::Assets);
+    // 启动时系统交来的文件在 `run` 的回调之前就到。
+    let (opened, open_urls) = futures::channel::mpsc::unbounded();
+    app.on_open_urls(move |urls| _ = opened.unbounded_send(urls));
+    app.run(|cx: &mut App| {
         startup::mark("app_run");
         // 系统通知认这个身份：Windows 上是 AppUserModelID，Linux 上是通知里的程序名。macOS 上由 .app 的
         // bundle id 定。
@@ -248,6 +252,7 @@ fn main() {
         window::watch_devices(cx);
         window::watch_todos(cx);
         window::watch_status(cx);
+        window::serve_open_urls(open_urls, cx);
         cx.activate(true);
         host_client::show_notice(cx);
         // 窗口先出来；未打包运行时才需要的图标解码放到最后。

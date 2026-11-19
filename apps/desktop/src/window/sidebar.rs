@@ -279,7 +279,7 @@ impl WindowView {
             .flex()
             .flex_col()
             .when(!cards(cx), |sidebar| sidebar.bg(sidebar_background(cx)).border_r_1().border_color(cx.theme().border))
-            // 从访达拖来的东西悬在侧栏上时提示放下能开 workspace；放下由窗口根上的 `open_dropped_dirs` 办。
+            // 从访达拖来的东西悬在侧栏上时提示放下能打开；放下由窗口根上的 `open_paths` 办。
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(drop_bg))
             .text_size(FontSize::Body)
             // 顶上这条放红绿灯（全屏时没有）和侧栏开关，和标题栏一样能拖动窗口、双击缩放，比标题栏

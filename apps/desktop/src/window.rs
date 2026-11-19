@@ -1050,7 +1050,9 @@ impl Render for WindowView {
             // 写提交说明对话框里 agent 菜单的项派发到窗口的焦点上。
             .on_action(cx.listener(Self::select_commit_agent))
             // 终端和新建对话框没接住的拖放落到这里：侧栏收着时拖到标题栏、空 workspace 上也能开。
-            .on_drop(cx.listener(Self::open_dropped_dirs))
+            .on_drop(cx.listener(|this, dropped: &ExternalPaths, window, cx| {
+                this.open_paths(dropped.paths().to_vec(), false, window, cx);
+            }))
             .relative()
             .size_full()
             .flex()
@@ -1093,22 +1095,60 @@ fn covered_panes(panes: AnyElement, covered: bool) -> Stateful<Div> {
     div().id("panes").size_full().aria_hidden(covered).child(panes)
 }
 
+/// 系统交来打开的文件和文件夹（`urls` 里一批批的 file URL：访达的「打开方式」、拖到程序坞图标上）在最前面的
+/// 窗口里打开。
+pub fn serve_open_urls(mut urls: futures::channel::mpsc::UnboundedReceiver<Vec<String>>, cx: &mut App) {
+    cx.spawn(async move |cx| {
+        while let Some(batch) = futures::StreamExt::next(&mut urls).await {
+            let paths: Vec<PathBuf> =
+                batch.iter().filter_map(|url| runode_lsp::uri::to_path(&url.parse().ok()?)).collect();
+            cx.update(|cx| {
+                let Some(handle) = front_window(cx) else { return };
+                let opened = handle.update(cx, |view, window, cx| {
+                    window.activate_window();
+                    view.open_paths(paths, true, window, cx);
+                });
+                if let Err(err) = opened {
+                    tracing::warn!("failed to open the files handed over by the system: {err:#}");
+                }
+            });
+        }
+    })
+    .detach();
+}
+
 impl WindowView {
-    /// 从访达拖来的文件夹各开一个 workspace，已经开着的就切过去；文件不算。
-    fn open_dropped_dirs(&mut self, dropped: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+    /// 打开本机的 `paths`：文件夹各开一个 workspace，已经开着的就切过去；文件在当前 workspace 的预览栏里开成
+    /// 固定标签，`to_owner` 时先切到目录包着它的本机 workspace。当前 workspace 不在本机时文件不开。
+    fn open_paths(&mut self, paths: Vec<PathBuf>, to_owner: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !self.leave_todo_page(window, cx) {
             return;
         }
-        let paths = dropped.paths().to_vec();
         cx.spawn_in(window, async move |this, cx| {
-            let dirs = model::dropped_dirs(paths).await;
+            let (dirs, files) = model::sort_paths(paths).await;
             this.update_in(cx, |this, window, cx| {
-                if dirs.is_empty() || this.dialog_open(cx) {
+                if (dirs.is_empty() && files.is_empty()) || this.dialog_open(cx) {
                     return;
                 }
                 this.close_settings(window, cx);
                 for dir in dirs {
                     this.open_workspace(dir, None, window, cx);
+                }
+                for (path, real) in files {
+                    let local = this.workspaces.iter().enumerate().filter(|(_, workspace)| workspace.host.is_local());
+                    let owner = to_owner
+                        .then(|| model::innermost(local.map(|(ix, workspace)| (ix, workspace.real_dir())), &real))
+                        .flatten();
+                    if let Some(ix) = owner
+                        && ix != this.active
+                    {
+                        this.activate_workspace(ix, window, cx);
+                    }
+                    if this.workspace().host.is_local() {
+                        this.open_preview(&path, true, cx);
+                        // 焦点落到刚切过来的终端上，预览会退到它后面。
+                        window.focus(&this.preview.focus_handle(cx), cx);
+                    }
                 }
             })
             .ok();

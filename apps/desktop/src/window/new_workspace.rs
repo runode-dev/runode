@@ -543,7 +543,7 @@ impl WindowView {
                         cx.listener(|_, dropped: &ExternalPaths, window, cx| {
                             let paths = dropped.paths().to_vec();
                             cx.spawn_in(window, async move |this, cx| {
-                                let Some(dir) = super::model::dropped_dirs(paths).await.into_iter().next() else {
+                                let Some(dir) = super::model::sort_paths(paths).await.0.into_iter().next() else {
                                     return;
                                 };
                                 this.update_in(cx, |this, window, cx| {
