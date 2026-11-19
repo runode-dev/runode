@@ -197,8 +197,7 @@ fn spawn(spec: servers::Server, root: &Path) -> io::Result<Option<Process>> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     // app 没有控制台，不这样每起一个服务器就闪一个黑窗。
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    crate::subprocess::hide_window(&mut command);
     let mut child = command.spawn()?;
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         return Err(io::Error::other("the language server has no stdio"));

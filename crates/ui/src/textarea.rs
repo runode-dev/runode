@@ -79,10 +79,6 @@ pub struct TextareaState {
     /// 高度在这么多行之间伸缩。
     min_lines: usize,
     max_lines: usize,
-    /// 高度撑满父元素，不随行数伸缩。
-    fill: bool,
-    /// 左边画一栏行号。
-    line_numbers: bool,
     /// 按住鼠标拖选中；双击、三击后拖动按词、按行扩展。
     drag: Option<Drag>,
     history: History,
@@ -137,8 +133,6 @@ impl TextareaState {
             label: None,
             min_lines: 1,
             max_lines: 10,
-            fill: false,
-            line_numbers: false,
             drag: None,
             history: History::default(),
             version: 0,
@@ -170,34 +164,6 @@ impl TextareaState {
         if !self.sync(cx) {
             cx.emit(TextareaEvent::Changed);
         }
-    }
-
-    /// 换上全部文字，清空撤销记录，光标放到开头，发 `Changed`：拿来编辑一份读进来的文件时用。
-    pub fn load_text(&mut self, text: String, cx: &mut Context<Self>) {
-        self.set_text(text, cx);
-        self.history = History::default();
-        self.move_to(0, false, cx);
-    }
-
-    /// 换上别处改过的全部文字（可撤销），选区跟着不同的那段挪、滚动不动；文字没变时什么也不做，返回 `false`。
-    /// 编辑着的文件在磁盘上被别的程序改了时用。
-    pub fn reload_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
-        let text = normalize_newlines(&text);
-        if self.marked.is_none() && text == self.content {
-            return false;
-        }
-        self.record(None);
-        self.marked = None;
-        let (range, len) = changed_middle(&self.content, &text);
-        let shift = |offset| offset_after_change(offset, &range, len);
-        let selected = shift(self.selected.start)..shift(self.selected.end);
-        self.replace_all(text);
-        self.selected =
-            self.content.floor_char_boundary(selected.start)..self.content.floor_char_boundary(selected.end);
-        self.goal_x = None;
-        self.sync(cx);
-        self.autoscroll = false;
-        true
     }
 
     /// 文字的版本，每改一次（含输入法组字）变一次；交给 `set_highlights` 认出算样式段时的文字。
@@ -276,19 +242,6 @@ impl TextareaState {
         self.min_lines = min.max(1);
         self.max_lines = max.max(self.min_lines);
         self.autoscroll = true;
-        cx.notify();
-    }
-
-    /// 左边画一栏行号：每段硬换行的第一个视觉行写上它是第几行（从 1 数），软换行折出来的行不写。栏宽按最大
-    /// 行号的位数定，文字往右让开。
-    pub fn show_line_numbers(&mut self, cx: &mut Context<Self>) {
-        self.line_numbers = true;
-        cx.notify();
-    }
-
-    /// 高度撑满父元素，不再按 `set_line_limits` 的行数伸缩，内容超出时竖着滚动；外框也要撑满。
-    pub fn fill_height(&mut self, cx: &mut Context<Self>) {
-        self.fill = true;
         cx.notify();
     }
 
@@ -713,7 +666,6 @@ impl Render for TextareaState {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(|_, _: &SubmitText, _, cx| cx.emit(TextareaEvent::Submit)))
             .w_full()
-            .when(self.fill, |el| el.h_full())
             .cursor_text()
             .child(TextareaText { area: cx.entity() })
     }
@@ -889,16 +841,6 @@ fn shift_spans(spans: &mut Vec<(Range<usize>, HighlightStyle)>, range: &Range<us
     *spans = shifted;
 }
 
-/// `range` 换成 `len` 字节的新文字以后，原来在 `offset` 的位置挪到哪：在前面的不动，在后面的跟着挪，落在换掉的
-/// 那段里的放到新文字后面。
-fn offset_after_change(offset: usize, range: &Range<usize>, len: usize) -> usize {
-    match offset {
-        offset if offset <= range.start => offset,
-        offset if offset >= range.end => offset - range.end + range.start + len,
-        _ => range.start + len,
-    }
-}
-
 /// `old` 换成 `new` 时中间不同的那段：返回它在 `old` 里的范围和在 `new` 里的长度，两头落在字的边界上。
 fn changed_middle(old: &str, new: &str) -> (Range<usize>, usize) {
     let (a, b) = (old.as_bytes(), new.as_bytes());
@@ -930,19 +872,6 @@ mod tests {
         assert_eq!(lines_spanned(text, 2..3), Some(1..2));
         assert_eq!(lines_spanned(text, line_range_at(text, 2)), Some(1..2));
         assert_eq!(lines_spanned(text, 0..text.len()), Some(0..3));
-    }
-
-    #[test]
-    fn offsets_follow_an_outside_change() {
-        let (old, new) = ("one\ntwo\n", "zero\none\ntwo\n");
-        let (range, len) = changed_middle(old, new);
-        // 光标在 two 前面：上面多出一行时跟着往下挪，还在 two 前面。
-        assert_eq!(&new[offset_after_change(4, &range, len)..][..3], "two");
-        let (range, len) = changed_middle("one\ntwo\n", "one\ntwo\nthree\n");
-        assert_eq!(offset_after_change(4, &range, len), 4);
-        // 光标所在的那段被换掉时放到新文字后面。
-        let (range, len) = changed_middle("abc", "aXYc");
-        assert_eq!(offset_after_change(2, &range, len), 3);
     }
 
     #[test]
