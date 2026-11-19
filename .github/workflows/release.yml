@@ -11,7 +11,7 @@
 # 带界面的，打成 AppImage（也是自动更新下载的包）、deb 和 rpm；在
 # Windows 上打 x86_64 的安装包 setup.exe（Inno Setup，装到用户目录）和装到 SSH 远端用的便携 zip，可执行文件和安装包
 # 都用自签名证书签名；
-# x86_64 的 Mac 包再到 Intel 的 runner 上跑一下；CI 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
+# 两份 Mac 包各在自己架构的 runner 上核对签名和公证票据、跑一下，Windows 的安装包核对签名、装一遍；CI 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
 # 公开；最后在 macOS 和 Linux 上各用 scripts/install.sh、在 Windows 上静默运行 setup.exe 装一遍这个版本，
 # 确认装得上、跑得起来。
 #
@@ -467,32 +467,100 @@ jobs:
             target/release/bundle/Runode-*-windows-x86_64.zip
           if-no-files-found: error
 
-  check-macos-x86_64:
-    # x86_64 的 Mac 包是交叉编译的，打包时没跑过；公开前在 Intel 机器上跑一下，起不来就不发。
-    # shortcut: 只能在 Intel runner 上跑，GitHub 停掉 macos-15-intel 时这一步等不到机器、整个发版卡住；
+  check-macos:
+    # 公开前把两份 Mac 包各在自己的架构上过一遍：dmg 和里面的 app 签名完好、是 Developer ID 签的、钉着公证票据，
+    # 拷出来跑得起来。x86_64 的包是交叉编译的，打包时没跑过。有一样不对就不发。
+    # shortcut: x86_64 只能在 Intel runner 上跑，GitHub 停掉 macos-15-intel 时这一步等不到机器、整个发版卡住；
     # 到时改在 macos-15 上用 Rosetta 跑（arch -x86_64），或者不再发 x86_64。
     needs: [prepare, build-macos]
-    runs-on: macos-15-intel
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: bundle-macos-x86_64
+          name: bundle-macos-${{ matrix.arch }}
           path: bundle
-      - name: 拷出 .app、核对版本号
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
+      - name: 核对 dmg 的签名和公证票据
         run: |
-          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mnt" bundle/Runode-"$VERSION"-macos-x86_64.dmg
+          dmg=bundle/Runode-"$VERSION"-macos-${{ matrix.arch }}.dmg
+          codesign --verify --strict --verbose=2 "$dmg"
+          xcrun stapler validate "$dmg"
+      - name: 拷出 .app、核对签名和版本号
+        run: |
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mnt" bundle/Runode-"$VERSION"-macos-${{ matrix.arch }}.dmg
           ditto "$RUNNER_TEMP/mnt/Runode.app" "$RUNNER_TEMP/app/Runode.app"
           hdiutil detach "$RUNNER_TEMP/mnt"
-          reported=$("$RUNNER_TEMP/app/Runode.app/Contents/MacOS/runode" --version)
+          app="$RUNNER_TEMP/app/Runode.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -q '^Authority=Developer ID Application: ' ||
+            { echo "app 不是 Developer ID 签的" >&2; exit 1; }
+          xcrun stapler validate "$app"
+          reported=$("$app/Contents/MacOS/runode" --version)
           echo "$reported"
           [[ "$reported" == "runode $VERSION."* ]] || { echo "跑出来的不是 $VERSION" >&2; exit 1; }
 
+  check-windows:
+    # 公开前在 Windows 上过一遍安装包：签名完好，产品版本对得上，签名的证书和上一个正式版是同一张，再静默装上、
+    # 核对命令行报的版本号。装着的 app 按签名证书的指纹和产品版本认新版，这两样不对时发出去也没人更新得了。
+    needs: [prepare, build-windows]
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-windows-x86_64
+          path: bundle
+      - name: 核对签名和产品版本
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 自签名证书系统不信任，状态是 UnknownError 或 NotTrusted 也算签名完好。
+          function Thumbprint($file) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file
+            if (@('Valid', 'UnknownError', 'NotTrusted') -notcontains [string]$signature.Status) {
+              throw "signature status of ${file} is $($signature.Status)"
+            }
+            if (-not $signature.SignerCertificate) { throw "${file} has no signer certificate" }
+            $signature.SignerCertificate.Thumbprint
+          }
+          function Parts($version) {
+            $parts = @($version.Trim().Split('.') | ForEach-Object { [int]$_ })
+            while ($parts.Count -lt 4) { $parts += 0 }
+            $parts -join '.'
+          }
+          $setup = Get-Item "bundle/Runode-$env:VERSION-windows-x86_64-setup.exe"
+          $thumbprint = Thumbprint $setup.FullName
+          $product = $setup.VersionInfo.ProductVersion
+          if ((Parts $product) -ne (Parts $env:VERSION)) { throw "the installer is version $product, not $env:VERSION" }
+          # 还没发过正式版、或者上一版没有安装包时没得比。
+          gh release download --repo $env:GITHUB_REPOSITORY --pattern '*-windows-x86_64-setup.exe' --dir previous
+          if ($LASTEXITCODE -ne 0) { Write-Host 'no previous installer to compare with'; exit 0 }
+          $previous = Thumbprint (Get-ChildItem previous | Select-Object -First 1).FullName
+          if ($previous -ne $thumbprint) { throw "signed by $thumbprint, the previous release by $previous" }
+      - name: 安装、核对版本号
+        shell: bash
+        run: |
+          bundle/Runode-"$VERSION"-windows-x86_64-setup.exe //VERYSILENT //SUPPRESSMSGBOXES //NORESTART //NORUN
+          reported=$("$LOCALAPPDATA/Programs/Runode/rn.exe" --version)
+          echo "$reported"
+          [[ "$reported" == "runode $VERSION."* ]] || { echo "装上的不是 $VERSION" >&2; exit 1; }
+
   publish:
-    # CI 过了、各平台各架构都打好了、x86_64 的 Mac 包跑过了才发，缺一个就不发。
-    needs: [prepare, ci, build-macos, build-linux, build-linux-desktop, build-windows, check-macos-x86_64]
+    # CI 过了、各平台各架构都打好了、Mac 和 Windows 的包核对过了才发，缺一个就不发。
+    needs: [prepare, ci, build-macos, build-linux, build-linux-desktop, build-windows, check-macos, check-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
