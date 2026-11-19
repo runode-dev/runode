@@ -43,6 +43,28 @@ runode-speech = { path = "crates/speech", default-features = false }
 libghostty-vt = { path = "vendor/libghostty-rs/crates/libghostty-vt" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12" }
+# 预览栏的代码编辑器（Apache-2.0）。它自己用 `=` 钉着 gpui-pre 的版本，两边一起改；语法包各是一个特性，
+# JSON 的含在 tree-sitter 里。
+gpui-component = { version = "=0.10.0", features = [
+    "tree-sitter-bash",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-css",
+    "tree-sitter-go",
+    "tree-sitter-html",
+    "tree-sitter-java",
+    "tree-sitter-javascript",
+    "tree-sitter-kotlin",
+    "tree-sitter-markdown",
+    "tree-sitter-markdown-inline",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-swift",
+    "tree-sitter-toml",
+    "tree-sitter-tsx",
+    "tree-sitter-typescript",
+    "tree-sitter-yaml",
+] }
 anyhow = "1"
 portable-pty = "0.9"
 # socket 选项的跨平台写法：keepalive、IPV6_V6ONLY，以及绑定前设选项。

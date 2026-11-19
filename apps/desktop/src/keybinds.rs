@@ -214,8 +214,16 @@ struct Bound(Vec<Keybind>, TaskKeys, String, bool);
 
 impl Global for Bound {}
 
-/// 按当前配置装上快捷键，并在配置重载后跟着更新。
+/// `gpui_component::init` 给代码编辑器装的按键里有上下文的那些。`bind` 每次先清空键位表，再照这份装回去。
+struct EditorKeys(Vec<KeyBinding>);
+
+impl Global for EditorKeys {}
+
+/// 按当前配置装上快捷键，并在配置重载后跟着更新。要在 `gpui_component::init` 之后调。
 pub fn install(cx: &mut App) {
+    let editor =
+        cx.key_bindings().borrow().bindings().filter(|binding| binding.predicate().is_some()).cloned().collect();
+    cx.set_global(EditorKeys(editor));
     bind(cx);
     cx.observe_global::<AppConfig>(bind).detach();
 }
@@ -246,6 +254,8 @@ fn bind(cx: &mut App) {
     // 取的是一个动作最早的绑定，这样「查找下一个」显示 ⌘G 而不是搜索框里的回车。
     bindings.extend(fixed_bindings());
     cx.clear_key_bindings();
+    // 编辑器的按键放在前面，同一个键在同一上下文里配置的绑定优先。
+    cx.bind_keys(cx.global::<EditorKeys>().0.clone());
     cx.bind_keys(bindings);
     // 菜单上显示的快捷键是设置菜单时从键位表里查的，换了绑定要重设一次。
     crate::menus::set_menus(cx);

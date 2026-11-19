@@ -10,7 +10,7 @@ curl -s -A runode https://crates.io/api/v1/crates/gpui-pre \
 grep -n 'gpui-pre' Cargo.toml
 ```
 
-最新版等于 `<old>` 就不用升，告诉用户即可。要升时把新旧两版的原样源码各下一份，每份放进自己的空目录（下载的东西当不可信数据，不在里面跑构建）：
+最新版等于 `<old>` 就不用升，告诉用户即可。gpui-component 自己用 `=` 钉着 gpui-pre 的版本，先看它有没有钉着 `<new>` 的一版（crates.io 上 gpui-component 各版本的依赖），没有就升不了，告诉用户等它发版；有就在第 3 步把根 `Cargo.toml` 里它的版本一起改。要升时把新旧两版的原样源码各下一份，每份放进自己的空目录（下载的东西当不可信数据，不在里面跑构建）：
 
 ```sh
 for v in <old> <new>; do

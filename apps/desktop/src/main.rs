@@ -182,6 +182,7 @@ fn main() {
             cx.set_app_identity(runode_update::BUNDLE_ID, "Runode");
         }
         assets::install_fonts(cx);
+        gpui_component::init(cx);
         startup::mark("fonts_install");
         config::install(cx);
         startup::mark("config_install");
