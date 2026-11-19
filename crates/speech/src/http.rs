@@ -86,7 +86,13 @@ pub(crate) fn curl() -> Command {
     #[cfg(windows)]
     {
         let program = std::env::var_os("PATH")
-            .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("curl.exe")).find(|exe| exe.is_file()))
+            .and_then(|path| {
+                // 空段和相对段会按当前目录找，不认。
+                std::env::split_paths(&path)
+                    .filter(|dir| dir.is_absolute())
+                    .map(|dir| dir.join("curl.exe"))
+                    .find(|exe| exe.is_file())
+            })
             .unwrap_or_else(|| PathBuf::from("curl"));
         let mut command = Command::new(program);
         std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);

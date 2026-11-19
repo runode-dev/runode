@@ -211,7 +211,13 @@ fn revocation_unchecked(error: &str) -> bool {
 fn curl(timeout: Duration, no_revoke: bool) -> std::process::Command {
     #[cfg(windows)]
     let program = std::env::var_os("PATH")
-        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("curl.exe")).find(|exe| exe.is_file()))
+        .and_then(|path| {
+            // 空段和相对段会按当前目录找，不认。
+            std::env::split_paths(&path)
+                .filter(|dir| dir.is_absolute())
+                .map(|dir| dir.join("curl.exe"))
+                .find(|exe| exe.is_file())
+        })
         .unwrap_or_else(|| "curl.exe".into());
     #[cfg(not(windows))]
     let program = "curl";
