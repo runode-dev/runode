@@ -102,9 +102,9 @@ impl WindowView {
     }
 
     /// 在预览栏里打开 `path` 并切到它的标签：`pin` 时开成固定标签，否则开成临时标签；已经开着
-    /// 时重读一次。文件树跟着定位到它。`edit` 时读完是能编辑的文本就进编辑模式。
-    pub(super) fn open_preview(&mut self, path: &Path, pin: bool, edit: bool, cx: &mut Context<Self>) {
-        self.with_preview(cx, |panel, cx| panel.open(path, pin, edit, cx));
+    /// 时重读一次。文件树跟着定位到它。
+    pub(super) fn open_preview(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
+        self.with_preview(cx, |panel, cx| panel.open(path, pin, cx));
         self.reveal_front_tab(cx);
     }
 
@@ -116,10 +116,9 @@ impl WindowView {
         line: usize,
         hit: Option<Range<usize>>,
         pin: bool,
-        edit: bool,
         cx: &mut Context<Self>,
     ) {
-        self.with_preview(cx, |panel, cx| panel.open_at(path, line, hit, pin, edit, cx));
+        self.with_preview(cx, |panel, cx| panel.open_at(path, line, hit, pin, cx));
         self.reveal_front_tab(cx);
     }
 

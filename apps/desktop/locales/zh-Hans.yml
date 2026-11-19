@@ -1524,8 +1524,6 @@ preview:
   wrap: 自动换行
   show_source: 显示源码
   show_rendered: 显示排版
-  edit: 编辑
-  edit_failed: 无法编辑这个文件
   go_to_line: 跳到行号
   save_failed: 文件没有存下来
   modified_tab: "%{name}（已修改）"

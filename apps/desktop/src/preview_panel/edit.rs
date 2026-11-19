@@ -1,5 +1,5 @@
-//! 预览栏的编辑模式：普通标签里的文本文件换成代码编辑器（gpui-component 的 `EditorState`）来改，⌘S 存回
-//! 磁盘。改过没存的标签名后面带一个圆点，关掉它或退出编辑之前先问一句；文件在磁盘上被别人改过时存之前也先问。
+//! 预览栏的编辑器：普通标签里读全了的文本文件，正文是代码编辑器（gpui-component 的 `EditorState`），打开就能改，
+//! ⌘S 存回磁盘。改过没存的标签名后面带一个圆点，关掉它之前先问一句；文件在磁盘上被别人改过时存之前也先问。
 //! 语法高亮、查找替换、折叠和缩进由编辑器自己做，配色经 `theme` 跟着窗口的主题。
 //!
 //! 从 Dock 退出、注销、关机这类系统发起的退出弹不了框，没存的修改会丢。
@@ -160,7 +160,7 @@ impl Preview {
         self.editor.as_ref().filter(|editor| editor.dirty).map(|editor| editor.area.clone())
     }
 
-    /// 能进编辑模式：普通标签里读全了的文本。
+    /// 正文能换成编辑器：普通标签里读全了的文本。
     pub(super) fn editable(&self) -> bool {
         self.diff.is_none() && matches!(self.content, Some(Loaded::Text { truncated: false, .. }))
     }
@@ -178,86 +178,14 @@ impl Preview {
 }
 
 impl PreviewPanel {
-    /// 当前标签在编辑时输入框的焦点。
+    /// `preview` 正显示着的编辑器；Markdown 显示着排版时编辑器留着不显示。
+    pub(super) fn shown_editor<'a>(&self, preview: &'a Preview) -> Option<&'a Editor> {
+        preview.editor.as_ref().filter(|_| !self.markdown_shown(preview))
+    }
+
+    /// 当前标签显示着编辑器时它的焦点。
     pub(super) fn editor_focus(&self, cx: &App) -> Option<FocusHandle> {
-        Some(self.preview()?.editor.as_ref()?.area.focus_handle(cx))
-    }
-
-    /// 当前标签进出编辑模式。进的时候固定标签，免得打开别的文件时被换掉；改过没存时退出先问。
-    pub(super) fn toggle_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview_mut() else {
-            return;
-        };
-        if preview.editor.is_none() {
-            if preview.editable() {
-                preview.pinned = true;
-                self.start_editing(window, cx);
-            }
-            return;
-        }
-        if !preview.dirty() {
-            preview.editor = None;
-            window.focus(&self.focus, cx);
-            cx.notify();
-            return;
-        }
-        let area = preview.unsaved_area();
-        let name = preview.name();
-        let answer = self.ask_unsaved(&[name], window, cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let answer = answer.await.ok();
-            if answer == Some(UNSAVED_SAVE) {
-                let Some(saved) = area
-                    .clone()
-                    .and_then(|area| this.update_in(cx, |this, window, cx| this.save(area, window, cx)).ok())
-                else {
-                    return;
-                };
-                if !saved.await {
-                    return;
-                }
-            } else if answer != Some(UNSAVED_DISCARD) {
-                return;
-            }
-            this.update_in(cx, |this, window, cx| {
-                if let Some(preview) =
-                    this.preview_mut().filter(|preview| preview.editor.as_ref().map(|e| e.area.clone()) == area)
-                {
-                    preview.editor = None;
-                    window.focus(&this.focus, cx);
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    /// 在后台读当前标签的原文，读好了换成输入框、把焦点给它。读不了时报错，不进编辑。
-    fn start_editing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview() else {
-            return;
-        };
-        let (ws, path) = (self.ws, preview.path.clone());
-        let job = read_in_background(self.project(), &path, cx);
-        cx.spawn_in(window, async move |this, cx| {
-            let source = job.await;
-            this.update_in(cx, |this, window, cx| match source {
-                Ok(source) => {
-                    // 读的期间切走了的不抢焦点。
-                    let shown =
-                        this.ws == ws && this.preview().is_some_and(|tab| tab.path == path && tab.diff.is_none());
-                    if let Some(area) = this.install_editor(ws, &path, source, window, cx)
-                        && shown
-                    {
-                        window.focus(&area.focus_handle(cx), cx);
-                    }
-                }
-                Err(err) => report(&rust_i18n::t!("preview.edit_failed"), &err, window, cx),
-            })
-            .ok();
-        })
-        .detach();
+        Some(self.shown_editor(self.preview()?)?.area.focus_handle(cx))
     }
 
     /// 在后台读 workspace `ws` 里 `path` 普通标签的原文，读好了换成输入框；焦点不动，读不了时不进编辑也不报错。
@@ -549,6 +477,8 @@ impl PreviewPanel {
                     .min_h_0()
                     .role(Role::MultilineTextInput)
                     .aria_label(name)
+                    // 没被高亮上色的字用继承来的文字颜色画。
+                    .text_color(cx.theme().foreground)
                     .font_family(font)
                     .text_size(px(font_size))
                     .line_height(px(font_size + ROW_EXTRA_HEIGHT)),
@@ -557,7 +487,8 @@ impl PreviewPanel {
 
     /// 在当前标签的编辑器上面打开「跳到行号」的输入条：回车把光标放到那一行行首，Esc 关掉，焦点都回编辑器。
     pub(super) fn go_to_line(&mut self, _: &GoToLine, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(area) = self.preview().and_then(|preview| preview.editor.as_ref()).map(|editor| editor.area.clone())
+        let Some(area) =
+            self.preview().and_then(|preview| self.shown_editor(preview)).map(|editor| editor.area.clone())
         else {
             return;
         };

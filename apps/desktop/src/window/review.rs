@@ -60,7 +60,7 @@ impl WindowView {
             // 预览和这一页都盖在终端区上，先收起这一页才看得到。
             ReviewEvent::OpenFile(path) => {
                 self.close_review(window, cx);
-                self.open_preview(path, true, false, cx);
+                self.open_preview(path, true, cx);
             }
             ReviewEvent::OpenDiff(target) => {
                 self.close_review(window, cx);

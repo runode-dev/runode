@@ -1545,7 +1545,7 @@ impl PreviewPanel {
                     if job.await {
                         this.update(cx, |this, cx| {
                             if this.ws == id && this.preview().is_some_and(|preview| preview.path == source) {
-                                this.open(&path, false, false, cx);
+                                this.open(&path, false, cx);
                             }
                         })
                         .ok();

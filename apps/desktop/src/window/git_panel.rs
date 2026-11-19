@@ -72,7 +72,7 @@ impl WindowView {
                     DiffTarget { root: root.clone(), rel: rel.clone(), old_rel: old_rel.clone(), side: side.clone() };
                 self.click_diff(target, *clicks, cx);
             }
-            GitPanelEvent::OpenFile(path) => self.open_preview(path, true, false, cx),
+            GitPanelEvent::OpenFile(path) => self.open_preview(path, true, cx),
             GitPanelEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             GitPanelEvent::FocusTerminal => self.focus_terminal(window, cx),
             GitPanelEvent::OpenTerminal(dir) => {

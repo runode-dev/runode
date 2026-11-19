@@ -4,8 +4,8 @@
 //! 标签能拖动换位置，中键关掉，右键有关闭其他、关闭右侧这些。文本用终端的字体，带行号和相对 HEAD 的改动标记，能按行选中复制，
 //! 语法高亮在后台做完再换上；图片按栏宽等比缩小；二进制、读不了、太大的文件只给一句说明。
 //! 文件在磁盘上变了就重读，没显示的标签等切过去时再看要不要重读。Markdown 文件默认显示排版后的
-//! 样子，在后台解析。按 `open` 的 `edit` 打开的文本文件读完直接进编辑模式，Markdown
-//! 也一样，编辑的是源码，退出编辑才看到排版。
+//! 样子，在后台解析。读全了的文本文件读完正文就换成编辑器，打开就能改；Markdown
+//! 切到源码时是编辑器，排版显示的是磁盘上的内容。
 //!
 //! 从 Git 面板点开的是 diff 标签，和同一个文件的普通标签分开。
 //!
@@ -15,7 +15,7 @@
 //!
 //! 读文件、判断类型和高亮在 `runode_preview`，这里只管状态、后台任务和画：标签在 `tabs`，正文的
 //! 行和图片在 `body`，行号旁的改动标记在 `marks`，自动换行在 `wrap`，Markdown 的排版视图在 `markdown`，
-//! 编辑模式在 `edit`。
+//! 编辑器在 `edit`。
 //!
 //! 顶上一条写着文件路径，右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，app
 //! 随窗口存档）。
@@ -52,7 +52,7 @@ use crate::ui::{
     font_size::FontSize,
     icons::{
         ALERT_CAUTION_ICON, ALERT_IMPORTANT_ICON, ALERT_NOTE_ICON, ALERT_TIP_ICON, ALERT_WARNING_ICON, ARROW_UP_ICON,
-        CODE_ICON, PENCIL_ICON, WRAP_ICON,
+        CODE_ICON, WRAP_ICON,
     },
     menu::{Menu, MenuHost},
     panel::{panel_header, panel_shell},
@@ -155,7 +155,7 @@ struct Preview {
     stamp: Option<Stamp>,
     /// 选中的行：按下的那行和现在拖到的那行，从 0 数。
     selection: Option<(usize, usize)>,
-    /// 搜索结果打开时那一行里搜到的那段（行号和字节范围）：进编辑模式时只选中它，选区还是那一行时才算。
+    /// 搜索结果打开时那一行里搜到的那段（行号和字节范围）：正文换成编辑器时只选中它，选区还是那一行时才算。
     hit: Option<(usize, Range<usize>)>,
     /// 按着鼠标在拖选。
     selecting: bool,
@@ -170,10 +170,8 @@ struct Preview {
     /// 要滚到的条目（文本的行或 diff 的行）和滚到哪儿。等画的时候再滚：内容可能还没读完，
     /// 换行时条目在第几行也要那时才知道。
     reveal: Cell<Option<(usize, ScrollStrategy)>>,
-    /// 在编辑模式里时正文换成它。
+    /// 能编辑的文本读好后正文换成它。
     editor: Option<edit::Editor>,
-    /// 下次读完是能编辑的文本就进编辑模式，读完即清掉：从文件树打开的。
-    edit_on_load: bool,
 }
 
 enum Loaded {
@@ -247,7 +245,6 @@ impl Preview {
             marks: HashMap::new(),
             reveal: Cell::new(None),
             editor: None,
-            edit_on_load: false,
         }
     }
 
@@ -745,24 +742,16 @@ impl PreviewPanel {
     }
 
     /// 在预览栏里打开 `path` 并切到它的标签：`pin` 时开成固定标签，否则开成临时标签；已经开着
-    /// 时重读一次。文件树跟着定位到它。`edit` 时读完是能编辑的文本就进编辑模式，焦点不动；临时标签
+    /// 时重读一次。文件树跟着定位到它。读完是能编辑的文本正文就换成编辑器，焦点不动；临时标签
     /// 改了才固定下来。
-    pub fn open(&mut self, path: &Path, pin: bool, edit: bool, cx: &mut Context<Self>) {
-        self.open_tab(path, None, pin, edit, cx);
+    pub fn open(&mut self, path: &Path, pin: bool, cx: &mut Context<Self>) {
+        self.open_tab(path, None, pin, cx);
     }
 
-    /// 打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；进编辑模式时在编辑器里选中它，有 `hit`
+    /// 打开 `path`，再选中第 `line` 行（从 0 数）、滚到中间；正文是编辑器时在编辑器里选中它，有 `hit`
     /// （这一行里的字节范围）时只选中那段，免得接着打字把整行换掉。
-    pub fn open_at(
-        &mut self,
-        path: &Path,
-        line: usize,
-        hit: Option<Range<usize>>,
-        pin: bool,
-        edit: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.open(path, pin, edit, cx);
+    pub fn open_at(&mut self, path: &Path, line: usize, hit: Option<Range<usize>>, pin: bool, cx: &mut Context<Self>) {
+        self.open(path, pin, cx);
         // 排版视图不按行定位，显示着排版的 Markdown 先切到源码，选中的那一行才看得到。
         if self.preview().is_some_and(|preview| preview.path == path && self.markdown_shown(preview)) {
             self.toggle_preview_source(cx);
@@ -781,7 +770,7 @@ impl PreviewPanel {
     }
 
     /// 打开 `path` 的普通标签（`diff` 为空）或 diff 标签。
-    fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, edit: bool, cx: &mut Context<Self>) {
+    fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, cx: &mut Context<Self>) {
         let shown = self.preview_shown();
         if let Some(old) = self.preview().filter(|old| old.path != path || old.diff != diff) {
             old.release_image(cx);
@@ -792,9 +781,6 @@ impl PreviewPanel {
         let replaced = previews.open(path, diff, pin);
         if let Some(old) = replaced {
             old.release_image(cx);
-        }
-        if let Some(tab) = previews.active_mut() {
-            tab.edit_on_load = edit;
         }
         if shown {
             self.bring_front(cx);
@@ -1079,9 +1065,7 @@ impl PreviewPanel {
                     };
                     preview.content = Some(content);
                     preview.refresh_marks(git, real_root);
-                    let edit =
-                        std::mem::take(&mut preview.edit_on_load) && preview.editor.is_none() && preview.editable();
-                    if edit {
+                    if preview.editor.is_none() && preview.editable() {
                         this.start_editing_quietly(id, path.clone(), cx);
                     } else {
                         this.follow_disk(id, &path, cx);
@@ -1178,7 +1162,7 @@ impl PreviewPanel {
         let Some(preview) = self.preview() else {
             return;
         };
-        let lines = if preview.editor.is_some() {
+        let lines = if self.shown_editor(preview).is_some() {
             preview.editor_selected_lines(cx)
         } else if preview.diff.is_none() && !self.markdown_shown(preview) {
             preview.selected_lines()
@@ -1248,26 +1232,12 @@ impl PreviewPanel {
         // 这几个按钮只有按下的处理，辅助工具按不到，另外登记按下时做的事。
         let view = cx.entity().downgrade();
         let typeset = self.markdown_shown(preview);
-        let editing = preview.editor.is_some();
         let buttons = div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(2.))
-            .when(editing || preview.editable(), |buttons| {
-                buttons.child(
-                    toggle("preview-edit", PENCIL_ICON, editing, rust_i18n::t!("preview.edit"))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.toggle_edit(window, cx);
-                            }),
-                        )
-                        .on_a11y_press(view.clone(), Self::toggle_edit),
-                )
-            })
-            .when(!editing && preview.typesettable(), |buttons| {
+            .when(preview.typesettable(), |buttons| {
                 let text =
                     if typeset { rust_i18n::t!("preview.show_source") } else { rust_i18n::t!("preview.show_rendered") };
                 // 悬停提示说按了会怎样，跟着状态换；报给辅助工具的名字不换，开着表示正显示源码。
@@ -1287,8 +1257,7 @@ impl PreviewPanel {
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图、编辑器和 diff 里有；图片这类不是文字的
             // 没有可折的行，也不给。
             .when(
-                (editing || !typeset)
-                    && (preview.diff.is_some() || matches!(preview.content, Some(Loaded::Text { .. }))),
+                !typeset && (preview.diff.is_some() || matches!(preview.content, Some(Loaded::Text { .. }))),
                 |buttons| {
                     buttons.child(
                         toggle("preview-wrap", WRAP_ICON, self.wrap, rust_i18n::t!("preview.wrap"))
@@ -1325,7 +1294,7 @@ impl PreviewPanel {
             .min_h_0()
             .flex()
             .flex_col()
-            .map(|body| match &preview.editor {
+            .map(|body| match self.shown_editor(preview) {
                 Some(editor) => body.child(self.render_editor(editor, preview.name(), font, window, cx)),
                 None => body.child(self.render_preview_body(preview, width, font, window, cx)),
             });

@@ -146,9 +146,9 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            FileTreeEvent::Open { path, line: None, pin, .. } => self.open_preview(path, *pin, true, cx),
+            FileTreeEvent::Open { path, line: None, pin, .. } => self.open_preview(path, *pin, cx),
             FileTreeEvent::Open { path, line: Some(line), hit, pin } => {
-                self.open_preview_at(path, *line, hit.clone(), *pin, true, cx)
+                self.open_preview_at(path, *line, hit.clone(), *pin, cx)
             }
             FileTreeEvent::InsertPath(path) => self.insert_paths(vec![path.clone()], None, window, cx),
             FileTreeEvent::OpenTerminal(dir) => {
@@ -256,7 +256,7 @@ impl WindowView {
             self.set_panel(Some(SidePanel::Files), window, cx);
             self.with_file_tree(cx, |tree, cx| tree.reveal_file(path, cx));
         } else {
-            self.open_preview(path, false, false, cx);
+            self.open_preview(path, false, cx);
         }
     }
 

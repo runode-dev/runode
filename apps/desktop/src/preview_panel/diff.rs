@@ -185,7 +185,7 @@ impl PreviewPanel {
     /// 在预览栏里打开 `target` 的 diff 标签：`pin` 时开成固定标签，否则开成临时标签。
     pub fn open_diff(&mut self, target: DiffTarget, pin: bool, cx: &mut Context<Self>) {
         let path = target.root.join(&target.rel);
-        self.open_tab(&path, Some(target), pin, false, cx);
+        self.open_tab(&path, Some(target), pin, cx);
     }
 
     /// 工作区或暂存区的 diff 标签 `preview` 这一段没有改动了、另一段还有时，指向另一段的 diff；别的为空。

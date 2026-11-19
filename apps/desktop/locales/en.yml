@@ -1524,8 +1524,6 @@ preview:
   wrap: Word Wrap
   show_source: Show Source
   show_rendered: Show Formatted
-  edit: Edit
-  edit_failed: "Can't edit this file"
   go_to_line: Go to Line
   save_failed: "Couldn't save the file"
   modified_tab: "%{name} (modified)"
