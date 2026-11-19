@@ -1,4 +1,5 @@
-//! 本机文件路径和 `file://` URI 的换算。
+//! 文件路径和 `file://` URI 的换算。路径可以是别的电脑上的，所以按路径的写法分 Unix 和 Windows，不按这个程序
+//! 编给哪个系统：`/` 开头的是 Unix 的，带盘符的是 Windows 的。
 
 use std::{
     fmt::Write as _,
@@ -10,10 +11,11 @@ use lsp_types::Uri;
 /// `path`（绝对路径）的 `file://` URI；路径不是 UTF-8 时没有。
 pub fn from_path(path: &Path) -> Option<Uri> {
     let path = path.to_str()?;
-    let mut uri = String::from(if cfg!(windows) { "file:///" } else { "file://" });
+    let windows = !path.starts_with('/');
+    let mut uri = String::from(if windows { "file:///" } else { "file://" });
     for byte in path.bytes() {
         match byte {
-            b'\\' if cfg!(windows) => uri.push('/'),
+            b'\\' if windows => uri.push('/'),
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
                 uri.push(char::from(byte))
             }
@@ -23,7 +25,7 @@ pub fn from_path(path: &Path) -> Option<Uri> {
     uri.parse().ok()
 }
 
-/// `file://` URI 指的本机路径；别的 scheme、带主机名的没有。
+/// `file://` URI 指的路径；别的 scheme、带主机名的没有。
 pub fn to_path(uri: &Uri) -> Option<PathBuf> {
     let rest = uri.as_str().strip_prefix("file://")?;
     if !rest.starts_with('/') {
@@ -42,5 +44,6 @@ pub fn to_path(uri: &Uri) -> Option<PathBuf> {
         }
     }
     let path = String::from_utf8(bytes).ok()?;
-    Some(PathBuf::from(if cfg!(windows) { path[1..].replace('/', "\\") } else { path }))
+    let windows = matches!(path.as_bytes(), [b'/', drive, b':', ..] if drive.is_ascii_alphabetic());
+    Some(PathBuf::from(if windows { path[1..].replace('/', "\\") } else { path }))
 }

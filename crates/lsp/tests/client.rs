@@ -32,7 +32,7 @@ fn completion_params() -> CompletionParams {
 fn handshake_reports_the_root_and_confirms() {
     let (client, mut server, _notifications) = common::connect();
     let (done, result) = mpsc::channel();
-    client.initialize(Path::new("/p/my project"), move |reply| done.send(reply).unwrap());
+    client.initialize(Path::new("/p/my project"), Some(7), move |reply| done.send(reply).unwrap());
     let request = server.expect("initialize");
     assert_eq!(request["params"]["workspaceFolders"][0]["uri"], "file:///p/my%20project");
     assert_eq!(request["params"]["workspaceFolders"][0]["name"], "my project");

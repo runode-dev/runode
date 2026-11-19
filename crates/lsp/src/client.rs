@@ -147,14 +147,20 @@ impl Client {
     }
 
     /// 握手：报上客户端支持什么、项目根目录是 `root`，服务器答了以后告诉它可以开始，再把它的应答交给 `done`。
-    /// 握手完成之前不发别的消息。位置里的列优先按 Unicode 码点数。
-    pub fn initialize(&self, root: &Path, done: impl FnOnce(Result<InitializeResult, Error>) + Send + 'static) {
+    /// 握手完成之前不发别的消息。位置里的列优先按 Unicode 码点数。`process_id` 是和服务器在同一台电脑上的
+    /// 客户端进程，服务器发现它没了就自己退出；服务器在别的电脑上时不给。
+    pub fn initialize(
+        &self,
+        root: &Path,
+        process_id: Option<u32>,
+        done: impl FnOnce(Result<InitializeResult, Error>) + Send + 'static,
+    ) {
         let folder = uri::from_path(root).map(|uri| WorkspaceFolder {
             uri,
             name: root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
         });
         let params = InitializeParams {
-            process_id: Some(std::process::id()),
+            process_id,
             workspace_folders: folder.map(|folder| vec![folder]),
             capabilities: capabilities(),
             ..InitializeParams::default()
@@ -227,7 +233,10 @@ fn capabilities() -> ClientCapabilities {
             }),
             hover: Some(HoverClientCapabilities { content_format: markup, ..HoverClientCapabilities::default() }),
             definition: Some(GotoCapability { link_support: Some(true), ..GotoCapability::default() }),
-            publish_diagnostics: Some(PublishDiagnosticsClientCapabilities::default()),
+            publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
+                version_support: Some(true),
+                ..PublishDiagnosticsClientCapabilities::default()
+            }),
             ..TextDocumentClientCapabilities::default()
         }),
         ..ClientCapabilities::default()

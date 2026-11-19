@@ -112,7 +112,7 @@ impl Drop for Document {
 enum Slot {
     Starting,
     Running(Weak<Server>),
-    /// 起不来或握手不成，这个 workspace 里不再试。
+    /// 起不来、握手不成，或者远端主机上没装，这个 workspace 里不再试。
     Failed,
 }
 
@@ -192,7 +192,7 @@ fn start(
         }
     });
     let (done, result) = mpsc::channel();
-    client.initialize(root, move |reply| {
+    client.initialize(root, host.is_none().then(std::process::id), move |reply| {
         done.send(reply).ok();
     });
     let reply: Result<InitializeResult, _> = match result.recv_timeout(HANDSHAKE_TIMEOUT) {
@@ -336,6 +336,7 @@ impl PreviewPanel {
         // 远端的目录在这边查不了：文件在主仓库里时用仓库的根。
         let root =
             host.as_ref().and(tabs.git.as_ref()).map(|git| git.main.root.clone()).filter(|root| path.starts_with(root));
+        let remote = host.is_some();
         let key = (ws, spec.program);
         match self.servers.0.get(&key) {
             Some(Slot::Starting | Slot::Failed) => return,
@@ -358,6 +359,10 @@ impl PreviewPanel {
                     this.servers.0.insert(key, Slot::Running(Rc::downgrade(&server)));
                     this.open_documents(ws, spec.program, Some(server), cx);
                 }
+                // 远端每试一次都要起一条 ssh。
+                Ok(None) if remote => {
+                    this.servers.0.insert(key, Slot::Failed);
+                }
                 Ok(None) => {
                     this.servers.0.remove(&key);
                 }
@@ -368,7 +373,7 @@ impl PreviewPanel {
             })
             .ok();
             while let Some(params) = diagnostics.next().await {
-                if this.update(cx, |this, cx| this.show_diagnostics(params, cx)).is_err() {
+                if this.update(cx, |this, cx| this.show_diagnostics(ws, params, cx)).is_err() {
                     break;
                 }
             }
@@ -396,7 +401,7 @@ impl PreviewPanel {
             }
             server.client.open(uri.clone(), spec.language_id, editor.area.read(cx).text().to_string());
             let provider = Rc::new(Provider { server: server.clone(), uri: uri.clone() });
-            let (panel, own) = (panel.clone(), uri.clone());
+            let (panel, own) = (panel.clone(), path);
             editor.area.update(cx, |area, _| {
                 let lsp = area.lsp_mut();
                 lsp.completion_provider = Some(provider.clone());
@@ -404,7 +409,7 @@ impl PreviewPanel {
                 lsp.definition_provider = Some(provider);
                 // 定义在别的文件里的开成标签；在这个文件里的由编辑器自己跳，网址由它交给浏览器。
                 lsp.show_document = Some(Rc::new(move |target: &ShowDocumentParams, _: &mut Window, cx: &mut App| {
-                    let Some(path) = uri::to_path(&target.uri).filter(|_| target.uri.as_str() != own.as_str()) else {
+                    let Some(path) = uri::to_path(&target.uri).filter(|path| *path != own) else {
                         return false;
                     };
                     let line = target.selection.map_or(0, |range| range.start.line as usize);
@@ -419,13 +424,17 @@ impl PreviewPanel {
         }
     }
 
-    /// 把语言服务器对一个文档的诊断画到开着它的编辑器里；诊断说的不是编辑器里现在这一版时不画。
-    fn show_diagnostics(&mut self, params: PublishDiagnosticsParams, cx: &mut Context<Self>) {
-        let editors =
-            self.workspaces.values_mut().flat_map(|tabs| &mut tabs.tabs).filter_map(|tab| tab.editor.as_mut());
-        for editor in editors {
-            let Some(document) = editor.lsp.as_mut().filter(|document| document.uri.as_str() == params.uri.as_str())
-            else {
+    /// 把 workspace `ws` 的语言服务器对一个文档的诊断画到开着它的编辑器里；诊断说的不是编辑器里现在这一版时
+    /// 不画。
+    fn show_diagnostics(&mut self, ws: WorkspaceId, params: PublishDiagnosticsParams, cx: &mut Context<Self>) {
+        // 按路径认文档：同一个路径，服务器写出的 URI 和这边写的转义可以不一样。
+        let Some(path) = uri::to_path(&params.uri) else {
+            return;
+        };
+        let tabs =
+            self.workspaces.get_mut(&ws).into_iter().flat_map(|tabs| &mut tabs.tabs).filter(|tab| tab.path == path);
+        for editor in tabs.filter_map(|tab| tab.editor.as_mut()) {
+            let Some(document) = editor.lsp.as_mut() else {
                 continue;
             };
             if params.version.is_some_and(|version| version != document.version) {
