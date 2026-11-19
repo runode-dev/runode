@@ -1,0 +1,39 @@
+# 依赖的升级 PR，每周一批。小版本和补丁各生态合成一个 PR，大版本一个依赖一个 PR。
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    ignore:
+      # GPUI 和代码编辑器互相用 `=` 钉着版本，升级要核对平台层的补丁，照 vendor-upgrade 的流程手动做。
+      - dependency-name: "gpui-pre*"
+      - dependency-name: "gpui-component"
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      gradle:
+        update-types: [minor, patch]
+  - package-ecosystem: bundler
+    directory: /apps/ios
+    schedule:
+      interval: weekly
+    groups:
+      bundler:
+        update-types: [minor, patch]

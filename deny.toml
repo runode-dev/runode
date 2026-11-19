@@ -1,4 +1,4 @@
-# cargo-deny 的配置，CI 里只跑 `cargo deny check bans`，用来守住 crate 的分层：
+# cargo-deny 的配置。`cargo deny check advisories` 查依赖里已公布的漏洞，`cargo deny check bans` 守住 crate 的分层：
 # 界面框架只许 app（runode）和它的部件库（runode-ui）直接依赖，终端仿真和 PTY 只许 runode-terminal 直接依赖，
 # 语法高亮只许 runode-preview 直接依赖，终端宿主只许 app 直接依赖，TLS 和密码学只许
 # runode-remote 和推送中转 runode-push 直接依赖，SQLite 只许 runode-todo 直接依赖，
@@ -6,6 +6,10 @@
 # crate 直接依赖。「某个 crate 只依赖谁」那类规则由 `make layers` 跑的检查脚本核对。
 # `wrappers` 列出的 crate 可以直接依赖被禁的 crate，其他 crate 直接依赖时报错；经由这些
 # crate 间接用到不算违规。
+
+[advisories]
+# 没人维护的只报自己直接依赖的：间接依赖换不换由上游定，报了也改不了。
+unmaintained = "workspace"
 
 [bans]
 # 这份配置只管分层，重复版本交给日常升级处理，不在这里报。

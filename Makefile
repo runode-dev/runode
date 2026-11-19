@@ -15,7 +15,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device android-vt android-tunnel android-speech android-test run-android app install restart dmg check test test-ssh clippy layers fmt fmt-check clean
+.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device android-vt android-tunnel android-speech android-test run-android app install restart dmg check test test-ssh clippy layers audit fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -144,6 +144,9 @@ endif
 layers: ## 检查 crate 分层：谁能依赖谁（cargo-deny）和几个 crate 只依赖谁（scripts/check-layers.py）
 	cargo deny check bans
 	python3 scripts/check-layers.py
+
+audit: ## 查依赖里已公布的漏洞（cargo-deny 读 RustSec 的公告库）
+	cargo deny check advisories
 
 fmt: ## 按 rustfmt.toml 格式化工作区里的 crate（不碰 vendor）
 	$(CARGO) fmt

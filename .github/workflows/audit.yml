@@ -1,0 +1,43 @@
+# 查依赖里已公布的漏洞（RustSec，`make audit`）。新公布的漏洞和代码改动无关，所以不放进每个 PR 都跑的 CI：
+# 每天查一遍 main，依赖或 cargo-deny 的配置一改也查。
+name: Audit
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # cargo 读依赖树要 libghostty-vt 的清单；只查清单，不编译，用不着 ghostty 的源码。
+      - name: 拉 libghostty-rs 子模块
+        run: git submodule update --init --depth 1 vendor/libghostty-rs
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-deny@0.20.2
+      - name: 查已公布的漏洞
+        run: make audit
