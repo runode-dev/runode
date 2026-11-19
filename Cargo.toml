@@ -55,6 +55,7 @@ gpui-component = { version = "=0.10.0", features = [
     "tree-sitter-html",
     "tree-sitter-java",
     "tree-sitter-javascript",
+    "tree-sitter-make",
     "tree-sitter-markdown",
     "tree-sitter-markdown-inline",
     "tree-sitter-python",

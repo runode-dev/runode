@@ -129,6 +129,16 @@ fn next_occurrence(text: &str, selected: &Range<usize>, from: usize, whole_word:
     (start != selected.start).then(|| start..start + needle.len())
 }
 
+/// 编辑器按什么语言高亮 `path`：扩展名，Makefile 按文件名认。
+fn language_of(path: &Path) -> String {
+    let lower = |name: Option<&std::ffi::OsStr>| name.and_then(|name| name.to_str()).unwrap_or_default().to_lowercase();
+    let name = lower(path.file_name());
+    match lower(path.extension()) {
+        ext if ext == "mk" || name == "makefile" || name == "gnumakefile" => "make".into(),
+        ext => ext,
+    }
+}
+
 /// `text` 和 `saved` 一样。
 fn same(text: &Rope, saved: &str) -> bool {
     let mut rest = saved;
@@ -244,7 +254,7 @@ impl PreviewPanel {
         let selected = preview.selected_lines();
         let hit = preview.hit.take().filter(|(line, _)| preview.selection == Some((*line, *line)));
         // 语言按扩展名认，认不出的当纯文本。
-        let language = path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_lowercase();
+        let language = language_of(path);
         let area = cx.new(|cx| {
             let mut area =
                 EditorState::new(window, cx).language(language).line_number(true).folding(true).soft_wrap(wrap);
@@ -615,6 +625,15 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn makefiles_are_recognized_by_name() {
+        for path in ["/p/Makefile", "/p/GNUmakefile", "/p/rules.mk"] {
+            assert_eq!(language_of(Path::new(path)), "make");
+        }
+        assert_eq!(language_of(Path::new("/p/a.RS")), "rs");
+        assert_eq!(language_of(Path::new("/p/LICENSE")), "");
+    }
 
     #[test]
     fn next_occurrence_wraps_and_skips_the_selection_itself() {
