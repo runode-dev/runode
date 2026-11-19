@@ -892,7 +892,7 @@ fn write_chunks(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use futures::StreamExt as _;
@@ -955,9 +955,9 @@ mod tests {
     /// 经假的 ssh 连的「远端」：假的 ssh 把要在远端跑的命令换成在本机、以一个临时目录为家目录跑，主连接相关的
     /// 直接成功。丢掉时结束「远端」的宿主、删掉临时目录，测试中途失败也一样。
     #[cfg(unix)]
-    struct FakeRemote {
-        host: std::sync::Arc<super::RemoteHost>,
-        home: std::path::PathBuf,
+    pub(crate) struct FakeRemote {
+        pub(crate) host: std::sync::Arc<super::RemoteHost>,
+        pub(crate) home: std::path::PathBuf,
         root: std::path::PathBuf,
         /// 测试里见过的「远端」宿主，丢掉时一起结束。
         pids: std::cell::RefCell<Vec<u32>>,
@@ -966,7 +966,7 @@ mod tests {
     #[cfg(unix)]
     impl FakeRemote {
         /// 主机名 `name`，连接要等 `RemoteHost::retry_now` 或第一次自己连。
-        fn new(name: &str) -> Self {
+        pub(crate) fn new(name: &str) -> Self {
             use std::os::unix::fs::PermissionsExt as _;
 
             // 放在 /tmp 下：远端宿主的 socket 在这个家目录里，路径要放得进 `sun_path`。
@@ -995,7 +995,7 @@ mod tests {
         }
 
         /// 等到连上或停下，交回那时的状态，记下「远端」宿主。
-        fn connected(&self) -> Status {
+        pub(crate) fn connected(&self) -> Status {
             let status = wait_for(&self.host, Duration::from_secs(120), |status| {
                 matches!(status, Status::Connected(_) | Status::Stopped { .. })
             });

@@ -1,14 +1,17 @@
-//! 预览栏编辑器的语言服务器：按文件挑一个装在这台电脑上的服务器（`runode_lsp::servers`），一个 workspace、一个
-//! 程序起一个进程，开着的文件共用，都关了就让它退出；编辑器从它拿补全、悬停说明、跳到定义和诊断。没装服务器、
-//! 项目在远端主机上、配置关着（`language-server`）时编辑照常，只是没有这些。
+//! 预览栏编辑器的语言服务器：按文件挑一个装在项目所在电脑上的服务器（`runode_lsp::servers`），一个 workspace、
+//! 一个程序起一个进程，开着的文件共用，都关了就让它退出；编辑器从它拿补全、悬停说明、跳到定义和诊断。没装服务器、
+//! 配置关着（`language-server`）、项目在配对的电脑或 Windows 的 SSH 主机上时编辑照常，只是没有这些。
+
+pub(crate) mod remote;
 
 use std::{
     collections::HashMap,
-    io,
+    ffi::OsString,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     rc::{Rc, Weak},
-    sync::mpsc,
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
@@ -30,7 +33,7 @@ use runode_lsp::{
 };
 
 use super::{PreviewPanel, WorkspaceId, tabs::PreviewTabs};
-use crate::config::AppConfig;
+use crate::{config::AppConfig, host_client::ssh::RemoteHost};
 
 /// 语言服务器握手最多等这么久，过了算起不来。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -117,26 +120,31 @@ enum Slot {
 #[derive(Default)]
 pub(super) struct Servers(HashMap<(WorkspaceId, &'static str), Slot>);
 
-/// 本机的 `tabs` 里 `path` 用的语言服务器；配置关着、项目在远端、没有对应的服务器时没有。
+/// `tabs` 里 `path` 用的语言服务器；配置关着、项目所在的电脑上起不了、没有对应的服务器时没有。
 fn server_for(tabs: &PreviewTabs, path: &Path, cx: &App) -> Option<servers::Server> {
-    (cx.global::<AppConfig>().0.language_server && !tabs.project.is_remote()).then(|| servers::for_path(path))?
+    let reachable = !tabs.project.is_remote() || remote::host(&tabs.project).is_some();
+    (cx.global::<AppConfig>().0.language_server && reachable).then(|| servers::for_path(path))?
 }
 
-/// 起 `spec` 这个语言服务器、握好手；项目根目录是 `file` 往上第一个有 `.git` 的目录，没有时是它所在的目录。
-/// 诊断发进 `diagnostics`。用户没装这个程序时是 `None`。会阻塞。
-fn start(
-    spec: servers::Server,
-    file: &Path,
-    diagnostics: UnboundedSender<PublishDiagnosticsParams>,
-) -> io::Result<Option<Server>> {
-    let Some(path) = crate::process_env::user_path(None) else {
-        return Ok(None);
-    };
+/// 一个起好的语言服务器进程和它的 stdin、stdout；远端的是连着它的那个 ssh。
+struct Process {
+    child: Child,
+    input: Box<dyn Write + Send>,
+    output: Box<dyn Read + Send>,
+}
+
+/// `program` 在用户登录 shell 的 PATH 里的位置，和那个 PATH；没装时没有。会阻塞。
+fn locate(program: &str) -> Option<(PathBuf, OsString)> {
+    let path = crate::process_env::user_path(None)?;
     let dirs: Vec<PathBuf> = std::env::split_paths(&path).filter(|dir| dir.is_absolute()).collect();
-    let Some(program) = runode_terminal::shells::find_command(&dirs, spec.program) else {
+    Some((runode_terminal::shells::find_command(&dirs, program)?, path))
+}
+
+/// 在本机的 `root` 里起 `spec`；用户没装这个程序时是 `None`。会阻塞。
+fn spawn(spec: servers::Server, root: &Path) -> io::Result<Option<Process>> {
+    let Some((program, path)) = locate(spec.program) else {
         return Ok(None);
     };
-    let root = file.ancestors().skip(1).find(|dir| dir.join(".git").exists()).or(file.parent()).unwrap_or(file);
     let mut command = Command::new(program);
     // 服务器自己还要找编译器、包管理器，给它用户 shell 里的 PATH。
     command
@@ -153,7 +161,30 @@ fn start(
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         return Err(io::Error::other("the language server has no stdio"));
     };
-    let client = Client::start(stdout, stdin, move |method, params| {
+    Ok(Some(Process { child, input: Box::new(stdin), output: Box::new(stdout) }))
+}
+
+/// 起 `spec` 这个语言服务器、握好手，`host` 不为空时起在那台 SSH 主机上。项目根目录是 `root`；本机上没给
+/// 时是 `file` 往上第一个有 `.git` 的目录，都没有时是 `file` 所在的目录。诊断发进 `diagnostics`。用户没装
+/// 这个程序时是 `None`。会阻塞。
+fn start(
+    spec: servers::Server,
+    file: &Path,
+    root: Option<PathBuf>,
+    host: Option<Arc<RemoteHost>>,
+    diagnostics: UnboundedSender<PublishDiagnosticsParams>,
+) -> io::Result<Option<Server>> {
+    let found = host.is_none().then(|| file.ancestors().skip(1).find(|dir| dir.join(".git").exists())).flatten();
+    let root = root.as_deref().or(found).or(file.parent()).unwrap_or(file);
+    let process = match &host {
+        Some(host) => remote::spawn(host, spec)?,
+        None => match spawn(spec, root)? {
+            Some(process) => process,
+            None => return Ok(None),
+        },
+    };
+    let Process { mut child, input, output } = process;
+    let client = Client::start(output, input, move |method, params| {
         if method == "textDocument/publishDiagnostics"
             && let Ok(params) = serde_json::from_value(params)
         {
@@ -164,9 +195,13 @@ fn start(
     client.initialize(root, move |reply| {
         done.send(reply).ok();
     });
-    let reply: Result<InitializeResult, io::Error> = match result.recv_timeout(HANDSHAKE_TIMEOUT) {
-        Ok(reply) => reply.map_err(io::Error::other),
-        Err(_) => Err(io::ErrorKind::TimedOut.into()),
+    let reply: Result<InitializeResult, _> = match result.recv_timeout(HANDSHAKE_TIMEOUT) {
+        Ok(reply) => reply,
+        Err(_) => {
+            child.kill().ok();
+            child.wait().ok();
+            return Err(io::ErrorKind::TimedOut.into());
+        }
     };
     match reply {
         Ok(reply) => {
@@ -174,9 +209,12 @@ fn start(
             Ok(Some(Server { client, child: Some(child), triggers: triggers.unwrap_or_default() }))
         }
         Err(err) => {
-            child.kill().ok();
-            child.wait().ok();
-            Err(err)
+            // 流断了的是进程自己在退，等得到它的退出码；别的错结束掉它。
+            if err != runode_lsp::Error::Closed {
+                child.kill().ok();
+            }
+            let code = child.wait().ok().and_then(|status| status.code());
+            if host.is_some() && code == Some(remote::NOT_INSTALLED) { Ok(None) } else { Err(io::Error::other(err)) }
         }
     }
 }
@@ -288,9 +326,16 @@ impl PreviewPanel {
     /// 给 workspace `ws` 里 `path` 刚装上的编辑器接语言服务器：已经跑着的直接用，没起过的在后台起，起好了
     /// 把这个 workspace 里等着它的编辑器都接上。
     pub(super) fn attach_language_server(&mut self, ws: WorkspaceId, path: &Path, cx: &mut Context<Self>) {
-        let Some(spec) = self.workspaces.get(&ws).and_then(|tabs| server_for(tabs, path, cx)) else {
+        let Some(tabs) = self.workspaces.get(&ws) else {
             return;
         };
+        let Some(spec) = server_for(tabs, path, cx) else {
+            return;
+        };
+        let host = remote::host(&tabs.project);
+        // 远端的目录在这边查不了：文件在主仓库里时用仓库的根。
+        let root =
+            host.as_ref().and(tabs.git.as_ref()).map(|git| git.main.root.clone()).filter(|root| path.starts_with(root));
         let key = (ws, spec.program);
         match self.servers.0.get(&key) {
             Some(Slot::Starting | Slot::Failed) => return,
@@ -304,7 +349,7 @@ impl PreviewPanel {
         self.servers.0.insert(key, Slot::Starting);
         let (sender, mut diagnostics) = futures::channel::mpsc::unbounded();
         let file = path.to_path_buf();
-        let job = cx.background_spawn(async move { start(spec, &file, sender) });
+        let job = cx.background_spawn(async move { start(spec, &file, root, host, sender) });
         cx.spawn(async move |this, cx| {
             let started = job.await;
             this.update(cx, |this, cx| match started {

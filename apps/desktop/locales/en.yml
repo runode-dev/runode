@@ -864,7 +864,7 @@ settings:
     prevent_sleep: "With Agent, only while an agent is working. You can also switch it from the coffee cup in the status bar."
     file_tree_preview_click: A single click opens a temporary tab that the next file replaces; a double click keeps it.
     preview_font_size: In points.
-    language_server: "Completions, hover documentation, go to definition and diagnostics in the editor, from the language servers installed on this computer (rust-analyzer, gopls, clangd and so on). Runode installs none itself."
+    language_server: "Completions, hover documentation, go to definition and diagnostics in the editor, from the language servers installed on the computer the project is on (rust-analyzer, gopls, clangd and so on); a project on an SSH host uses the ones installed on that host. Runode installs none itself."
     task_placement: Where a task picked from the title bar's task menu runs.
     task_split_fold: A task from the task menu that runs in a right or down split gets the split folded to its title bar, so it does not take room; click the title bar to unfold. Cards window style only.
     git_auto_fetch: While the Git panel is showing, fetch from the remotes every few minutes so new commits on the remote show up.

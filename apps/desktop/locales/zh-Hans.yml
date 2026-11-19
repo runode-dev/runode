@@ -864,7 +864,7 @@ settings:
     prevent_sleep: "选「Agent」时有 agent 在干活才防止。也可以点状态栏上的咖啡杯切换。"
     file_tree_preview_click: 单击开成临时标签页，打开别的文件时被换掉；双击固定下来。
     preview_font_size: 单位是点。
-    language_server: "编辑器里的补全、悬停说明、跳到定义和诊断，用这台电脑上装着的语言服务器（rust-analyzer、gopls、clangd 等）。Runode 不替你装。"
+    language_server: "编辑器里的补全、悬停说明、跳到定义和诊断，用项目所在的电脑上装着的语言服务器（rust-analyzer、gopls、clangd 等）；SSH 主机上的项目用那台主机上装的。Runode 不替你装。"
     task_placement: 标题栏命令菜单里点了一条命令时，在哪开终端跑它。
     task_split_fold: 从命令菜单跑的命令在右边或下边分屏时，分屏折叠成标题条，不占地方，点标题条展开。只在卡片样式的窗口里起作用。
     git_auto_fetch: Git 面板开着时每隔几分钟在后台抓取远端，远端的新提交才看得到。

@@ -23,7 +23,7 @@
 mod body;
 mod diff;
 mod edit;
-mod lsp;
+pub(crate) mod lsp;
 mod markdown;
 mod marks;
 mod picture;

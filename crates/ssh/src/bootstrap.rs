@@ -107,21 +107,27 @@ pub enum Entry {
     Screen,
     /// 把远端的宿主装成登录服务（`runode --ssh-service`）。
     Service,
+    /// 语言服务器（`runode --ssh-lsp`，后面跟着服务器的程序名和参数）。程序名和参数原样拼进脚本，只能有字母、
+    /// 数字和 `-`、`_`、`.`。
+    Lsp { program: &'static str, args: &'static [&'static str] },
 }
 
 impl Entry {
-    fn arg(self) -> &'static str {
+    fn arg(self) -> String {
         match self {
-            Self::Project => "--ssh-project",
-            Self::Screen => "--ssh-screen",
-            Self::Service => "--ssh-service",
+            Self::Project => "--ssh-project".into(),
+            Self::Screen => "--ssh-screen".into(),
+            Self::Service => "--ssh-service".into(),
+            Self::Lsp { program, args } => {
+                ["--ssh-lsp", program].iter().chain(args).copied().collect::<Vec<_>>().join(" ")
+            }
         }
     }
 }
 
 /// 起远端装着的 `dir` 这个构建的 `entry`；没装时以 `PROBE_EXIT` 退出，先经 `connect_command` 装好。
 pub fn run_command(dir: &str, entry: Entry) -> String {
-    run_installed(dir, entry.arg())
+    run_installed(dir, &entry.arg())
 }
 
 fn run_installed(dir: &str, arg: &str) -> String {

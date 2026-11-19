@@ -59,6 +59,7 @@ fn scripts_avoid_characters_remote_shells_mangle() {
         run_command("0.1.16.abc", Entry::Project),
         run_command("0.1.16.abc", Entry::Screen),
         run_command("0.1.16.abc", Entry::Service),
+        run_command("0.1.16.abc", Entry::Lsp { program: "typescript-language-server", args: &["--stdio"] }),
         prune_command("0.1.16.abc"),
     ] {
         let inner = command.strip_prefix("/bin/sh -c '").and_then(|rest| rest.strip_suffix('\'')).unwrap();
