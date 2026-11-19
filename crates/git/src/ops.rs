@@ -291,8 +291,8 @@ impl Repo {
         };
         let mut text = String::from_utf8_lossy(&diff).into_owned();
         if !staged {
-            let untracked = run(&self.root, ["ls-files", "--others", "--exclude-standard"], None)?;
-            for path in String::from_utf8_lossy(&untracked).lines() {
+            let untracked = run(&self.root, ["ls-files", "--others", "--exclude-standard", "-z"], None)?;
+            for path in String::from_utf8_lossy(&untracked).split_terminator('\0') {
                 text.push_str(&format!("untracked: {path}\n"));
             }
         }

@@ -202,6 +202,17 @@ fn pending_diff_before_the_first_commit_includes_staged_files() {
     assert_eq!(handle.pending_diff(true).unwrap().matches("+one").count(), 1);
 }
 
+/// 未跟踪文件的名字原样列出，带引号的也不转义。
+#[cfg(unix)]
+#[test]
+fn pending_diff_lists_untracked_names_verbatim() {
+    let repo = TestRepo::new("ops-pending-quoted");
+    repo.commit_file("a.txt", "one\n", "first");
+    repo.write("say \"hi\".txt", "n\n");
+    let all = read(&repo).repo().pending_diff(false).unwrap();
+    assert!(all.ends_with("untracked: say \"hi\".txt\n"), "{all}");
+}
+
 /// 用户配的外部 diff 工具、总是上色和 textconv 都不影响给 AI 看的补丁：仍是 git 原样的差异。
 #[test]
 fn pending_diff_ignores_external_diff_color_and_textconv() {
