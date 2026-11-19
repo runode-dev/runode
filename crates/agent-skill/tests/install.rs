@@ -308,7 +308,8 @@ fn refresh_reinstalls_only_what_runode_installed_and_is_out_of_date() {
     fs::write(canonical.join("SKILL.md"), "old").unwrap();
     let reference = canonical.join(runode().files[1].0);
     fs::remove_file(&reference).unwrap();
-    fs::remove_file(home.path(".claude/skills/runode")).unwrap();
+    // agent 那边是链接或副本，`remove_dir_all` 两样都删得掉，不跟着链接删正本。
+    fs::remove_dir_all(home.path(".claude/skills/runode")).unwrap();
     assert_eq!(state(&env, "runode"), State::Installed { by_runode: true, current: false });
     assert!(refresh(&env).unwrap());
     assert_eq!(read(&canonical.join("SKILL.md")), runode().files[0].1);
