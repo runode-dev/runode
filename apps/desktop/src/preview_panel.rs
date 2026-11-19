@@ -70,7 +70,7 @@ use runode_preview::{Content, ImageFormat, Span};
 
 pub use diff::DiffTarget;
 pub(crate) use diff::{ask_discard_hunk, hunk_name, hunk_quote, hunk_title};
-pub use edit::GoToLine;
+pub use edit::{GoToLine, SelectNextOccurrence};
 
 use marks::{Mark, line_marks};
 pub use tabs::FileTab;
@@ -1310,6 +1310,7 @@ impl PreviewPanel {
                 .on_action(cx.listener(Self::select_all_preview))
                 .on_action(cx.listener(Self::insert_preview_path))
                 .on_action(cx.listener(Self::go_to_line))
+                .on_action(cx.listener(Self::select_next_occurrence))
                 // 焦点在预览栏里时，关标签页和关分屏的快捷键关的都是预览标签。
                 .on_action(cx.listener(Self::close_preview_tab))
                 .on_action(cx.listener(Self::close_preview_pane))

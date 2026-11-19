@@ -33,7 +33,9 @@ gpui::actions!(
     preview,
     [
         /// 在编辑器上面打开输入行号的小条，回车跳过去。
-        GoToLine
+        GoToLine,
+        /// 光标在词上、没有选区时选中这个词；有选区时把下一处相同的文字加选上，到文末从头找。
+        SelectNextOccurrence
     ]
 );
 
@@ -53,6 +55,9 @@ pub(super) struct Editor {
     stamp: Option<Stamp>,
     /// 正在存：这时再按 ⌘S 不管，免得两次写的先后乱了，旧的盖掉新的。
     saving: bool,
+    /// `SelectNextOccurrence` 上次之后的活动选区、加选到的位置、是不是从光标所在的词选起的（是就只加选整词）；
+    /// 文字改了就作废。
+    occurrence: Option<(Range<usize>, usize, bool)>,
     /// 开着的「跳到行号」输入条。
     go_to_line: Option<(Entity<InputState>, Subscription)>,
     /// 这个文件在语言服务器上开着的文档；没有可用的服务器时为空。
@@ -107,6 +112,21 @@ fn report(title: &str, err: &io::Error, window: &mut Window, cx: &mut Context<Pr
         cx,
     );
     cx.foreground_executor().spawn(answer).detach();
+}
+
+/// `text` 里 `from` 之后下一处和 `selected` 那段一样的文字，到文末从头找；除了 `selected` 自己再没有时为空。
+/// `whole_word` 时两边紧挨着字母、数字或下划线的不算。
+fn next_occurrence(text: &str, selected: &Range<usize>, from: usize, whole_word: bool) -> Option<Range<usize>> {
+    let needle = &text[selected.clone()];
+    let in_word = |c: char| c.is_alphanumeric() || c == '_';
+    let whole = |at: &usize| {
+        !whole_word
+            || !(text[..*at].chars().next_back().is_some_and(in_word)
+                || text[at + needle.len()..].chars().next().is_some_and(in_word))
+    };
+    let after = text.get(from..).into_iter().flat_map(|rest| rest.match_indices(needle)).map(|(at, _)| from + at);
+    let start = after.chain(text.match_indices(needle).map(|(at, _)| at)).find(whole)?;
+    (start != selected.start).then(|| start..start + needle.len())
 }
 
 /// `text` 和 `saved` 一样。
@@ -245,6 +265,7 @@ impl PreviewPanel {
                     document.changed(area.read(cx).text());
                     document.show_diagnostics(&area, cx);
                 }
+                editor.occurrence = None;
                 editor.dirty = !same(area.read(cx).text(), &editor.saved);
                 // 改过的临时标签固定下来，免得打开别的文件时连同没存的修改一起被换掉。
                 preview.pinned |= editor.dirty;
@@ -259,6 +280,7 @@ impl PreviewPanel {
             bom: source.bom,
             stamp: source.stamp,
             saving: false,
+            occurrence: None,
             go_to_line: None,
             lsp: None,
             _changed: changed,
@@ -501,6 +523,35 @@ impl PreviewPanel {
             )
     }
 
+    pub(super) fn select_next_occurrence(&mut self, _: &SelectNextOccurrence, _: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.preview().is_some_and(|preview| self.shown_editor(preview).is_some());
+        let Some(editor) = self.preview_mut().filter(|_| shown).and_then(|preview| preview.editor.as_mut()) else {
+            cx.propagate();
+            return;
+        };
+        let occurrence = &mut editor.occurrence;
+        editor.area.update(cx, |area, cx| {
+            let active = area.selected_range();
+            if active.is_empty() {
+                if let Some(word) = area.text().word_range(active.start) {
+                    area.set_selected_range(word, cx);
+                    let word = area.selected_range();
+                    *occurrence = Some((word.clone(), word.end, true));
+                }
+                return;
+            }
+            let (from, whole_word) = occurrence
+                .take()
+                .filter(|(of, ..)| *of == active)
+                .map_or((active.end, false), |(_, from, word)| (from, word));
+            let text = area.text().to_string();
+            if let Some(found) = next_occurrence(&text, &active, from, whole_word) {
+                area.add_selection(found.clone(), cx);
+                *occurrence = Some((area.selected_range(), found.end, whole_word));
+            }
+        });
+    }
+
     /// 在当前标签的编辑器上面打开「跳到行号」的输入条：回车把光标放到那一行行首，Esc 关掉，焦点都回编辑器。
     pub(super) fn go_to_line(&mut self, _: &GoToLine, window: &mut Window, cx: &mut Context<Self>) {
         let Some(area) =
@@ -564,6 +615,20 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn next_occurrence_wraps_and_skips_the_selection_itself() {
+        let text = "ab 中 ab x ab";
+        assert_eq!(next_occurrence(text, &(0..2), 2, false), Some(7..9));
+        assert_eq!(next_occurrence(text, &(0..2), 9, false), Some(12..14));
+        assert_eq!(next_occurrence(text, &(7..9), 14, false), Some(0..2));
+        assert_eq!(next_occurrence(text, &(0..2), 14, false), None);
+        assert_eq!(next_occurrence(text, &(3..6), 6, false), None);
+        let text = "app apple happy app_ app";
+        assert_eq!(next_occurrence(text, &(0..3), 3, false), Some(4..7));
+        assert_eq!(next_occurrence(text, &(0..3), 3, true), Some(21..24));
+        assert_eq!(next_occurrence(text, &(0..3), 24, true), None);
+    }
 
     /// 存回去的字节保留文件原来的换行和 BOM，只改了一处的文件不会整篇都变。
     #[test]
