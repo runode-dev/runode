@@ -129,6 +129,10 @@ jobs:
         runner: [ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      # 开发构建的 libghostty 默认是 Zig 的 Debug 构建，喂 VT 极慢：runner 忙的时候，交接前清不完积压的输出，
+      # 交接的测试等过期限。这里用发的包那种构建。
+      LIBGHOSTTY_VT_SYS_OPTIMIZE: ReleaseFast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

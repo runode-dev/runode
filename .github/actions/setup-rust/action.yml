@@ -36,7 +36,8 @@ runs:
       if: inputs.cache == 'true'
     # 检出后源码的修改时间都是新的，libghostty-vt-sys 的构建脚本每轮都会重跑，rust-cache 又不存 vendor 下
     # 路径依赖的构建输出；zig 的缓存在它的 OUT_DIR 里、按内容判断，单独存下来，重跑时就不用从头编
-    # libghostty。这一步排在 rust-cache 后面，存缓存时先于 rust-cache 的清理执行。
+    # libghostty。这一步排在 rust-cache 后面，存缓存时先于 rust-cache 的清理执行。键里带上架构和 job 给构建脚本定的
+    # 优化级别（LIBGHOSTTY_VT_SYS_OPTIMIZE）：命中了别种构建的缓存用不上，命中后又不会再存。
     - name: 定下 libghostty 构建缓存的键
       id: libghostty
       if: inputs.cache == 'true'
@@ -46,7 +47,7 @@ runs:
       if: inputs.cache == 'true'
       with:
         path: target/*/build/libghostty-vt-sys-*
-        key: libghostty-${{ github.job }}-${{ runner.os }}-${{ steps.libghostty.outputs.commits }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+        key: libghostty-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBGHOSTTY_VT_SYS_OPTIMIZE }}-${{ steps.libghostty.outputs.commits }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
     # rust-cache 存缓存前清理 target，会删掉 sherpa-onnx-sys 下到 target/sherpa-onnx-prebuilt 的静态库，它构建脚本的
     # 输出却留着、不再重跑，链接时找不到库；构建脚本重跑时只要 lib 目录在就当库下好了，不再下载。库不在时
     # 整个删掉 target/sherpa-onnx-prebuilt，再按名字删掉它各份构建输出和 fingerprint（cargo clean -p 只清当前
