@@ -93,14 +93,7 @@ pub(crate) fn os_str(bytes: &[u8]) -> Cow<'_, OsStr> {
     }
 }
 
-/// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）：app 和宿主都没有控制台，不然每跑一次
-/// git 就闪一个黑窗。别的系统上什么都不做。
-pub(crate) fn hide_window(command: &mut Command) {
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(command, 0x0800_0000);
-    #[cfg(not(windows))]
-    let _ = command;
-}
+pub(crate) use runode_subprocess::hide_window;
 
 /// 这台机器上的 git 跑得起来：没装时为假。当场查 `runnable`，不用记着的结果，查到的也留给之后各处起 git 时用；
 /// 它为真才起一次 `git --version`，放到后台跑。

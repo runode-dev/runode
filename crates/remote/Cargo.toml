@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
+runode-subprocess.workspace = true
 runode-protocol.workspace = true
 # 推送时看会话的 agent 是不是在等回答（`SessionMeta`、`AgentState`）。
 runode-types.workspace = true
@@ -38,7 +39,6 @@ windows-sys = { workspace = true, features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_System_SystemInformation",
-    "Win32_System_Threading",
 ] }
 
 [lints]

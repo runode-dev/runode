@@ -9,10 +9,6 @@ use std::{
     process::{Child, Command},
 };
 
-/// `CREATE_NO_WINDOW` 的值：拉起控制台程序时不给它开窗口。
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 /// 拉起之前调：Unix 上让子进程自成一个进程组，组号就是它的进程号；Windows 上不给它开控制台窗口。
 pub(crate) fn isolate(command: &mut Command) {
     #[cfg(unix)]
@@ -20,14 +16,7 @@ pub(crate) fn isolate(command: &mut Command) {
     hide_window(command);
 }
 
-/// Windows 上拉起控制台程序时不开窗口（`CREATE_NO_WINDOW`）：宿主和 app 都没有控制台，不然每拉起一次就闪
-/// 一个黑窗。别的系统上什么都不做。
-pub(crate) fn hide_window(command: &mut Command) {
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(command, CREATE_NO_WINDOW);
-    #[cfg(not(windows))]
-    let _ = command;
-}
+pub(crate) use runode_subprocess::hide_window;
 
 /// `child` 退出了没有，不收尸：Unix 上用 `waitid` 的 `WNOWAIT`，组号在之后 `kill_tree` 时还是它的。
 #[cfg(unix)]

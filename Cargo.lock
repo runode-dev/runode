@@ -7587,6 +7587,7 @@ dependencies = [
  "runode-screen",
  "runode-speech",
  "runode-ssh",
+ "runode-subprocess",
  "runode-tasks",
  "runode-terminal",
  "runode-todo",
@@ -7612,6 +7613,7 @@ dependencies = [
  "libc",
  "memchr",
  "regex",
+ "runode-subprocess",
  "runode-types",
  "serde",
  "serde_json",
@@ -7699,6 +7701,7 @@ name = "runode-git"
 version = "0.2.2"
 dependencies = [
  "libc",
+ "runode-subprocess",
  "serde",
 ]
 
@@ -7786,6 +7789,7 @@ dependencies = [
  "ring",
  "runode-paths",
  "runode-protocol",
+ "runode-subprocess",
  "runode-types",
  "rustls",
  "serde",
@@ -7834,6 +7838,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-avf-audio",
  "objc2-foundation 0.3.2",
+ "runode-subprocess",
  "runode-types",
  "serde_json",
  "sha2 0.11.1",
@@ -7846,9 +7851,14 @@ dependencies = [
 name = "runode-ssh"
 version = "0.2.2"
 dependencies = [
+ "runode-subprocess",
  "uds_windows",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "runode-subprocess"
+version = "0.2.2"
 
 [[package]]
 name = "runode-tasks"
@@ -7913,6 +7923,7 @@ dependencies = [
  "libc",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "runode-subprocess",
  "serde",
  "serde_json",
  "sha2 0.11.1",

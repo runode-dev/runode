@@ -7,19 +7,9 @@ use std::{
     process::Command,
 };
 
-use crate::Destination;
+use runode_subprocess::hide_window;
 
-/// Windows 上不给 ssh 开控制台窗口（`CREATE_NO_WINDOW`）：桌面 app 和宿主都没有控制台，不然每调一次 ssh 就
-/// 闪一个黑窗；要问用户的经 askpass 问，用不着控制台。
-fn no_window(command: &mut Command) {
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(
-        command,
-        windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
-    );
-    #[cfg(not(windows))]
-    let _ = command;
-}
+use crate::Destination;
 
 /// 主连接空闲多久后自己退出（秒），用户没设时用这个。
 pub const DEFAULT_PERSIST_SECS: u32 = 600;
@@ -39,7 +29,7 @@ impl Ssh {
     /// 所有调用都带的选项：命令行上的 `-o` 压过配置文件，用户自己的 ControlPath 不受影响。
     fn base(&self) -> Command {
         let mut command = Command::new(&self.program);
-        no_window(&mut command);
+        hide_window(&mut command);
         match &self.control {
             Some(path) => command.arg("-o").arg(control_path_option(path)),
             None => command.args(["-o", "ControlPath=none", "-o", "ControlMaster=no"]),
@@ -60,7 +50,7 @@ impl Ssh {
     /// `ssh -V`：版本打在 stderr 上，由 `parse_version` 读。
     pub fn version(&self) -> Command {
         let mut command = Command::new(&self.program);
-        no_window(&mut command);
+        hide_window(&mut command);
         command.arg("-V");
         command
     }
@@ -140,7 +130,7 @@ impl Ssh {
         let mut command = match socket {
             Some(socket) => {
                 let mut command = Command::new(&self.program);
-                no_window(&mut command);
+                hide_window(&mut command);
                 command.args(["-F", "none", "-o"]).arg(control_path_option(socket)).args(["-o", "LogLevel=ERROR"]);
                 command
             }

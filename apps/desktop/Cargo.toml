@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 runode-paths.workspace = true
+runode-subprocess.workspace = true
 runode-git = { workspace = true, features = ["serde"] }
 runode-types.workspace = true
 runode-terminal.workspace = true

@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 runode-types.workspace = true
+runode-subprocess.workspace = true
 anyhow.workspace = true
 # 录麦克风；无头的 Linux 构建不开 `recording`，不链 ALSA 的 libasound。
 cpal = { workspace = true, optional = true }

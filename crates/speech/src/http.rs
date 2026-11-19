@@ -79,32 +79,13 @@ pub(crate) fn post(
     parse(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&headers))
 }
 
-/// 跑 curl 的命令。Windows 上 `Command` 先找 System32 再找 PATH，所以先按 PATH 找 `curl.exe`，
-/// 用户自己装的新版排在系统自带的前面；也不给它开控制台窗口。第一个参数是 `-q`（只在最前面才管用）：不读
-/// `~/.curlrc`，里面的 `location`、`fail`、超时这类设置会改掉调用方定的行为。
+/// 跑 curl 的命令，不开控制台窗口。第一个参数是 `-q`（只在最前面才管用）：不读 `~/.curlrc`，里面的
+/// `location`、`fail`、超时这类设置会改掉调用方定的行为。
 pub(crate) fn curl() -> Command {
-    #[cfg(windows)]
-    {
-        let program = std::env::var_os("PATH")
-            .and_then(|path| {
-                // 空段和相对段会按当前目录找，不认。
-                std::env::split_paths(&path)
-                    .filter(|dir| dir.is_absolute())
-                    .map(|dir| dir.join("curl.exe"))
-                    .find(|exe| exe.is_file())
-            })
-            .unwrap_or_else(|| PathBuf::from("curl"));
-        let mut command = Command::new(program);
-        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
-        command.arg("-q");
-        command
-    }
-    #[cfg(not(windows))]
-    {
-        let mut command = Command::new("curl");
-        command.arg("-q");
-        command
-    }
+    let mut command = Command::new(runode_subprocess::curl_program());
+    runode_subprocess::hide_window(&mut command);
+    command.arg("-q");
+    command
 }
 
 /// 拆开 curl 的输出：响应体，最后一行是 `--write-out` 写的状态码；`headers` 是 `--dump-header`

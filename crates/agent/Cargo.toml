@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 runode-types.workspace = true
+runode-subprocess.workspace = true
 serde.workspace = true
 regex.workspace = true
 memchr.workspace = true

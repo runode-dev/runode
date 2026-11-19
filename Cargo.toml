@@ -18,6 +18,7 @@ publish = false
 [workspace.dependencies]
 runode-paths = { path = "crates/paths" }
 runode-types = { path = "crates/types" }
+runode-subprocess = { path = "crates/subprocess" }
 runode-protocol = { path = "crates/protocol" }
 runode-git = { path = "crates/git" }
 runode-todo = { path = "crates/todo" }

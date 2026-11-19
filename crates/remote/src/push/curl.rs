@@ -51,22 +51,9 @@ pub(crate) struct Curl {
 }
 
 impl Default for Curl {
-    /// Windows 上 `Command` 先找 System32 再找 PATH，所以先按 PATH 找 `curl.exe`：系统自带的没编进
-    /// HTTP/2，用户自己装的新版要排在它前面。
+    /// Windows 自带的 curl 没编进 HTTP/2，用户自己装的新版要排在它前面。
     fn default() -> Self {
-        #[cfg(windows)]
-        let program = std::env::var_os("PATH")
-            .and_then(|path| {
-                // 空段和相对段会按当前目录找，不认。
-                std::env::split_paths(&path)
-                    .filter(|dir| dir.is_absolute())
-                    .map(|dir| dir.join("curl.exe"))
-                    .find(|exe| exe.is_file())
-            })
-            .unwrap_or_else(|| "curl.exe".into());
-        #[cfg(not(windows))]
-        let program = "curl".into();
-        Self::new(program)
+        Self::new(runode_subprocess::curl_program())
     }
 }
 
@@ -75,16 +62,10 @@ impl Curl {
         Self { program, checked: Arc::default() }
     }
 
-    /// 拉起 curl 的命令。Windows 上不开控制台窗口（`CREATE_NO_WINDOW`）：宿主没有控制台，不然每推一次
-    /// 就闪一个黑窗。
+    /// 拉起 curl 的命令，不开控制台窗口。
     fn command(&self) -> Command {
-        #[cfg_attr(not(windows), expect(unused_mut, reason = "只在 Windows 上设标志"))]
         let mut command = Command::new(&self.program);
-        #[cfg(windows)]
-        std::os::windows::process::CommandExt::creation_flags(
-            &mut command,
-            windows_sys::Win32::System::Threading::CREATE_NO_WINDOW,
-        );
+        runode_subprocess::hide_window(&mut command);
         command
     }
 

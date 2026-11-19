@@ -19,7 +19,6 @@ use crate::{Error, Release, authenticode};
 /// 下载安装包最多等这么久。
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const SETUP_NAME: &str = "Runode-setup.exe";
-pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
@@ -177,12 +176,12 @@ fn verify(file: &Path, thumbprint: &str, version: &str) -> Result<(), Error> {
 }
 
 fn signature(file: &Path) -> Result<authenticode::Signed, String> {
-    let out = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", authenticode::SCRIPT])
-        .env("RUNODE_FILE", file)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|err| format!("powershell.exe: {err}"))?;
+        .env("RUNODE_FILE", file);
+    runode_subprocess::hide_window(&mut command);
+    let out = command.output().map_err(|err| format!("powershell.exe: {err}"))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_owned());
     }

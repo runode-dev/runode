@@ -205,29 +205,15 @@ fn revocation_unchecked(error: &str) -> bool {
     ["0x80092012", "0x80092013"].iter().any(|code| error.contains(code))
 }
 
-/// 不加 `-q`：照用户 `~/.curlrc` 里的代理走。Windows 上 `Command` 先找 System32 再找 PATH，所以先按
-/// PATH 找 `curl.exe`，用户自己装的新版排在系统自带的前面。
+/// 不加 `-q`：照用户 `~/.curlrc` 里的代理走。
 #[cfg(not(target_os = "macos"))]
 fn curl(timeout: Duration, no_revoke: bool) -> std::process::Command {
-    #[cfg(windows)]
-    let program = std::env::var_os("PATH")
-        .and_then(|path| {
-            // 空段和相对段会按当前目录找，不认。
-            std::env::split_paths(&path)
-                .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join("curl.exe"))
-                .find(|exe| exe.is_file())
-        })
-        .unwrap_or_else(|| "curl.exe".into());
-    #[cfg(not(windows))]
-    let program = "curl";
-    let mut command = std::process::Command::new(program);
+    let mut command = std::process::Command::new(runode_subprocess::curl_program());
     command.args(["-fsSL", "--retry", "2", "--proto", "=https", "--max-time"]).arg(timeout.as_secs().to_string());
     if no_revoke {
         command.arg("--ssl-no-revoke");
     }
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, crate::windows::CREATE_NO_WINDOW);
+    runode_subprocess::hide_window(&mut command);
     command
 }
 

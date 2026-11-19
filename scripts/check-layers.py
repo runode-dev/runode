@@ -9,14 +9,15 @@ import sys
 # crate 名 -> 它能直接依赖的 runode crate。
 ONLY = {
     "runode-types": set(),
+    "runode-subprocess": set(),
     "runode-paths": set(),
-    "runode-git": set(),
+    "runode-git": {"runode-subprocess"},
     "runode-files": set(),
     "runode-preview": set(),
     "runode-lsp": set(),
-    "runode-update": set(),
+    "runode-update": {"runode-subprocess"},
     "runode-protocol": {"runode-types"},
-    "runode-agent": {"runode-types"},
+    "runode-agent": {"runode-types", "runode-subprocess"},
     "runode-agent-skill": {"runode-paths"},
     "runode-android-tunnel": set(),
 }
