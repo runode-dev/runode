@@ -12,7 +12,7 @@ use std::{
     process::{Child, Command, Stdio},
     rc::{Rc, Weak},
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures::{
@@ -24,9 +24,9 @@ use gpui_component::input::{CompletionProvider, DefinitionProvider, EditorState,
 use runode_lsp::{
     Client, servers,
     types::{
-        CompletionContext, CompletionParams, CompletionResponse, Diagnostic, GotoDefinitionParams,
-        GotoDefinitionResponse, Hover, HoverParams, InitializeResult, LocationLink, PublishDiagnosticsParams,
-        ShowDocumentParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri,
+        CompletionContext, CompletionParams, CompletionResponse, CompletionTextEdit, Diagnostic, GotoDefinitionParams,
+        GotoDefinitionResponse, Hover, HoverParams, InitializeResult, LocationLink, Position, PositionEncodingKind,
+        PublishDiagnosticsParams, Range, ShowDocumentParams, TextDocumentIdentifier, TextDocumentPositionParams, Uri,
         request::{Completion, GotoDefinition, HoverRequest, Request},
     },
     uri,
@@ -35,6 +35,8 @@ use runode_lsp::{
 use super::{PreviewPanel, WorkspaceId, tabs::PreviewTabs};
 use crate::{config::AppConfig, host_client::ssh::RemoteHost};
 
+/// 语言服务器跑了这么久以后自己退出的重新起；没跑这么久就退的不再起，免得起了又退地转。
+const RESTART_AFTER: Duration = Duration::from_secs(60);
 /// 语言服务器握手最多等这么久，过了算起不来。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// 请语言服务器退出后隔这么久看一次它退了没有，看这么多次还没退就结束掉它。
@@ -47,6 +49,32 @@ pub(super) struct Server {
     child: Option<Child>,
     /// 服务器要求的、打了就问补全的字符。
     triggers: Vec<String>,
+    /// 协议里位置的列按 UTF-16 码元数；否则按 Unicode 码点数，和编辑器的一样。
+    utf16: bool,
+}
+
+/// 把 `position` 的列在 UTF-16 码元数和 Unicode 码点数之间换算，`text` 是它所在的文档；`to_utf16` 时从码点数
+/// 换成码元数，否则反过来。
+fn convert_column(text: &Rope, position: Position, to_utf16: bool) -> Position {
+    let (mut chars, mut units) = (0, 0);
+    for c in text.slice_line(position.line as usize).chars() {
+        if (if to_utf16 { chars } else { units }) >= position.character {
+            break;
+        }
+        chars += 1;
+        units += c.len_utf16() as u32;
+    }
+    Position { line: position.line, character: if to_utf16 { units } else { chars } }
+}
+
+impl Server {
+    /// 服务器给的 `range` 换成编辑器的写法，`text` 是它所在的文档。
+    fn range_from_wire(&self, text: &Rope, range: Range) -> Range {
+        if !self.utf16 {
+            return range;
+        }
+        Range { start: convert_column(text, range.start, false), end: convert_column(text, range.end, false) }
+    }
 }
 
 impl Drop for Server {
@@ -94,7 +122,8 @@ impl Document {
     /// 编辑器里的文字变成了 `text`。
     pub(super) fn changed(&mut self, text: &Rope) {
         self.version += 1;
-        self.server.client.change(self.uri.clone(), self.version, text.to_string());
+        let text = text.clone();
+        self.server.client.change(self.uri.clone(), self.version, move || text.to_string());
     }
 
     /// 编辑器里的文字存盘了。
@@ -112,7 +141,7 @@ impl Drop for Document {
 enum Slot {
     Starting,
     Running(Weak<Server>),
-    /// 起不来、握手不成，或者远端主机上没装，这个 workspace 里不再试。
+    /// 起不来、握手不成、刚起来就退出，或者远端主机上没装，这个 workspace 里不再试。
     Failed,
 }
 
@@ -205,8 +234,9 @@ fn start(
     };
     match reply {
         Ok(reply) => {
+            let utf16 = reply.capabilities.position_encoding != Some(PositionEncodingKind::UTF32);
             let triggers = reply.capabilities.completion_provider.and_then(|options| options.trigger_characters);
-            Ok(Some(Server { client, child: Some(child), triggers: triggers.unwrap_or_default() }))
+            Ok(Some(Server { client, child: Some(child), triggers: triggers.unwrap_or_default(), utf16 }))
         }
         Err(err) => {
             // 流断了的是进程自己在退，等得到它的退出码；别的错结束掉它。
@@ -227,11 +257,11 @@ struct Provider {
 
 impl Provider {
     /// `text` 里字节位置 `offset` 在协议里的写法。
-    /// shortcut: 列按 Unicode 码点数，只肯用 UTF-16 的服务器在有 BMP 之外字符的行上位置会偏；遇到这样的服务器时按握手定下的编码换算。
     fn at(&self, text: &Rope, offset: usize) -> TextDocumentPositionParams {
+        let position = text.offset_to_position(offset);
         TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: self.uri.clone() },
-            position: text.offset_to_position(offset),
+            position: if self.server.utf16 { convert_column(text, position, true) } else { position },
         }
     }
 
@@ -265,7 +295,28 @@ impl CompletionProvider for Provider {
             },
             cx,
         );
-        cx.background_spawn(async move { Ok(reply.await?.unwrap_or(CompletionResponse::Array(Vec::new()))) })
+        let (server, text) = (self.server.clone(), text.clone());
+        cx.spawn(async move |_| {
+            let mut items = match reply.await? {
+                Some(CompletionResponse::Array(items)) => items,
+                Some(CompletionResponse::List(list)) => list.items,
+                None => Vec::new(),
+            };
+            for item in &mut items {
+                match &mut item.text_edit {
+                    Some(CompletionTextEdit::Edit(edit)) => edit.range = server.range_from_wire(&text, edit.range),
+                    Some(CompletionTextEdit::InsertAndReplace(edit)) => {
+                        edit.insert = server.range_from_wire(&text, edit.insert);
+                        edit.replace = server.range_from_wire(&text, edit.replace);
+                    }
+                    None => {}
+                }
+                for edit in item.additional_text_edits.iter_mut().flatten() {
+                    edit.range = server.range_from_wire(&text, edit.range);
+                }
+            }
+            Ok(CompletionResponse::Array(items))
+        })
     }
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
@@ -276,13 +327,21 @@ impl CompletionProvider for Provider {
 
 impl HoverProvider for Provider {
     fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<anyhow::Result<Option<Hover>>> {
-        self.ask::<HoverRequest>(
+        let reply = self.ask::<HoverRequest>(
             HoverParams {
                 text_document_position_params: self.at(text, offset),
                 work_done_progress_params: Default::default(),
             },
             cx,
-        )
+        );
+        let (server, text) = (self.server.clone(), text.clone());
+        cx.spawn(async move |_| {
+            let mut hover = reply.await?;
+            if let Some(hover) = &mut hover {
+                hover.range = hover.range.map(|range| server.range_from_wire(&text, range));
+            }
+            Ok(hover)
+        })
     }
 }
 
@@ -302,22 +361,32 @@ impl DefinitionProvider for Provider {
             },
             cx,
         );
-        cx.background_spawn(async move {
-            let locations = match reply.await? {
-                Some(GotoDefinitionResponse::Link(links)) => return Ok(links),
-                Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-                Some(GotoDefinitionResponse::Array(locations)) => locations,
+        let (server, text, own) = (self.server.clone(), text.clone(), self.uri.clone());
+        cx.spawn(async move |_| {
+            let link = |uri, range| LocationLink {
+                origin_selection_range: None,
+                target_uri: uri,
+                target_range: range,
+                target_selection_range: range,
+            };
+            let mut links = match reply.await? {
+                Some(GotoDefinitionResponse::Link(links)) => links,
+                Some(GotoDefinitionResponse::Scalar(location)) => vec![link(location.uri, location.range)],
+                Some(GotoDefinitionResponse::Array(locations)) => {
+                    locations.into_iter().map(|location| link(location.uri, location.range)).collect()
+                }
                 None => Vec::new(),
             };
-            Ok(locations
-                .into_iter()
-                .map(|location| LocationLink {
-                    origin_selection_range: None,
-                    target_uri: location.uri,
-                    target_range: location.range,
-                    target_selection_range: location.range,
-                })
-                .collect())
+            for link in &mut links {
+                link.origin_selection_range =
+                    link.origin_selection_range.map(|range| server.range_from_wire(&text, range));
+                // 别的文件里的目标只用到行号，行号不用换算。
+                if uri::to_path(&link.target_uri) == uri::to_path(&own) {
+                    link.target_range = server.range_from_wire(&text, link.target_range);
+                    link.target_selection_range = server.range_from_wire(&text, link.target_selection_range);
+                }
+            }
+            Ok(links)
         })
     }
 }
@@ -353,10 +422,13 @@ impl PreviewPanel {
         let job = cx.background_spawn(async move { start(spec, &file, root, host, sender) });
         cx.spawn(async move |this, cx| {
             let started = job.await;
+            let since = Instant::now();
+            let mut mine = Weak::new();
             this.update(cx, |this, cx| match started {
                 Ok(Some(server)) => {
                     let server = Rc::new(server);
-                    this.servers.0.insert(key, Slot::Running(Rc::downgrade(&server)));
+                    mine = Rc::downgrade(&server);
+                    this.servers.0.insert(key, Slot::Running(mine.clone()));
                     this.open_documents(ws, spec.program, Some(server), cx);
                 }
                 // 远端每试一次都要起一条 ssh。
@@ -374,11 +446,60 @@ impl PreviewPanel {
             .ok();
             while let Some(params) = diagnostics.next().await {
                 if this.update(cx, |this, cx| this.show_diagnostics(ws, params, cx)).is_err() {
-                    break;
+                    return;
                 }
             }
+            // 通知到头是连接断了。
+            this.update(cx, |this, cx| this.server_exited(key, &mine, since.elapsed() >= RESTART_AFTER, cx)).ok();
         })
         .detach();
+    }
+
+    /// `key` 的服务器 `server` 的连接断了。还有编辑器接着它时是它自己退出了：把这些编辑器摘下来，`restart` 时
+    /// 重新起一个接上，否则这个 workspace 里不再试。
+    fn server_exited(
+        &mut self,
+        key: (WorkspaceId, &'static str),
+        server: &Weak<Server>,
+        restart: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let running = matches!(self.servers.0.get(&key), Some(Slot::Running(running)) if running.ptr_eq(server));
+        let (true, Some(server), Some(tabs)) = (running, server.upgrade(), self.workspaces.get_mut(&key.0)) else {
+            return;
+        };
+        tracing::warn!("{} exited on its own", key.1);
+        let mut orphan = None;
+        for tab in &mut tabs.tabs {
+            let Some(editor) = tab.editor.as_mut() else {
+                continue;
+            };
+            if !editor.lsp.as_ref().is_some_and(|document| Rc::ptr_eq(&document.server, &server)) {
+                continue;
+            }
+            editor.lsp = None;
+            editor.area.update(cx, |area, cx| {
+                let text = area.text().clone();
+                if let Some(shown) = area.diagnostics_mut() {
+                    shown.reset(&text);
+                }
+                cx.notify();
+                let lsp = area.lsp_mut();
+                lsp.completion_provider = None;
+                lsp.hover_provider = None;
+                lsp.definition_provider = None;
+                lsp.show_document = None;
+            });
+            orphan = Some(tab.path.clone());
+        }
+        if restart {
+            self.servers.0.remove(&key);
+            if let Some(path) = orphan {
+                self.attach_language_server(key.0, &path, cx);
+            }
+        } else {
+            self.servers.0.insert(key, Slot::Failed);
+        }
     }
 
     /// workspace `ws` 里该用 `program`、还没接上的编辑器都在 `server` 上打开文档，问它要补全、悬停和定义。
@@ -440,8 +561,35 @@ impl PreviewPanel {
             if params.version.is_some_and(|version| version != document.version) {
                 continue;
             }
-            document.diagnostics.clone_from(&params.diagnostics);
+            let text = editor.area.read(cx).text();
+            document.diagnostics = params
+                .diagnostics
+                .iter()
+                .cloned()
+                .map(|mut diagnostic| {
+                    diagnostic.range = document.server.range_from_wire(text, diagnostic.range);
+                    diagnostic
+                })
+                .collect();
             document.show_diagnostics(&editor.area, cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn columns_convert_between_code_points_and_utf16_units() {
+        let text = Rope::from("x\na😀b中c");
+        let at = |character| Position { line: 1, character };
+        for (chars, units) in [(0, 0), (1, 1), (2, 3), (3, 4), (4, 5), (5, 6)] {
+            assert_eq!(convert_column(&text, at(chars), true), at(units));
+            assert_eq!(convert_column(&text, at(units), false), at(chars));
+        }
+        // 列超出行尾的停在行尾。
+        assert_eq!(convert_column(&text, at(9), true), at(6));
+        assert_eq!(convert_column(&text, at(9), false), at(5));
     }
 }

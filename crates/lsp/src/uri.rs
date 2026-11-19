@@ -44,6 +44,7 @@ pub fn to_path(uri: &Uri) -> Option<PathBuf> {
         }
     }
     let path = String::from_utf8(bytes).ok()?;
-    let windows = matches!(path.as_bytes(), [b'/', drive, b':', ..] if drive.is_ascii_alphabetic());
+    let windows =
+        matches!(path.as_bytes(), [b'/', drive, b':'] | [b'/', drive, b':', b'/', ..] if drive.is_ascii_alphabetic());
     Some(PathBuf::from(if windows { path[1..].replace('/', "\\") } else { path }))
 }

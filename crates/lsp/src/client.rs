@@ -57,6 +57,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 type Reply = Box<dyn FnOnce(Result<Value, Error>) + Send>;
+/// 一条要发的消息：写线程上调它拿到正文。
+type Outgoing = Box<dyn FnOnce() -> Vec<u8> + Send>;
 
 struct Shared {
     /// 等应答的请求，按请求 id；连接断了以后是 `None`。
@@ -69,7 +71,7 @@ struct Shared {
 #[derive(Clone)]
 pub struct Client {
     shared: Arc<Shared>,
-    outgoing: mpsc::Sender<Vec<u8>>,
+    outgoing: mpsc::Sender<Outgoing>,
 }
 
 impl Client {
@@ -80,11 +82,11 @@ impl Client {
         mut writer: impl Write + Send + 'static,
         on_notification: impl Fn(&str, Value) + Send + 'static,
     ) -> Self {
-        let (outgoing, queue) = mpsc::channel::<Vec<u8>>();
+        let (outgoing, queue) = mpsc::channel::<Outgoing>();
         let shared = Arc::new(Shared { pending: Mutex::new(Some(HashMap::new())), next_id: AtomicI64::new(1) });
         thread::spawn(move || {
             for body in queue {
-                if let Err(err) = write_message(&mut writer, &body) {
+                if let Err(err) = write_message(&mut writer, &body()) {
                     tracing::debug!("writing to the language server: {err}");
                     break;
                 }
@@ -142,8 +144,13 @@ impl Client {
     }
 
     fn send(&self, message: &Value) {
+        let body = message.to_string().into_bytes();
+        self.send_later(move || body);
+    }
+
+    fn send_later(&self, body: impl FnOnce() -> Vec<u8> + Send + 'static) {
         // 写线程已经停了的不管：读线程随后会让等着的请求都落空。
-        self.outgoing.send(message.to_string().into_bytes()).ok();
+        self.outgoing.send(Box::new(body)).ok();
     }
 
     /// 握手：报上客户端支持什么、项目根目录是 `root`，服务器答了以后告诉它可以开始，再把它的应答交给 `done`。
@@ -181,11 +188,17 @@ impl Client {
         });
     }
 
-    /// 告诉服务器 `uri` 的全文变成了 `text`；`version` 每次比上一次大。
-    pub fn change(&self, uri: Uri, version: i32, text: String) {
-        self.notify::<DidChangeTextDocument>(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier { uri, version },
-            content_changes: vec![TextDocumentContentChangeEvent { range: None, range_length: None, text }],
+    /// 告诉服务器 `uri` 的全文变成了 `text` 交回的那篇；`version` 每次比上一次大。`text` 在写线程上调，整篇
+    /// 文字在那里取出、编成消息，调用方的线程不为它停。
+    pub fn change(&self, uri: Uri, version: i32, text: impl FnOnce() -> String + Send + 'static) {
+        self.send_later(move || {
+            let params = DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier { uri, version },
+                content_changes: vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: text() }],
+            };
+            json!({ "jsonrpc": "2.0", "method": DidChangeTextDocument::METHOD, "params": params })
+                .to_string()
+                .into_bytes()
         });
     }
 
@@ -246,7 +259,7 @@ fn capabilities() -> ClientCapabilities {
 /// 处理服务器发来的一条消息：应答交给等它的请求，通知交给 `on_notification`，请求当场答掉。
 fn receive(
     shared: &Shared,
-    outgoing: &mpsc::Sender<Vec<u8>>,
+    outgoing: &mpsc::Sender<Outgoing>,
     mut message: Value,
     on_notification: &impl Fn(&str, Value),
 ) {
@@ -285,5 +298,6 @@ fn receive(
     };
     let mut reply = json!({ "jsonrpc": "2.0", "id": id });
     reply.as_object_mut().unwrap().extend(answer.as_object().unwrap().clone());
-    outgoing.send(reply.to_string().into_bytes()).ok();
+    let body = reply.to_string().into_bytes();
+    outgoing.send(Box::new(move || body)).ok();
 }

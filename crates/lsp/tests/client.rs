@@ -48,7 +48,7 @@ fn documents_are_synced_as_full_text() {
     let (client, mut server, _notifications) = common::connect();
     let uri = uri::from_path(Path::new("/p/a.rs")).unwrap();
     client.open(uri.clone(), "rust", "fn a() {}".into());
-    client.change(uri.clone(), 1, "fn b() {}".into());
+    client.change(uri.clone(), 1, || "fn b() {}".into());
     client.save(uri.clone());
     client.close(uri);
     let opened = server.expect("textDocument/didOpen");

@@ -27,6 +27,8 @@ fn paths_round_trip_through_uris() {
     let uri = uri::from_path(windows).unwrap();
     assert_eq!(uri.as_str(), "file:///C:/p/a%20b.rs");
     assert_eq!(uri::to_path(&uri).unwrap(), windows);
+    let colon = Path::new("/a:b/c.rs");
+    assert_eq!(uri::to_path(&uri::from_path(colon).unwrap()).unwrap(), colon);
     assert_eq!(uri::to_path(&"https://example.com/a.rs".parse().unwrap()), None);
     assert_eq!(uri::to_path(&"file://host/a.rs".parse().unwrap()), None);
 }
