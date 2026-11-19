@@ -113,14 +113,21 @@ jobs:
         run: make test
         env:
           RUNODE_REQUIRE_SHELLS: "1"
+      # 连 SSH 主机的那几条路（部署、桥接、断线重连、换构建后接手会话）标着 ignored，`make test` 不跑。
+      - name: 经假的 ssh 测连 SSH 主机
+        run: make test-ssh
 
   # 发版时 Linux 也要编出 runode（命令行和宿主），平时就在 Linux 上类型检查并 lint 全部 crate（含测试代码），
-  # 免得到打标签时才发现编不过；另外跑只在 Linux 上才走得到的交接和描述符传递测试。整套测试暂时不在 Linux 上跑：
-  # 其中有依赖环境的测试（真 shell、systemd、计时），还没在 Linux 上核对过。
+  # 免得到打标签时才发现编不过；另外跑只在 Linux 上才走得到的交接和描述符传递测试，和不依赖真 shell、systemd、
+  # 计时的那几个 crate 的测试。发的包有 x86_64 和 aarch64 两份，两种机器上各查一遍。
   check-linux:
     # 发版提交只改版本号，不在 main 上重跑；发版流程对标签另查一遍，那时 ref 是标签，不受这条影响。
     if: "${{ !(github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore: 发布 v')) }}"
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,6 +137,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-nextest@0.9.146
       - name: 装 GPUI 编译要的库
         run: |
           sudo apt-get update
@@ -138,6 +148,11 @@ jobs:
       # 连 Linux 的窗口后端一起查，发版的无头包不开它。
       - name: clippy
         run: make clippy CLIPPY_ARGS="--features runode/linux-desktop -- -D warnings"
+      - name: 测试
+        run: |
+          cargo nextest run --locked --no-fail-fast -p runode-subprocess -p runode-paths -p runode-types -p runode-protocol \
+            -p runode-update -p runode-todo -p runode-tasks -p runode-config -p runode-cli -p runode-git \
+            -p runode-files -p runode-preview -p runode-lsp -p runode-agent -p runode-agent-skill -p runode-ssh
       # 交接时传描述符（MSG_NOSIGNAL、MSG_CMSG_CLOEXEC、253 个的上限）和读 /proc 判断进程死活的 Linux 分支。
       - name: Linux 专有的交接测试
         run: |
@@ -185,9 +200,10 @@ jobs:
       - name: 测试
         run: |
           cargo build -p runode --locked
-          cargo nextest run --locked --no-fail-fast -p runode-paths -p runode-types -p runode-protocol \
-            -p runode-update -p runode-autostart -p runode-todo -p runode-tasks -p runode-config -p runode-cli \
-            -p runode-git -p runode-terminal
+          cargo nextest run --locked --no-fail-fast -p runode-subprocess -p runode-paths -p runode-types \
+            -p runode-protocol -p runode-update -p runode-autostart -p runode-todo -p runode-tasks -p runode-config \
+            -p runode-cli -p runode-git -p runode-terminal -p runode-files -p runode-preview -p runode-lsp \
+            -p runode-agent -p runode-agent-skill -p runode-ssh
       - name: 编安装包（不签名）
         # 发版时 release.yml 经 workflow_call 调这里，event_name 同样是 push，要另看 ref 才排除得掉。
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
