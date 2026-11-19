@@ -1,5 +1,5 @@
-//! 预览栏编辑器的语言服务器：按文件挑一个装在项目所在电脑上的服务器（`runode_lsp::servers`），一个 workspace、
-//! 一个程序起一个进程，开着的文件共用，都关了就让它退出；编辑器从它拿补全、悬停说明、跳到定义和诊断。没装服务器、
+//! 预览栏编辑器的语言服务器：按文件挑一个装在项目所在电脑上的服务器（`runode_lsp::servers`），一个 workspace 里
+//! 每个 git 仓库、每个程序起一个进程，开着的文件共用，都关了就让它退出；编辑器从它拿补全、悬停说明、跳到定义和诊断。没装服务器、
 //! 配置关着（`language-server`）、项目在配对的电脑或 Windows 的 SSH 主机上时编辑照常，只是没有这些。
 
 pub(crate) mod remote;
@@ -141,13 +141,26 @@ impl Drop for Document {
 enum Slot {
     Starting,
     Running(Weak<Server>),
-    /// 起不来、握手不成、刚起来就退出，或者远端主机上没装，这个 workspace 里不再试。
+    /// 起不来、握手不成、刚起来就退出，或者远端主机上没装，这个仓库里不再试。
     Failed,
 }
 
-/// 各 workspace 里起过的语言服务器，按程序名。
+/// 一个语言服务器管的范围：workspace、文件所在 git 仓库的根（`project_root`）、程序名。SSH 主机上的项目
+/// 一个 workspace 只分程序，根为空。
+type Key = (WorkspaceId, Option<PathBuf>, &'static str);
+
+/// 各 workspace 里起过的语言服务器。
 #[derive(Default)]
-pub(super) struct Servers(HashMap<(WorkspaceId, &'static str), Slot>);
+pub(super) struct Servers(HashMap<Key, Slot>);
+
+/// 本机项目 `tabs` 里的 `path` 所在 git 仓库的根：往上第一个有 `.git` 的目录。不在仓库里的、SSH 主机上的
+/// （那边的目录在这边查不了）没有。
+fn project_root(tabs: &PreviewTabs, path: &Path) -> Option<PathBuf> {
+    if tabs.project.is_remote() {
+        return None;
+    }
+    path.ancestors().skip(1).find(|dir| dir.join(".git").exists()).map(Path::to_path_buf)
+}
 
 /// `tabs` 里 `path` 用的语言服务器；配置关着、项目所在的电脑上起不了、没有对应的服务器时没有。
 fn server_for(tabs: &PreviewTabs, path: &Path, cx: &App) -> Option<servers::Server> {
@@ -193,8 +206,8 @@ fn spawn(spec: servers::Server, root: &Path) -> io::Result<Option<Process>> {
     Ok(Some(Process { child, input: Box::new(stdin), output: Box::new(stdout) }))
 }
 
-/// 起 `spec` 这个语言服务器、握好手，`host` 不为空时起在那台 SSH 主机上。项目根目录是 `root`；本机上没给
-/// 时是 `file` 往上第一个有 `.git` 的目录，都没有时是 `file` 所在的目录。诊断发进 `diagnostics`。用户没装
+/// 起 `spec` 这个语言服务器、握好手，`host` 不为空时起在那台 SSH 主机上。项目根目录是 `root`，没给时是
+/// `file` 所在的目录。诊断发进 `diagnostics`。用户没装
 /// 这个程序时是 `None`。会阻塞。
 fn start(
     spec: servers::Server,
@@ -203,8 +216,7 @@ fn start(
     host: Option<Arc<RemoteHost>>,
     diagnostics: UnboundedSender<PublishDiagnosticsParams>,
 ) -> io::Result<Option<Server>> {
-    let found = host.is_none().then(|| file.ancestors().skip(1).find(|dir| dir.join(".git").exists())).flatten();
-    let root = root.as_deref().or(found).or(file.parent()).unwrap_or(file);
+    let root = root.as_deref().or(file.parent()).unwrap_or(file);
     let process = match &host {
         Some(host) => remote::spawn(host, spec)?,
         None => match spawn(spec, root)? {
@@ -402,21 +414,21 @@ impl PreviewPanel {
             return;
         };
         let host = remote::host(&tabs.project);
-        // 远端的目录在这边查不了：文件在主仓库里时用仓库的根。
-        let root =
-            host.as_ref().and(tabs.git.as_ref()).map(|git| git.main.root.clone()).filter(|root| path.starts_with(root));
         let remote = host.is_some();
-        let key = (ws, spec.program);
+        let key: Key = (ws, project_root(tabs, path), spec.program);
+        // SSH 主机上的文件在主仓库里时用仓库的根。
+        let main = tabs.git.as_ref().filter(|_| remote).map(|git| git.main.root.clone());
+        let root = key.1.clone().or(main.filter(|root| path.starts_with(root)));
         match self.servers.0.get(&key) {
             Some(Slot::Starting | Slot::Failed) => return,
             Some(Slot::Running(server)) if server.strong_count() > 0 => {
                 let server = server.upgrade();
-                self.open_documents(ws, spec.program, server, cx);
+                self.open_documents(&key, server, cx);
                 return;
             }
             _ => {}
         }
-        self.servers.0.insert(key, Slot::Starting);
+        self.servers.0.insert(key.clone(), Slot::Starting);
         let (sender, mut diagnostics) = futures::channel::mpsc::unbounded();
         let file = path.to_path_buf();
         let job = cx.background_spawn(async move { start(spec, &file, root, host, sender) });
@@ -428,24 +440,24 @@ impl PreviewPanel {
                 Ok(Some(server)) => {
                     let server = Rc::new(server);
                     mine = Rc::downgrade(&server);
-                    this.servers.0.insert(key, Slot::Running(mine.clone()));
-                    this.open_documents(ws, spec.program, Some(server), cx);
+                    this.servers.0.insert(key.clone(), Slot::Running(mine.clone()));
+                    this.open_documents(&key, Some(server), cx);
                 }
                 // 远端每试一次都要起一条 ssh。
                 Ok(None) if remote => {
-                    this.servers.0.insert(key, Slot::Failed);
+                    this.servers.0.insert(key.clone(), Slot::Failed);
                 }
                 Ok(None) => {
                     this.servers.0.remove(&key);
                 }
                 Err(err) => {
                     tracing::warn!("starting {}: {err}", spec.program);
-                    this.servers.0.insert(key, Slot::Failed);
+                    this.servers.0.insert(key.clone(), Slot::Failed);
                 }
             })
             .ok();
             while let Some(params) = diagnostics.next().await {
-                if this.update(cx, |this, cx| this.show_diagnostics(ws, params, cx)).is_err() {
+                if this.update(cx, |this, cx| this.show_diagnostics(ws, &mine, params, cx)).is_err() {
                     return;
                 }
             }
@@ -456,19 +468,13 @@ impl PreviewPanel {
     }
 
     /// `key` 的服务器 `server` 的连接断了。还有编辑器接着它时是它自己退出了：把这些编辑器摘下来，`restart` 时
-    /// 重新起一个接上，否则这个 workspace 里不再试。
-    fn server_exited(
-        &mut self,
-        key: (WorkspaceId, &'static str),
-        server: &Weak<Server>,
-        restart: bool,
-        cx: &mut Context<Self>,
-    ) {
+    /// 重新起一个接上，否则这个仓库里不再试。
+    fn server_exited(&mut self, key: Key, server: &Weak<Server>, restart: bool, cx: &mut Context<Self>) {
         let running = matches!(self.servers.0.get(&key), Some(Slot::Running(running)) if running.ptr_eq(server));
         let (true, Some(server), Some(tabs)) = (running, server.upgrade(), self.workspaces.get_mut(&key.0)) else {
             return;
         };
-        tracing::warn!("{} exited on its own", key.1);
+        tracing::warn!("{} exited on its own", key.2);
         let mut orphan = None;
         for tab in &mut tabs.tabs {
             let Some(editor) = tab.editor.as_mut() else {
@@ -502,24 +508,27 @@ impl PreviewPanel {
         }
     }
 
-    /// workspace `ws` 里该用 `program`、还没接上的编辑器都在 `server` 上打开文档，问它要补全、悬停和定义。
-    fn open_documents(&mut self, ws: WorkspaceId, program: &str, server: Option<Rc<Server>>, cx: &mut Context<Self>) {
-        let (Some(server), Some(tabs)) = (server, self.workspaces.get_mut(&ws)) else {
+    /// 归 `key` 管、还没接上的编辑器都在 `server` 上打开文档，问它要补全、悬停和定义。
+    fn open_documents(&mut self, key: &Key, server: Option<Rc<Server>>, cx: &mut Context<Self>) {
+        let (ws, root, program) = key;
+        let (Some(server), Some(tabs)) = (server, self.workspaces.get_mut(ws)) else {
             return;
         };
         let panel = cx.weak_entity();
         for at in 0..tabs.tabs.len() {
             let path = tabs.tabs[at].path.clone();
-            let Some(spec) = server_for(tabs, &path, cx).filter(|spec| spec.program == program) else {
+            let Some(spec) = server_for(tabs, &path, cx).filter(|spec| spec.program == *program) else {
                 continue;
             };
+            if tabs.tabs[at].editor.as_ref().is_none_or(|editor| editor.lsp.is_some())
+                || project_root(tabs, &path) != *root
+            {
+                continue;
+            }
             let tab = &mut tabs.tabs[at];
             let (Some(editor), None, Some(uri)) = (&mut tab.editor, &tab.diff, uri::from_path(&path)) else {
                 continue;
             };
-            if editor.lsp.is_some() {
-                continue;
-            }
             server.client.open(uri.clone(), spec.language_id, editor.area.read(cx).text().to_string());
             let provider = Rc::new(Provider { server: server.clone(), uri: uri.clone() });
             let (panel, own) = (panel.clone(), path);
@@ -545,9 +554,15 @@ impl PreviewPanel {
         }
     }
 
-    /// 把 workspace `ws` 的语言服务器对一个文档的诊断画到开着它的编辑器里；诊断说的不是编辑器里现在这一版时
-    /// 不画。
-    fn show_diagnostics(&mut self, ws: WorkspaceId, params: PublishDiagnosticsParams, cx: &mut Context<Self>) {
+    /// 把 workspace `ws` 的语言服务器 `server` 对一个文档的诊断画到在它上面开着这个文档的编辑器里；诊断说的
+    /// 不是编辑器里现在这一版时不画。
+    fn show_diagnostics(
+        &mut self,
+        ws: WorkspaceId,
+        server: &Weak<Server>,
+        params: PublishDiagnosticsParams,
+        cx: &mut Context<Self>,
+    ) {
         // 按路径认文档：同一个路径，服务器写出的 URI 和这边写的转义可以不一样。
         let Some(path) = uri::to_path(&params.uri) else {
             return;
@@ -555,7 +570,8 @@ impl PreviewPanel {
         let tabs =
             self.workspaces.get_mut(&ws).into_iter().flat_map(|tabs| &mut tabs.tabs).filter(|tab| tab.path == path);
         for editor in tabs.filter_map(|tab| tab.editor.as_mut()) {
-            let Some(document) = editor.lsp.as_mut() else {
+            let Some(document) = editor.lsp.as_mut().filter(|document| Rc::as_ptr(&document.server) == server.as_ptr())
+            else {
                 continue;
             };
             if params.version.is_some_and(|version| version != document.version) {
