@@ -140,7 +140,7 @@ unsafe fn drop_missing_locales() {
         let Ok(value) = std::env::var(key) else {
             continue;
         };
-        if value.is_empty() || locale_exists(&value) {
+        if value.is_empty() || crate::process_env::locale_exists(&value) {
             continue;
         }
         // SAFETY: 调用方保证还没有别的线程。
@@ -151,23 +151,6 @@ unsafe fn drop_missing_locales() {
         // SAFETY: 调用方保证还没有别的线程。
         unsafe { std::env::set_var("LANG", "C.UTF-8") };
     }
-}
-
-/// 这台机器上能不能用 locale `name`。
-#[cfg(unix)]
-fn locale_exists(name: &str) -> bool {
-    let Ok(name) = std::ffi::CString::new(name) else {
-        return false;
-    };
-    // SAFETY: `name` 是以 NUL 结尾的字符串；建出来的 locale 马上释放。
-    unsafe {
-        let locale = libc::newlocale(libc::LC_ALL_MASK, name.as_ptr(), std::ptr::null_mut());
-        if locale.is_null() {
-            return false;
-        }
-        libc::freelocale(locale);
-    }
-    true
 }
 
 /// 原子地把符号链接 `link` 改指 `target`。
@@ -508,17 +491,5 @@ fn copy(mut from: impl Read, mut to: impl Write, chunk: usize, flush: bool) {
                 }
             }
         }
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::locale_exists;
-
-    #[test]
-    fn only_installed_locales_exist() {
-        assert!(locale_exists("C"));
-        assert!(!locale_exists("xx_NOWHERE.UTF-8"));
-        assert!(!locale_exists("bad\0name"));
     }
 }

@@ -9,6 +9,8 @@ pub fn fix() {
     use_login_shell();
     #[cfg(target_os = "macos")]
     ensure_lang();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    ensure_utf8();
 }
 
 /// app 自己找用户装的命令行工具（agent、gh）用的 PATH：`reported` 是本机终端里 shell 报告的 PATH，没有时用
@@ -61,6 +63,35 @@ fn ensure_lang() {
     unsafe { std::env::set_var("LANG", lang) };
 }
 
+/// 环境里一个语言环境变量都没有时（登录服务起的宿主、经 ssh 起的桥接，服务器上常常这样）终端里是 C 语言
+/// 环境：ls 把中文文件名印成转义的字节，shell 把中文当成一个个字节。这台机器有 `C.UTF-8` 就用它；已经设了
+/// 语言环境变量时不动。
+#[cfg(all(unix, not(target_os = "macos")))]
+fn ensure_utf8() {
+    let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    if !["LC_ALL", "LC_CTYPE", "LANG"].into_iter().any(set) && locale_exists("C.UTF-8") {
+        // SAFETY: 由 `fix` 在 `main` 最开头调用，还没有别的线程读写环境变量。
+        unsafe { std::env::set_var("LANG", "C.UTF-8") };
+    }
+}
+
+/// 这台机器上能不能用 locale `name`。
+#[cfg(unix)]
+pub fn locale_exists(name: &str) -> bool {
+    let Ok(name) = std::ffi::CString::new(name) else {
+        return false;
+    };
+    // SAFETY: `name` 是以 NUL 结尾的字符串；建出来的 locale 马上释放。
+    unsafe {
+        let locale = libc::newlocale(libc::LC_ALL_MASK, name.as_ptr(), std::ptr::null_mut());
+        if locale.is_null() {
+            return false;
+        }
+        libc::freelocale(locale);
+    }
+    true
+}
+
 /// `language` 在本机装着的 UTF-8 语言环境里对应的那个：先找 `region` 的，再找这种语言的本土（中文按
 /// `script` 分简繁），再找它随便哪个地区的，都没有时是 `en_US.UTF-8`。`zh`、`SG` 没有 `zh_SG.UTF-8`，
 /// 得到 `zh_CN.UTF-8`，和 Terminal.app 一样。
@@ -103,5 +134,13 @@ mod tests {
         assert_eq!(pick("en", Some("SG"), None), "en_US.UTF-8");
         assert_eq!(pick("ja", None, None), "ja_JP.UTF-8");
         assert_eq!(pick("xx", Some("YY"), None), "en_US.UTF-8");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_installed_locales_exist() {
+        assert!(locale_exists("C"));
+        assert!(!locale_exists("xx_NOWHERE.UTF-8"));
+        assert!(!locale_exists("bad\0name"));
     }
 }
