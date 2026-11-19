@@ -506,6 +506,9 @@ struct Runner {
     owner: Option<u64>,
     /// 交互的计数，给 `Viewer::last_active` 编号。
     interactions: u64,
+    /// 已经不带着屏幕连着的设备里交互得最晚的那台：设备名和它的 `Viewer::last_active`，它再带着屏幕
+    /// 连上时沿用。
+    departed: Option<(String, u64)>,
     /// 给前端的输出抹掉 shell 集成报告的内容，从会话开出来起每块输出都经过它。
     redactor: ReportRedactor,
     /// 宿主那份 VT 现在套着的主题：最近一次 `Inbox::Theme` 的，还没有过时是开出来时的。
@@ -556,6 +559,7 @@ impl Runner {
             viewers: Vec::new(),
             owner: None,
             interactions: 0,
+            departed: None,
             redactor: ReportRedactor::new(),
             settings: Arc::new(settings),
             shell,
@@ -891,7 +895,11 @@ impl Runner {
             }
         } else {
             if !self.viewers.iter().any(|v| v.connection == connection) {
-                self.viewers.push(Viewer { connection, device, requested: None, last_active: 0 });
+                let last_active = self
+                    .departed
+                    .take_if(|(name, _)| device.as_deref() == Some(name.as_str()))
+                    .map_or(0, |(_, active)| active);
+                self.viewers.push(Viewer { connection, device, requested: None, last_active });
             }
             if let Some(size) = size {
                 self.request_size(connection, size);

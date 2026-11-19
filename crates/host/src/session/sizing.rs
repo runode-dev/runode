@@ -8,6 +8,10 @@
 //! 别的只记下，等它当上 owner 再用；还没有 owner 时谁的都应用。尺寸只在宿主插进输出流的
 //! `HostMsg::Resized` 处改，两份 VT 不会分叉；owner 换了用 `HostMsg::SizeOwner` 告诉前端。owner 是
 //! 连接级的状态，交接后新宿主上的会话从没有 owner 开始。
+//!
+//! 交互的先后跟着设备走：同一台设备（按 `Hello` 里的设备名认，没报的不算）断线后换一条连接回来，
+//! 沿用断开前的先后；走了的设备只记着交互得最晚的那一台。owner 断线时尺寸交给了别的前端，那个前端
+//! 在它回来之前没交互过的话，它一请求尺寸就接着当 owner，不用再交互一次。
 
 use runode_protocol::HostMsg;
 use runode_types::grid::GridSize;
@@ -24,18 +28,23 @@ pub(super) struct Viewer {
     /// 这个前端最近一次请求的尺寸（带尺寸的 `Subscribe` 或者 `Inbox::Resize`），轮到它当 owner 时
     /// 应用；还没请求过时为空，这时没资格当 owner。
     pub(super) requested: Option<GridSize>,
-    /// 最近一次交互的序号（`Runner::interactions`），没交互过为 0。
+    /// 最近一次交互的序号（`Runner::interactions`），没交互过为 0；`device` 之前的连接交互过的，
+    /// 沿用那边的。
     pub(super) last_active: u64,
 }
 
 impl Runner {
     /// 连接 `connection` 的视图要尺寸 `size`：是 `Viewer` 的记下来；它是 owner、或者还没有 owner
-    /// 时当场应用。
+    /// 时当场应用；它交互得比 owner 晚（owner 是在它的设备断线时接手的）时轮到它当 owner。
     pub(super) fn request_size(&mut self, connection: u64, size: GridSize) {
         if let Some(viewer) = self.viewers.iter_mut().find(|v| v.connection == connection) {
             viewer.requested = Some(size);
         }
-        if self.owner.is_none_or(|owner| owner == connection) {
+        let active =
+            |connection: u64| self.viewers.iter().find(|v| v.connection == connection).map_or(0, |v| v.last_active);
+        if self.owner.is_some_and(|owner| active(owner) < active(connection)) {
+            self.make_owner(connection);
+        } else if self.owner.is_none_or(|owner| owner == connection) {
             self.apply_size(size);
         }
     }
@@ -55,8 +64,20 @@ impl Runner {
 
     /// 连接 `connection` 不再带着屏幕连着（断开、`Detach`、改成只看状态）：不再有资格；它是 owner
     /// 的话交给剩下的、请求过尺寸的里面最近交互过的，应用那边的尺寸；没有这样的就没有 owner。
+    /// 它的交互先后留给同一台设备还连着的连接，没有就记进 `Runner::departed`。
     pub(super) fn forget_viewer(&mut self, connection: u64) {
-        self.viewers.retain(|v| v.connection != connection);
+        if let Some(at) = self.viewers.iter().position(|v| v.connection == connection) {
+            let left = self.viewers.remove(at);
+            if let Some(device) = left.device {
+                match self.viewers.iter_mut().find(|v| v.device.as_ref() == Some(&device)) {
+                    Some(same) => same.last_active = same.last_active.max(left.last_active),
+                    None if left.last_active > self.departed.as_ref().map_or(0, |(_, active)| *active) => {
+                        self.departed = Some((device, left.last_active));
+                    }
+                    None => {}
+                }
+            }
+        }
         if self.owner != Some(connection) {
             return;
         }

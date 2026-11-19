@@ -475,6 +475,61 @@ fn the_owner_leaving_skips_viewers_without_a_size() {
     a.send(&ClientMsg::Kill { id });
 }
 
+/// 最近交互过的设备断线后换一条连接回来（不带尺寸连上，只发 `Resize`）：别的前端在这期间没交互过，
+/// 它接着决定尺寸，新连接先连上、旧连接后断开也一样；别的前端交互过了就只记下。
+#[test]
+fn a_device_that_reconnects_keeps_its_turn() {
+    let host = host();
+    let mut mac = desktop(&host, "mac");
+    let id = cat(&mut mac);
+    attach_view(&mut mac, id, Some(SIZE_A));
+    let phone = {
+        let mut phone = mobile(&host, "phone");
+        attach_view(&mut phone, id, Some(SIZE_B));
+        phone
+    };
+
+    // 手机断线：尺寸回到 mac。
+    drop(phone);
+    let seen = until(&mac, |message| matches!(message, HostMsg::SizeOwner { mine: true, .. }));
+    assert_eq!(resized(&seen).last(), Some(&SIZE_A));
+
+    // 回来：mac 没交互过，接着决定尺寸。
+    let mut phone = mobile(&host, "phone");
+    let (_, size, owner) = attach_view(&mut phone, id, None);
+    assert_eq!((size, owner), (SIZE_A, size_owner(false, "mac")));
+    phone.send(&ClientMsg::Resize { id, size: SIZE_B });
+    let seen = until(&phone, |message| matches!(message, HostMsg::SizeOwner { .. }));
+    assert_eq!(resized(&seen), [SIZE_B]);
+    assert_eq!(owners(&seen), [size_owner(true, "phone")]);
+
+    // 新连接先连上、请求了尺寸，旧连接才断开：新连接接着当 owner，尺寸不动。
+    let mut again = mobile(&host, "phone");
+    let (_, size, owner) = attach_view(&mut again, id, None);
+    assert_eq!((size, owner), (SIZE_B, size_owner(false, "phone")));
+    again.send(&ClientMsg::Resize { id, size: SIZE_B });
+    settle(&mut again, id);
+    drop(phone);
+    let seen = until(&again, |message| matches!(message, HostMsg::SizeOwner { .. }));
+    assert_eq!(owners(&seen), [size_owner(true, "phone")]);
+    assert!(resized(&seen).is_empty(), "{seen:?}");
+
+    // mac 在手机断开期间交互过：手机回来只记下尺寸。
+    drop(again);
+    until(&mac, |message| matches!(message, HostMsg::SizeOwner { mine: true, .. }));
+    mac.send(&ClientMsg::Focus { id, focused: true });
+    settle(&mut mac, id);
+    let mut phone = mobile(&host, "phone");
+    let (_, size, owner) = attach_view(&mut phone, id, None);
+    assert_eq!((size, owner), (SIZE_A, size_owner(false, "mac")));
+    phone.send(&ClientMsg::Resize { id, size: SIZE_B });
+    settle(&mut phone, id);
+    let (info_now, seen) = info(&mut mac, id);
+    assert_eq!((info_now.size, info_now.size_owner.as_deref()), (SIZE_A, Some("mac")));
+    assert!(resized(&seen).is_empty(), "{seen:?}");
+    mac.send(&ClientMsg::Kill { id });
+}
+
 /// 前端给的行列数太大（几万见方会卡死会话线程）时，开会话、带尺寸连上、改尺寸都回 `Error`，
 /// 会话的尺寸不变；正好到上限的照常。
 #[test]
