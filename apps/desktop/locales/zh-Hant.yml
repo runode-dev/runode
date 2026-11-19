@@ -1526,6 +1526,7 @@ preview:
   show_rendered: 顯示排版
   edit: 編輯
   edit_failed: 無法編輯這個檔案
+  go_to_line: 跳到行號
   save_failed: 檔案沒有存下來
   modified_tab: "%{name}（已修改）"
   unsaved_title: "捨棄 %{count} 個檔案裡沒儲存的修改？"

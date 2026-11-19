@@ -484,7 +484,7 @@ impl WindowView {
         .detach();
         let github_actions = cx.new(|_| ActionsPanel::default());
         let actions_events = cx.subscribe_in(&github_actions, window, Self::on_github_actions_event);
-        let preview = cx.new(|cx| PreviewPanel::new(runode_terminal::cell_width, cx));
+        let preview = cx.new(|cx| PreviewPanel::new(runode_terminal::cell_width, window.window_handle(), cx));
         let preview_events = cx.subscribe_in(&preview, window, Self::on_preview_event);
         let mut seen_file_tabs = None;
         let preview_watch = cx.observe(&preview, move |this, preview, cx| {

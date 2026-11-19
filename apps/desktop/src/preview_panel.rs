@@ -60,15 +60,16 @@ use crate::ui::{
     tooltip::tooltip,
 };
 use gpui::{
-    App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton, MouseMoveEvent, Render,
-    RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString, Stateful, SvgRenderer,
-    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    AnyWindowHandle, App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton,
+    MouseMoveEvent, Render, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString,
+    Stateful, SvgRenderer, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
 
 pub use diff::DiffTarget;
 pub(crate) use diff::{ask_discard_hunk, hunk_name, hunk_quote, hunk_title};
+pub use edit::GoToLine;
 
 use marks::{Mark, line_marks};
 pub use tabs::FileTab;
@@ -516,6 +517,8 @@ pub struct PreviewPanel {
     source: bool,
     /// 一个字在终端里占几格，Markdown 表格估列宽用；由 app 给，和终端排版用同一张表。
     cell_width: fn(char) -> u8,
+    /// 预览栏所在的窗口：建代码编辑器、给它换文字要窗口，读完文件的后台任务里经它拿。
+    window: AnyWindowHandle,
 }
 
 impl EventEmitter<PreviewEvent> for PreviewPanel {}
@@ -539,7 +542,7 @@ impl MenuHost for PreviewPanel {
 
 impl PreviewPanel {
     /// `cell_width` 说一个字在终端里占几格。
-    pub fn new(cell_width: fn(char) -> u8, cx: &mut Context<Self>) -> Self {
+    pub fn new(cell_width: fn(char) -> u8, window: AnyWindowHandle, cx: &mut Context<Self>) -> Self {
         Self {
             workspaces: HashMap::new(),
             ws: 0,
@@ -549,6 +552,7 @@ impl PreviewPanel {
             wrap: false,
             source: false,
             cell_width,
+            window,
         }
     }
 
@@ -728,6 +732,7 @@ impl PreviewPanel {
             let handle = preview.scroll.0.borrow().base_handle.clone();
             handle.set_offset(gpui::point(px(0.), handle.offset().y));
         }
+        self.wrap_editors(cx);
         cx.emit(PreviewEvent::OptionsChanged);
         cx.notify();
     }
@@ -1279,11 +1284,10 @@ impl PreviewPanel {
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_source(cx)),
                 )
             })
-            // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图和 diff 里有；图片这类不是文字的
+            // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图、编辑器和 diff 里有；图片这类不是文字的
             // 没有可折的行，也不给。
             .when(
-                !typeset
-                    && !editing
+                (editing || !typeset)
                     && (preview.diff.is_some() || matches!(preview.content, Some(Loaded::Text { .. }))),
                 |buttons| {
                     buttons.child(
@@ -1322,7 +1326,7 @@ impl PreviewPanel {
             .flex()
             .flex_col()
             .map(|body| match &preview.editor {
-                Some(editor) => body.child(self.render_editor(editor, font, cx)),
+                Some(editor) => body.child(self.render_editor(editor, preview.name(), font, window, cx)),
                 None => body.child(self.render_preview_body(preview, width, font, window, cx)),
             });
         Some(
@@ -1332,6 +1336,7 @@ impl PreviewPanel {
                 .on_action(cx.listener(Self::copy_preview))
                 .on_action(cx.listener(Self::select_all_preview))
                 .on_action(cx.listener(Self::insert_preview_path))
+                .on_action(cx.listener(Self::go_to_line))
                 // 焦点在预览栏里时，关标签页和关分屏的快捷键关的都是预览标签。
                 .on_action(cx.listener(Self::close_preview_tab))
                 .on_action(cx.listener(Self::close_preview_pane))

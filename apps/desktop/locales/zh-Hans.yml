@@ -1526,6 +1526,7 @@ preview:
   show_rendered: 显示排版
   edit: 编辑
   edit_failed: 无法编辑这个文件
+  go_to_line: 跳到行号
   save_failed: 文件没有存下来
   modified_tab: "%{name}（已修改）"
   unsaved_title: "放弃 %{count} 个文件里没保存的修改？"

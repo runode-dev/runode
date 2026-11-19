@@ -195,6 +195,8 @@ fn fixed_bindings() -> Vec<KeyBinding> {
     ];
     // 和 VS Code 的 Claude Code 扩展把选区交给 agent 的键一样。
     bindings.extend(INSERT_PATH.iter().map(|c| KeyBinding::new(secondary!("alt-k"), InsertFilePath, *c)));
+    // 和 Zed、VS Code 在 macOS 上跳到行号的键一样。
+    bindings.push(KeyBinding::new("ctrl-g", crate::preview_panel::GoToLine, Some("Preview")));
     bindings.extend(FOCUS_TERMINAL.iter().map(|c| KeyBinding::new("escape", FocusTerminal, *c)));
     // 别的平台上终端里单按 Ctrl 的键归 shell，复制、粘贴是 Ctrl+Shift 加字母；终端外照那里的习惯单按 Ctrl。
     if cfg!(not(target_os = "macos")) {
