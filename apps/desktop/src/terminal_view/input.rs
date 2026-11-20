@@ -108,6 +108,10 @@ impl TerminalView {
             cx.notify();
             return;
         }
+        // 不拦下，GPUI 就把这个按键交给输入法，事件里的文字经 `replace_text_in_range` 交上来。
+        if keys::carries_foreign_text(&event.keystroke) {
+            return;
+        }
         let Some(input) = keys::translate(&event.keystroke) else {
             return;
         };

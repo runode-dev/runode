@@ -111,6 +111,55 @@ fn right_option_down() -> bool {
     false
 }
 
+/// 正在分发的按键事件带着的文本不是它的键位在当前布局下打出的字：语音输入这类工具合成按键时
+/// 随便填个键码（常是 A 键的 0），再把整段文字塞进事件的 `characters`。这种按键不能按键码编码，
+/// 要留给输入法那条路，经 `replace_text_in_range` 交上来的才是事件里的文字。
+#[cfg(target_os = "macos")]
+pub fn carries_foreign_text(keystroke: &Keystroke) -> bool {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSEventModifierFlags, NSEventType};
+    let Some(mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let Some(event) = NSApplication::sharedApplication(mtm).currentEvent() else {
+        return false;
+    };
+    if event.r#type() != NSEventType::KeyDown {
+        return false;
+    }
+    let Some(characters) = event.characters() else {
+        return false;
+    };
+    let caps_lock = event.modifierFlags().contains(NSEventModifierFlags::CapsLock);
+    differs_from_key(keystroke, &characters.to_string(), caps_lock)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn carries_foreign_text(_: &Keystroke) -> bool {
+    false
+}
+
+/// 只看会打字的按键：Control、Command 组合键，回车、方向键这类 `characters` 是控制字符或 AppKit
+/// 功能键私用码位的键，死键这类没有文本的事件都不算。Caps Lock 打出的大写字母不算不同，GPUI 算键位的字时
+/// 不管 Caps Lock。单个字符的空格键也不算：GPUI 给它的 `key_char` 写死成空格，Option+Space 的 `characters` 却是
+/// 不换行空格；GPUI 按 `characters` 的首字认空格键，所以以空格开头的整段文字仍算。
+#[cfg(any(target_os = "macos", test))]
+fn differs_from_key(keystroke: &Keystroke, characters: &str, caps_lock: bool) -> bool {
+    let m = &keystroke.modifiers;
+    let Some(key_char) = keystroke.key_char.as_deref() else {
+        return false;
+    };
+    let typed =
+        |s: &str| !s.is_empty() && s.chars().all(|c| !c.is_control() && !('\u{F700}'..='\u{F8FF}').contains(&c));
+    !m.control
+        && !m.platform
+        && !(keystroke.key == "space" && characters.chars().count() == 1)
+        && typed(key_char)
+        && typed(characters)
+        && characters != key_char
+        && !(caps_lock && characters == key_char.to_uppercase())
+}
+
 /// GPUI 键名对应的按键及其未按 Shift 时的字符：键名按 `KeyChord` 的写法认，不打字的键的字符是
 /// `'\0'`。美式布局下需要 Shift 的符号，映射回产生它的那个键。
 pub(crate) fn key_code(name: &str) -> Option<(Key, char)> {
@@ -193,6 +242,21 @@ mod tests {
         assert_eq!(input.key, Key::C);
         assert_eq!(input.text, None);
         assert!(input.mods.ctrl);
+    }
+
+    #[test]
+    fn synthesized_text_differs_from_key() {
+        let a = stroke("a", Some("a"), Modifiers::none());
+        assert!(differs_from_key(&a, "你好", false));
+        assert!(!differs_from_key(&a, "a", false));
+        assert!(!differs_from_key(&a, "A", true));
+        assert!(differs_from_key(&a, "A", false));
+        assert!(!differs_from_key(&stroke("a", Some("a"), Modifiers::control()), "\u{1}", false));
+        assert!(!differs_from_key(&stroke("enter", Some("\n"), Modifiers::none()), "\r", false));
+        assert!(!differs_from_key(&stroke("up", None, Modifiers::none()), "\u{F700}", false));
+        assert!(!differs_from_key(&stroke("e", Some("e"), Modifiers::none()), "", false));
+        assert!(!differs_from_key(&stroke("space", Some(" "), Modifiers::alt()), "\u{a0}", false));
+        assert!(differs_from_key(&stroke("space", Some(" "), Modifiers::none()), " 你好", false));
     }
 
     #[test]
