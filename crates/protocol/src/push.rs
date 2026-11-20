@@ -1,6 +1,7 @@
 //! agent 停下来等回答时，会话所在电脑的宿主给手机推一条普通通知，标题是「<agent> 在等你回答」，副标题
 //! 是会话标题和电脑名，正文是屏幕底部的问题。看板上的任务做完了（agent 干完活停下来，不是在等回答）时
 //! 推另一种（`NotificationKind::TodoDone`），标题是「任务做完了」，副标题是任务标题和电脑名，没有正文。
+//! agent 干完活停在空闲时推 `NotificationKind::AgentDone`，标题是「<agent> 做完了」，副标题是会话标题和电脑名，没有正文。
 //! iPhone 上的通知经 Apple 的 APNs 送到，Android 上的经 Google 的 FCM（`PushService`）。这里是推送的线上
 //! 格式：发给 APNs 的 payload 和请求头里要用的值、发给 FCM 的请求体，以及经中转服务发送时的请求体。
 //!
@@ -18,6 +19,8 @@
 //! 3. 看板上的任务从进行中变成需要你、又不是在等回答（agent 干完活停下来）时，电脑同样推一条
 //!    （`Notification::todo_done`），一次做完只推一次；`apns-collapse-id` 也是任务的会话标识。agent 报了
 //!    没做成时推另一种（`NotificationKind::TodoFailed`，标题「任务没做成」，正文是它报的结果）。
+//! 4. 不是看板任务的会话里，agent 从干活停到空闲、过了宽限期还空闲时，电脑推一条
+//!    （`Notification::agent_done`），一次停下只推一次；`apns-collapse-id` 同样是会话标识。
 //!
 //! 官方 App 的推送经中转服务发（它持有签 APNs 请求的密钥和 FCM 的服务账号）。官方 App 拿到 device token
 //! 或 FCM 的 registration token 后为每台电脑向中转服务换一个句柄（`RelayRegister`），电脑只拿得到句柄，
@@ -101,6 +104,8 @@ const SUBTITLE_KEY: &str = "agent.blocked.body";
 /// 任务做完、没做成的通知的标题，不带参数；副标题用 `SUBTITLE_KEY`。
 const TODO_DONE_TITLE_KEY: &str = "todo.done.title";
 const TODO_FAILED_TITLE_KEY: &str = "todo.failed.title";
+/// agent 做完的通知的标题，参数是 agent 的名字；副标题用 `SUBTITLE_KEY`。
+const AGENT_DONE_TITLE_KEY: &str = "agent.done.title";
 
 /// 推给哪个 APNs 环境：App Store、TestFlight 装的是 `Production`，Xcode 直接装的是 `Development`。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -211,6 +216,8 @@ pub enum NotificationKind {
     /// 看板上的任务没做成（agent 报了 `todo::Outcome::Failed`）。`title` 是任务标题，`lines` 是 agent 报的
     /// 结果开头几行，`agent` 为空。
     TodoFailed,
+    /// agent 干完活停在空闲（不是看板任务的会话）。`title` 是会话标题，`agent` 是 agent 的名字，`lines` 为空。
+    AgentDone,
 }
 
 impl NotificationKind {
@@ -284,13 +291,19 @@ impl Notification {
         }
     }
 
+    /// 会话 `session` 里的 agent 做完了：`title` 是会话标题，`agent` 是 agent 的名字，没有正文。
+    pub fn agent_done(machine: String, machine_name: &str, session: SessionId, meta: &SessionMeta) -> Self {
+        Self { kind: NotificationKind::AgentDone, ..Self::new(machine, machine_name, session, meta, &[]) }
+    }
+
     /// 请求头 `apns-collapse-id`：会话标识，同一个会话的新通知替掉旧的。
     pub fn collapse_id(&self) -> String {
         self.session.to_string()
     }
 }
 
-/// 通知的 APNs payload：标题是「<agent> 在等你回答」（没有 agent 时是另一句，任务做完时是「任务做完了」），
+/// 通知的 APNs payload：标题是「<agent> 在等你回答」（没有 agent 时是另一句，任务做完时是「任务做完了」，agent
+/// 做完时是「<agent> 做完了」），
 /// 副标题是标题和电脑名，
 /// 文字在手机端的本地化表里；正文是屏幕上的几行，没有时不写；同一台电脑的归一组（`thread-id`）。
 /// 超过 `MAX_APNS_PAYLOAD` 字节时先从最上面一行起删 `lines`，删完还超就把标题一次次缩短一半；标题
@@ -535,6 +548,7 @@ fn encode(notification: &Notification) -> Option<Vec<u8>> {
     let (title_loc_key, title_loc_args) = match notification.kind {
         NotificationKind::TodoDone => (TODO_DONE_TITLE_KEY, Vec::new()),
         NotificationKind::TodoFailed => (TODO_FAILED_TITLE_KEY, Vec::new()),
+        NotificationKind::AgentDone => (AGENT_DONE_TITLE_KEY, vec![notification.agent.as_str()]),
         NotificationKind::Blocked if notification.agent.is_empty() => (TITLE_KEY_UNNAMED, Vec::new()),
         NotificationKind::Blocked => (TITLE_KEY, vec![notification.agent.as_str()]),
     };

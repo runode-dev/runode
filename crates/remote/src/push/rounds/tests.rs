@@ -134,10 +134,10 @@ fn without_text_the_screen_is_not_read() {
     rounds.observe(&[], t);
     assert_eq!(rounds.observe(&[blocked(A)], secs(t, 1)), [notify(A, &[])]);
     assert_eq!(rounds.observe(&[blocked(A)], secs(t, 30)), []);
-    rounds.set_options(Duration::ZERO, true);
+    rounds.set_options(Duration::ZERO, true, true);
     rounds.observe(&[working(B)], secs(t, 31));
     assert_eq!(rounds.observe(&[blocked(B)], secs(t, 32)), [Action::ReadScreen(B)]);
-    rounds.set_options(Duration::ZERO, false);
+    rounds.set_options(Duration::ZERO, false, true);
     assert_eq!(rounds.screen(B, Some("secret")), [notify(B, &[])]);
 }
 
@@ -177,6 +177,99 @@ fn idle(id: SessionId) -> SessionInfo {
 
 fn done(id: SessionId) -> Action {
     Action::TodoDone(id, "任务 1".into())
+}
+
+fn agent_done(id: SessionId) -> Action {
+    Action::AgentDone(id, Box::new(idle(id).meta))
+}
+
+/// agent 从干活停到空闲、过了宽限期还空闲才推，一次停下只推一次；又干起活来时没发出去的别发了，再停下是新的一次。
+#[test]
+fn finished_agents_are_pushed_once() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(DELAY, true);
+    assert_eq!(rounds.observe(&[working(A)], t), []);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 2)), []);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 10)), []);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 12)), [agent_done(A)]);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 600)), []);
+    assert_eq!(rounds.observe(&[working(A)], secs(t, 602)), [Action::Cancel(A)]);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 604)), []);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 614)), [agent_done(A)]);
+    // 推过以后会话没了：没发出去的别发了。
+    assert_eq!(rounds.observe(&[], secs(t, 616)), [Action::Cancel(A)]);
+}
+
+/// 宽限期里又干起活来、停下来等回答的不按做完推；一直空闲、刚起来就空闲的 agent 没干过活，也不推。
+#[test]
+fn only_finished_work_is_pushed() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(DELAY, true);
+    rounds.observe(&[working(A), session(B, None)], t);
+    assert_eq!(rounds.observe(&[idle(A), idle(B)], secs(t, 2)), []);
+    assert_eq!(rounds.observe(&[working(A), idle(B)], secs(t, 8)), []);
+    assert_eq!(rounds.observe(&[blocked(A), idle(B)], secs(t, 10)), []);
+    assert_eq!(rounds.observe(&[blocked(A), idle(B)], secs(t, 19)), []);
+    assert_eq!(rounds.observe(&[blocked(A), idle(B)], secs(t, 30)), [Action::ReadScreen(A)]);
+}
+
+/// 第一份列表里已经空闲的不算刚停下。
+#[test]
+fn finished_agents_start_from_a_baseline() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(DELAY, true);
+    rounds.observe(&[working(A)], t);
+    rounds.reconnected();
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 2)), []);
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 30)), []);
+}
+
+/// 关了做完的通知不推；看板任务的会话有任务做完的通知，也不推。
+#[test]
+fn finished_agents_can_be_left_out() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(DELAY, true);
+    rounds.set_options(DELAY, true, false);
+    rounds.observe(&[working(A)], t);
+    rounds.observe(&[idle(A)], secs(t, 2));
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 12)), []);
+
+    let mut rounds = Rounds::new(DELAY, true);
+    round(&mut rounds, &[todo("1", A)], &[working(A)], t);
+    rounds.observe(&[working(A)], t);
+    rounds.observe(&[idle(A)], secs(t, 2));
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 12)), []);
+}
+
+/// 停下时任务还没完成、宽限期里宿主替它标了完成（自动完成）：只推任务做完，不再推 agent 做完。
+#[test]
+fn todos_finished_while_idle_are_not_pushed_twice() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(Duration::from_secs(30), true);
+    let mut open = todo("1", A);
+    open.spec.auto_done = true;
+    let finished = Todo { done_at: Some(UNIX), ..open.clone() };
+    let mut both = |todo: &Todo, sessions: &[SessionInfo], at: Instant| {
+        let mut actions = rounds.observe(sessions, at);
+        actions.extend(round(&mut rounds, std::slice::from_ref(todo), sessions, at));
+        actions
+    };
+    both(&open, &[working(A)], t);
+    assert_eq!(both(&open, &[idle(A)], secs(t, 2)), []);
+    assert_eq!(both(&finished, &[idle(A)], secs(t, 14)), [done(A)]);
+    assert_eq!(both(&finished, &[idle(A)], secs(t, 40)), []);
+}
+
+/// 任务完成以后用户在它的终端里接着让 agent 干活：再停下来时照常推做完。
+#[test]
+fn finished_todos_leave_their_sessions_to_agent_done() {
+    let t = Instant::now();
+    let mut rounds = Rounds::new(DELAY, true);
+    let done = Todo { done_at: Some(UNIX), ..todo("1", A) };
+    round(&mut rounds, &[done], &[working(A)], t);
+    rounds.observe(&[working(A)], t);
+    rounds.observe(&[idle(A)], secs(t, 2));
+    assert_eq!(rounds.observe(&[idle(A)], secs(t, 12)), [agent_done(A)]);
 }
 
 /// 同一轮的任务表和会话列表，会话列表先到。

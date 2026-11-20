@@ -197,7 +197,9 @@ pub struct Config {
     pub remote_access_push: bool,
     /// 推送带屏幕上的问题和选项；关着时只有标题和 agent。
     pub remote_access_push_text: bool,
-    /// agent 等回答过了这么久还在等才推。
+    /// agent 干完活停在空闲时也推。
+    pub remote_access_push_done: bool,
+    /// agent 等回答、干完活停在空闲过了这么久还是这样才推。
     pub remote_access_push_delay: Duration,
     /// 直连 APNs 用的 .p8 密钥文件，`~/` 开头时从家目录算；和下面三项都配了才直连，推给 bundle id
     /// 是 `apns_bundle_id` 的 App。
@@ -297,6 +299,7 @@ impl Default for Config {
             remote_access_address: None,
             remote_access_push: true,
             remote_access_push_text: true,
+            remote_access_push_done: true,
             remote_access_push_delay: Duration::from_secs(10),
             apns_key_file: None,
             apns_key_id: None,

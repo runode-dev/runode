@@ -177,8 +177,11 @@ pub(crate) fn config_doc(key: &str) -> &'static str {
         "remote-access-push-text" => {
             "Include the question and choices from the bottom of the screen in the notification: true, false. With false only the title and the agent are sent."
         }
+        "remote-access-push-done" => {
+            "Also notify paired phones when an agent finishes working and goes idle: true, false. Tasks on the task board have their own notification when they finish and are not notified again."
+        }
         "remote-access-push-delay" => {
-            "Seconds an agent has to keep waiting before the phone is notified, so quick answers at the computer don't buzz the phone: a whole number, 0 notifies right away."
+            "Seconds an agent has to keep waiting, or stay idle after it finishes, before the phone is notified, so quick answers at the computer don't buzz the phone: a whole number, 0 notifies right away."
         }
         "apns-key-file" => {
             "Push straight to Apple instead of through the relay, for a phone app you build and sign yourself: the .p8 key file downloaded from your Apple developer account; ~/ for the home directory. Only used together with apns-key-id, apns-team-id and apns-bundle-id. A phone whose app has that bundle ID and registered an APNs device token is pushed with this key, even when the bundle ID is the official app's; registrations through the relay still go through the relay. Shown in Settings when developer-mode is on."

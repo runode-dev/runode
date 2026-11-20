@@ -300,6 +300,7 @@ impl Page {
                 Section("push"),
                 Row("remote-access-push", Switch),
                 Row("remote-access-push-text", Switch),
+                Row("remote-access-push-done", Switch),
                 Row("remote-access-push-delay", Text(80.)),
                 Section("push_key"),
                 Row("apns-key-file", Text(300.)),

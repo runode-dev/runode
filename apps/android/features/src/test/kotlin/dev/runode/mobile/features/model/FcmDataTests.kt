@@ -47,6 +47,15 @@ class FcmDataTests {
         assertEquals("Task failed", failed.title.english)
     }
 
+    @Test fun finishedAgentsHaveTheirOwnTitleAndChannel() {
+        val message = assertNotNull(PushMessage.parse(sampleData("fcm_message_agent_done.json")))
+        assertEquals(PushMessage.Kind.AgentDone, message.kind)
+        assertEquals("Claude Code finished", message.title.english)
+        assertEquals("修 bug · Ethan 的 MacBook Pro", message.subtitle.english)
+        assertEquals("", message.body)
+        assertEquals(PushChannel.AgentDone, message.channel)
+    }
+
     @Test fun unknownAgentsAndBrokenDataAreHandled() {
         val data = sampleData("fcm_message.json")
         val unnamed = assertNotNull(PushMessage.parse(data + ("agent" to "")))

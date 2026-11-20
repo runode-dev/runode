@@ -729,6 +729,30 @@
         }
       }
     },
+    "agent.done.title" : {
+      "comment" : "电脑推来的 agent 做完通知的标题（APNs 的 title-loc-key），参数是 agent 的名字；副标题同 agent.blocked.body。",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ finished"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 做完了"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 做完了"
+          }
+        }
+      }
+    },
     "git.line.removed" : {
       "comment" : "逐行改动里删掉的一行，给 VoiceOver 读。",
       "extractionState" : "manual",

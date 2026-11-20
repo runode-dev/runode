@@ -21,10 +21,15 @@ data class PushMessage(
         Blocked("blocked"),
         TodoDone("todo_done"),
         TodoFailed("todo_failed"),
+        AgentDone("agent_done"),
     }
 
-    /** 发到哪个通知渠道：等回答的单独一个，用户能只留它。 */
-    val channel: PushChannel get() = if (kind == Kind.Blocked) PushChannel.Blocked else PushChannel.Tasks
+    /** 发到哪个通知渠道：等回答、agent 做完各单独一个，用户能分开关。 */
+    val channel: PushChannel get() = when (kind) {
+        Kind.Blocked -> PushChannel.Blocked
+        Kind.AgentDone -> PushChannel.AgentDone
+        Kind.TodoDone, Kind.TodoFailed -> PushChannel.Tasks
+    }
 
     /** 通知的 tag：同一个会话的新通知替掉旧的。 */
     val tag: String get() = link.session
@@ -43,6 +48,7 @@ data class PushMessage(
                     if (agent.isEmpty()) UiText.res(R.string.agent_blocked_title_unnamed) else UiText.res(R.string.agent_blocked_title, agent)
                 Kind.TodoDone -> UiText.res(R.string.todo_done_title)
                 Kind.TodoFailed -> UiText.res(R.string.todo_failed_title)
+                Kind.AgentDone -> UiText.res(R.string.agent_done_title, agent)
             }
             val subtitle = UiText.res(R.string.detail_separator, data["title"].orEmpty(), data["machine_name"].orEmpty())
             return PushMessage(link, kind, title, subtitle, data["body"].orEmpty())
@@ -54,4 +60,5 @@ data class PushMessage(
 enum class PushChannel(val id: String, @param:StringRes val label: Int) {
     Blocked("agent_blocked", R.string.notification_channel_blocked),
     Tasks("tasks", R.string.notification_channel_tasks),
+    AgentDone("agent_done", R.string.notification_channel_agent_done),
 }

@@ -235,8 +235,10 @@
     <string name="agent_blocked_title_unnamed">有终端在等你回答</string>
     <string name="todo_done_title">任务做完了</string>
     <string name="todo_failed_title">任务没做成</string>
+    <string name="agent_done_title">%1$s 做完了</string>
     <string name="notification_channel_blocked">等你回答</string>
     <string name="notification_channel_tasks">任务</string>
+    <string name="notification_channel_agent_done">agent 做完了</string>
     <string name="action_cancel">取消</string>
     <string name="action_save">保存</string>
     <string name="action_ok">好</string>

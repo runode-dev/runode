@@ -27,7 +27,13 @@ private fun JsonElement.toUserInfo(): Any? = when (this) {
 /** 宿主 `runode_protocol::push` 照规格写出的推送样例：电脑推来的等回答、任务做完的通知。 */
 class PushTests {
     private val notifications =
-        listOf("apns_notify.json", "apns_notify_unnamed.json", "apns_todo_done.json", "apns_todo_failed.json")
+        listOf(
+            "apns_notify.json",
+            "apns_notify_unnamed.json",
+            "apns_todo_done.json",
+            "apns_todo_failed.json",
+            "apns_agent_done.json",
+        )
 
     /** 点开通知时按 `aps` 外面的 `machine`、`session` 打开那个会话；同一台电脑的通知按 `thread-id` 归在一组。 */
     @Test

@@ -72,7 +72,9 @@ pub struct PushSettings {
     pub enabled: bool,
     /// 带不带屏幕上的文字（问题和选项）。
     pub text: bool,
-    /// agent 等回答过了这么久还在等才推。
+    /// agent 干完活停在空闲时也推。
+    pub done: bool,
+    /// agent 等回答、停在空闲过了这么久还是这样才推。
     pub delay: Duration,
     /// 直连 APNs 用的密钥；没配时为 `None`，只能经中转推官方 App。
     pub direct: Option<ApnsKey>,
@@ -87,6 +89,7 @@ impl Default for PushSettings {
         Self {
             enabled: true,
             text: true,
+            done: true,
             delay: Duration::from_secs(10),
             direct: None,
             fcm_account: None,
@@ -300,7 +303,7 @@ impl Poller {
                 continue;
             }
             let rounds = &mut self.rounds;
-            rounds.set_options(settings.delay, settings.text);
+            rounds.set_options(settings.delay, settings.text, settings.done);
             if self.host.is_none() {
                 match HostLink::connect(&self.connect) {
                     Ok(link) => {
@@ -423,6 +426,14 @@ impl Poller {
                 Action::Notify(id, meta, lines) => {
                     let targets = self.targets(settings, |registration| {
                         Notification::new(registration.machine.clone(), &registration.machine_name, id, &meta, &lines)
+                    });
+                    if !targets.is_empty() {
+                        self.sender.notify(targets);
+                    }
+                }
+                Action::AgentDone(id, meta) => {
+                    let targets = self.targets(settings, |registration| {
+                        Notification::agent_done(registration.machine.clone(), &registration.machine_name, id, &meta)
                     });
                     if !targets.is_empty() {
                         self.sender.notify(targets);

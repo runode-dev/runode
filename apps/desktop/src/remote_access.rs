@@ -74,6 +74,7 @@ pub fn push_settings(config: &Config) -> PushSettings {
     PushSettings {
         enabled: config.remote_access_push,
         text: config.remote_access_push_text,
+        done: config.remote_access_push_done,
         delay: config.remote_access_push_delay,
         direct,
         fcm_account: config
@@ -353,10 +354,11 @@ mod tests {
             apns_bundle_id: Some("cn.example.app".into()),
             fcm_service_account_file: Some("/keys/firebase-adminsdk.json".into()),
             remote_access_push_text: false,
+            remote_access_push_done: false,
             ..Config::default()
         };
         let settings = push_settings(&config);
-        assert!(!settings.text);
+        assert!(!settings.text && !settings.done);
         assert_eq!(settings.fcm_account.as_deref(), Some(std::path::Path::new("/keys/firebase-adminsdk.json")));
         let key = settings.direct.unwrap();
         assert_eq!((key.key_file.to_str(), key.bundle.as_str()), (Some("/keys/AuthKey_X.p8"), "cn.example.app"));

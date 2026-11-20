@@ -231,6 +231,15 @@ fn todo_done_notifications_match_the_fixtures() {
     assert_eq!((long.title.chars().count(), long.machine_name.chars().count()), (TEXT_LIMIT, TEXT_LIMIT));
 }
 
+/// agent 做完的通知：标题换成做完的键、参数是 agent 的名字，副标题同等回答的；没有正文。
+#[test]
+fn agent_done_notifications_match_the_fixtures() {
+    let done = Notification::agent_done(MACHINE.into(), "Ethan 的 MacBook Pro", SESSION, &meta());
+    assert_eq!(String::from_utf8(notify_payload(&done).unwrap()).unwrap(), fixture("apns_agent_done.json"));
+    let fcm = fcm_message(FCM_TOKEN, &done, NOW + 1800, NOW).unwrap();
+    assert_eq!(String::from_utf8(fcm).unwrap(), fixture("fcm_message_agent_done.json"));
+}
+
 /// 任务没做成的通知：标题换成没做成的键，副标题同做完的，正文是结果的前几行。
 #[test]
 fn todo_failed_notifications_match_the_fixtures() {

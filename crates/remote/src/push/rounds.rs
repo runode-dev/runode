@@ -5,8 +5,12 @@
 //! 一条通知；答得快的不打扰。一次等回答只推一次：等的时候屏幕上的问题变了不再推，不再等了以后再等
 //! 才算新的一次。
 //!
-//! 连上宿主后的第一份列表（`reconnected` 之后）只记下各会话现在的样子：那时已经在等的不算刚开始等，
-//! 交接或者重启后不会再推一遍。
+//! agent 从干活（`AgentState::Working`）停到空闲、过了同样的宽限期还空闲时推一条做完的通知（`done` 开着时），
+//! 一次停下只推一次；推过以后又不空闲了（干起活来、退出了、会话没了）时还没发出去的别发了，变成等回答的除外
+//! （那边有自己的撤法）。停下时还没完成的看板任务的会话（上一轮任务表里的）这次停下不推这一条，有任务做完的通知。
+//!
+//! 连上宿主后的第一份列表（`reconnected` 之后）只记下各会话现在的样子：那时已经在等、已经空闲的不算刚开始等、
+//! 刚停下，交接或者重启后不会再推一遍。
 //!
 //! 看板上的任务另算（`set_todos`、`todo_sessions`）：同一轮的任务表和会话列表都到了才看（两份回话
 //! 谁先到不一定，拿上一轮的任务表看会把刚标成完成、刚删掉的任务也推出去），按
@@ -46,6 +50,8 @@ pub(crate) enum Action {
     /// 会话不再等了（答了、退出了或者没了），或者任务推过做完以后不再是做完等着的样子：还没发出去的通知
     /// 别发了。
     Cancel(SessionId),
+    /// 推一条 agent 做完的通知：会话的状态。
+    AgentDone(SessionId, Box<SessionMeta>),
     /// 推一条任务做完的通知：任务的会话和标题。
     TodoDone(SessionId, String),
     /// 推一条任务没做成的通知：任务的会话、标题和 agent 报的结果的几行（不带屏幕文字时为空）。
@@ -61,6 +67,10 @@ pub(crate) struct Rounds {
     delay: Duration,
     /// 带屏幕上的文字；不带时不读屏幕，`Action::Notify` 的几行为空。
     text: bool,
+    /// 推 agent 做完的通知。
+    done: bool,
+    /// 上一轮任务表里没完成的任务的会话。
+    todo_session_ids: HashSet<SessionId>,
     /// 这一轮的任务表和会话列表，先到的那份等着另一份。
     todos: Option<Vec<Todo>>,
     sessions: Option<Vec<SessionInfo>>,
@@ -90,25 +100,34 @@ struct Track {
     blocked_at: Option<Instant>,
     /// 读屏幕的请求发出去了还没回，回来了就推。
     reading: bool,
+    /// agent 在干活。
+    working: bool,
+    /// 什么时候从干活停到空闲的；这次停下还没推时有。
+    idle_at: Option<Instant>,
+    /// 这次停下推过做完了，还没再干活。
+    done_pushed: bool,
 }
 
 impl Rounds {
-    /// 接着的第一份列表只记现状。
+    /// 接着的第一份列表只记现状；推 agent 做完的通知，`set_options` 可以关掉。
     pub(crate) fn new(delay: Duration, text: bool) -> Self {
         Self {
             tracked: HashMap::new(),
             baseline: true,
             delay,
             text,
+            done: true,
+            todo_session_ids: HashSet::new(),
             todos: None,
             sessions: None,
             todo_tracked: HashMap::new(),
         }
     }
 
-    pub(crate) fn set_options(&mut self, delay: Duration, text: bool) {
+    pub(crate) fn set_options(&mut self, delay: Duration, text: bool, done: bool) {
         self.delay = delay;
         self.text = text;
+        self.done = done;
     }
 
     /// 和宿主的连接断了又连上（或者第一次连上）：下一份列表只记现状，没回的读屏幕请求不等了。
@@ -121,6 +140,7 @@ impl Rounds {
         self.todos = None;
         self.sessions = None;
         self.todo_tracked.clear();
+        self.todo_session_ids.clear();
     }
 
     /// 又要了一轮任务表和会话列表：上一轮落单、还没配上对的那份不要了，免得和这一轮的配成一对。
@@ -151,6 +171,8 @@ impl Rounds {
         };
         let mut actions = Vec::new();
         let mut tracked = HashMap::new();
+        self.todo_session_ids =
+            todos.iter().filter(|todo| todo.done_at.is_none()).filter_map(|todo| todo.session).collect();
         for todo in todos {
             let info = todo.session.and_then(|id| sessions.iter().find(|info| info.id == id));
             let column = column(todo, info, unix);
@@ -250,18 +272,36 @@ impl Rounds {
         let mut actions = Vec::new();
         self.tracked.retain(|id, track| {
             let listed = sessions.iter().any(|info| info.id == *id);
-            if !listed && track.blocked {
+            if !listed && (track.blocked || track.done_pushed) {
                 actions.push(Action::Cancel(*id));
             }
             listed
         });
         for info in sessions {
-            let blocked = !info.exited && info.meta.agent.is_some_and(|agent| agent.state == AgentState::Blocked);
+            let state = info.meta.agent.filter(|_| !info.exited).map(|agent| agent.state);
+            let blocked = state == Some(AgentState::Blocked);
+            let idle = state == Some(AgentState::Idle);
             let track = self.tracked.entry(info.id).or_default();
-            if track.blocked && !blocked {
+            if (track.blocked && !blocked) || (track.done_pushed && !idle && !blocked) {
                 actions.push(Action::Cancel(info.id));
             }
             track.meta = info.meta.clone();
+            if !idle {
+                track.done_pushed = false;
+            }
+            if baseline || !idle {
+                track.idle_at = None;
+            } else if track.working && !self.todo_session_ids.contains(&info.id) {
+                track.idle_at = Some(now);
+            }
+            track.working = state == Some(AgentState::Working);
+            if track.idle_at.is_some_and(|at| now.duration_since(at) >= self.delay) {
+                track.idle_at = None;
+                if self.done {
+                    track.done_pushed = true;
+                    actions.push(Action::AgentDone(info.id, Box::new(track.meta.clone())));
+                }
+            }
             if baseline || !blocked {
                 track.blocked_at = None;
                 track.reading = false;

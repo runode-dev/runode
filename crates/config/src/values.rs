@@ -112,6 +112,7 @@ impl Config {
             "remote-access-address" => self.remote_access_address.iter().map(ToString::to_string).collect(),
             "remote-access-push" => bool(self.remote_access_push),
             "remote-access-push-text" => bool(self.remote_access_push_text),
+            "remote-access-push-done" => bool(self.remote_access_push_done),
             "remote-access-push-delay" => vec![self.remote_access_push_delay.as_secs().to_string()],
             "apns-key-file" => self.apns_key_file.iter().cloned().collect(),
             "apns-key-id" => self.apns_key_id.iter().cloned().collect(),
@@ -156,7 +157,7 @@ mod tests {
              shell-integration-features = no-cursor\n\
              agent-notifications-exclude = codex,claude\nagent-done-sound = none\nlanguage = en\n\
              file-tree-preview-click = double\nprevent-sleep = agent\npalette = 3=#010203\nremote-access = true\n\
-             remote-access-push = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
+             remote-access-push = false\nremote-access-push-done = false\nremote-access-push-delay = 30\napns-key-file = ~/AuthKey_X.p8\n\
              apns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
              fcm-service-account-file = ~/firebase-adminsdk.json\n\
              clipboard-write = deny\nclipboard-read = allow"]);

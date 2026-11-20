@@ -286,8 +286,10 @@
     <string name="agent_blocked_title_unnamed">A terminal is waiting for your answer</string>
     <string name="todo_done_title">Task finished</string>
     <string name="todo_failed_title">Task failed</string>
+    <string name="agent_done_title">%1$s finished</string>
     <string name="notification_channel_blocked">Waiting for your answer</string>
     <string name="notification_channel_tasks">Tasks</string>
+    <string name="notification_channel_agent_done">Agent finished</string>
 
     <!-- 各页共用 -->
     <string name="action_cancel">Cancel</string>

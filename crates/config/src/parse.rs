@@ -96,6 +96,7 @@ pub const KEYS: &[&[&str]] = &[
         "remote-access-address",
         "remote-access-push",
         "remote-access-push-text",
+        "remote-access-push-done",
         "remote-access-push-delay",
     ],
     &["apns-key-file", "apns-key-id", "apns-team-id", "apns-bundle-id", "fcm-service-account-file"],
@@ -450,6 +451,10 @@ impl Config {
             "remote-access-push-text" => {
                 self.remote_access_push_text =
                     or_default(empty, defaults.remote_access_push_text, || parse_bool(value))?;
+            }
+            "remote-access-push-done" => {
+                self.remote_access_push_done =
+                    or_default(empty, defaults.remote_access_push_done, || parse_bool(value))?;
             }
             "remote-access-push-delay" => {
                 self.remote_access_push_delay = or_default(empty, defaults.remote_access_push_delay, || {
@@ -913,18 +918,24 @@ unknown-key = whatever
     fn push_is_on_by_default_and_direct_needs_a_key() {
         let d = Config::default();
         assert_eq!(
-            (d.remote_access_push, d.remote_access_push_text, d.remote_access_push_delay),
-            (true, true, Duration::from_secs(10))
+            (d.remote_access_push, d.remote_access_push_text, d.remote_access_push_done, d.remote_access_push_delay),
+            (true, true, true, Duration::from_secs(10))
         );
         assert_eq!((&d.apns_key_file, &d.fcm_service_account_file), (&None, &None));
         let config = load(&[
-            "remote-access-push = false\nremote-access-push-text = false\nremote-access-push-delay = 30\n\
+            "remote-access-push = false\nremote-access-push-text = false\nremote-access-push-done = false\n\
+             remote-access-push-delay = 30\n\
              apns-key-file =  ~/keys/AuthKey_X.p8 \napns-key-id = X\napns-team-id = T\napns-bundle-id = cn.example.app\n\
              fcm-service-account-file = ~/keys/firebase-adminsdk.json ",
         ]);
         assert_eq!(
-            (config.remote_access_push, config.remote_access_push_text, config.remote_access_push_delay),
-            (false, false, Duration::from_secs(30))
+            (
+                config.remote_access_push,
+                config.remote_access_push_text,
+                config.remote_access_push_done,
+                config.remote_access_push_delay
+            ),
+            (false, false, false, Duration::from_secs(30))
         );
         assert_eq!(config.apns_key_file.as_deref(), Some("~/keys/AuthKey_X.p8"));
         assert_eq!(
