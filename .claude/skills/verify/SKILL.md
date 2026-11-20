@@ -101,6 +101,14 @@ $S app && $S smoke      # 先确认 app 连着的宿主是好的
 
 界面走完后照样 `$S logs`、`$S stop`。
 
+### 系统通知和 agent 的状态（`window::agents`、`alerts`、`agent` 的规则）
+
+macOS 上只有 .app 里的 runode 发系统通知，裸的 `target/debug/runode` 不发。先 `make app`（约半分钟，产物在 `target/local/bundle/Runode.app`，不装进 /Applications），每条 `$S` 命令前都带上 `RUNODE_VERIFY_BIN=target/local/bundle/Runode.app/Contents/MacOS/runode`，`stop` 也一样。它不是 debug 构建，沙盒里的文件名不带 `-dev`（`host.sock`、`host.log`），脚本按可执行文件的路径自己换。它和装好的 Runode 是同一个 bundle id，发出的通知算在用户的 Runode 名下、用它的通知授权。
+
+agent 的状态靠前台进程和屏幕认，不用起真的 agent：用 C 编一个叫 `claude` 的小程序（脚本不行，前台进程名会是 bash），打印 Claude Code 权限提问的样子（一条 `─` 横线，下面 `Do you want to proceed?`、`❯ 1. Yes`、`2. No`、`Esc to cancel · Tab to amend`）后 `pause()`，源文件和产物放 `/tmp` 下自己的目录、用完删掉。`$S rn open --tab -- <它的路径>` 开在不切过去的标签里，几秒后 `$S rn list` 里这一行 AGENT 是 `Claude Code`、STATE 是 `blocked`、VIEW 是 `hidden`。
+
+通知发没发看两处：`screencapture -x` 截整屏，右上角有横幅；通知中心的库 `~/Library/Group Containers/group.com.apple.usernoted/db2/db` 里 `record` 表多一行（`app` 表里 `dev.runode.app` 的 `app_id`），把 `data` 列 `writefile` 出来用 `plutil -p` 看 `titl` 和 `body`。用户自己的 Runode 也往这里记，按标题和正文里的沙盒路径认自己那条。
+
 ### 这里验不到的
 
 SSH 主机、远程访问和手机配对、远程桌面、语音输入、自动更新要真的网络、设备或权限，沙盒不覆盖。改了这些时跑对应 crate 的单测，在汇报里写明没有实地验证。改了 `ssh` 或 `desktop` 里连 SSH 主机的部分（`host_client` 的 ssh、bridge）时跑 `make test-ssh`：经假 ssh 在本机临时家目录里测部署、桥接、断线重连和换构建后接手会话，会先另编一份构建号不同的 runode（留在 `target/debug/runode-test-old`），再编回正常的，全程约 30 秒。
@@ -119,7 +127,7 @@ SSH 主机、远程访问和手机配对、远程桌面、语音输入、自动�
 
 失败时先看哪里：
 
-- `sandbox.sh` 报「就绪前退出」「连不上」：`KEEP=1 $S stop` 留下目录，看 `$S logs` 列的三份日志：宿主的 `.runode/cache/host-dev.log`、app 的 `.verify/app.log`、只起宿主时的 `.verify/host.out`。
+- `sandbox.sh` 报「就绪前退出」「连不上」：`KEEP=1 $S stop` 留下目录，看 `$S logs` 列的三份日志：宿主的 `.runode/cache/host-dev.log`（打包的 .app 是 `host.log`）、app 的 `.verify/app.log`、只起宿主时的 `.verify/host.out`。
 - `open` 报 `there is no workspace to open it in`：宿主没读到工作区。`$S host` 只在 `.runode/run/host-layout-dev.json` 不存在时写一个空工作区；换个新沙盒重来。
 - `send --wait` 不打印 `exit N`、stderr 说在等屏幕安静：shell 集成没报到，看 `$S rn read <会话号>` 屏幕上是不是卡在别的提示（比如 shell 的首次配置向导）。
 - `cargo build` 报找不到 libghostty 或 zig：子模块没拉，或 zig 版本不对，见 CONTRIBUTING.md 的「构建」。

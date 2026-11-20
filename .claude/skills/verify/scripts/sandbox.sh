@@ -2,8 +2,7 @@
 # 在隔离的家目录里起开发版 runode（宿主或整个 app），用命令行驱动它，用完关掉、删干净。
 # 隔离靠换 HOME：runode 的配置、数据、socket 和日志都在 `$HOME/.runode` 下，Ghostty 的配置在
 # `$HOME/.config` 下；再去掉宿主给终端设的 RUNODE_SOCKET、RUNODE_SESSION、RUNODE_BIN，命令行才不会
-# 连到正在用的那个 runode。开发版的宿主文件名本来就和装好的版本不同（host-dev），换了 HOME 后连配置、
-# 看板和窗口存档也是沙盒自己的一份。
+# 连到正在用的那个 runode。换了 HOME 后连配置、看板和窗口存档也是沙盒自己的一份。
 #
 # 用法：sandbox.sh host|app|rn ARGS...|smoke|status|logs|stop
 #   host    只起宿主（`runode --host --stay`），给它一个空工作区，等到命令行连得上
@@ -20,7 +19,8 @@
 # 环境变量：
 #   RUNODE_VERIFY_HOME  沙盒目录，默认 /tmp/runode-verify-<工作树路径的短哈希>，每个工作树各用一个；
 #                       已有、又不是本脚本建的目录不用。socket 路径要放进 104 字节，别放到 $TMPDIR 下
-#   RUNODE_VERIFY_BIN   要跑的 runode，默认当前工作树的 target/debug/runode（认 CARGO_TARGET_DIR）
+#   RUNODE_VERIFY_BIN   要跑的 runode，默认当前工作树的 target/debug/runode（认 CARGO_TARGET_DIR）；也可以是
+#                       `make app` 打出的 Runode.app 里的 Contents/MacOS/runode
 #   READY_SECS          等就绪的上限，默认 20 秒
 set -euo pipefail
 
@@ -35,12 +35,14 @@ if [ -d "$(dirname "$BIN")" ]; then BIN="$(cd "$(dirname "$BIN")" && pwd -P)/$(b
 STATE="$SANDBOX/.verify"
 # 起宿主或 app 时记下可执行文件的样子（修改时间、大小、inode），之后据此认出重新编过。
 STAMP="$STATE/bin.stamp"
-# 开发版的宿主文件名带 -dev（`runode_paths` 的 HOST_NAME、HOST_LAYOUT_FILE）；macOS 上 runtime_dir 不按机器分层。
-SOCK="$SANDBOX/.runode/run/host-dev.sock"
-LOCK="$SANDBOX/.runode/run/host-dev.lock"
-HOST_LOG="$SANDBOX/.runode/cache/host-dev.log"
-HOST_LAYOUT="$SANDBOX/.runode/run/host-layout-dev.json"
-ONBOARDING_FILE="$SANDBOX/.runode/onboarding-dev"
+# 带 debug_assertions 编的 runode 的文件名带 -dev（`runode_paths` 的 HOST_NAME、HOST_LAYOUT_FILE、ONBOARDING_FILE），
+# 按可执行文件在不在 debug 目录下认；macOS 上 runtime_dir 不按机器分层。
+case "$BIN" in */debug/*) DEV=-dev ;; *) DEV= ;; esac
+SOCK="$SANDBOX/.runode/run/host$DEV.sock"
+LOCK="$SANDBOX/.runode/run/host$DEV.lock"
+HOST_LOG="$SANDBOX/.runode/cache/host$DEV.log"
+HOST_LAYOUT="$SANDBOX/.runode/run/host-layout$DEV.json"
+ONBOARDING_FILE="$SANDBOX/.runode/onboarding$DEV"
 APP_LOG="$STATE/app.log"
 # 沙盒的环境。写成数组、直接展开在命令前：放进函数再后台跑时 `$!` 是子 shell，不是 runode。
 SANDBOX_ENV=(env -u RUNODE_SOCKET -u RUNODE_SESSION -u RUNODE_BIN -u XDG_CONFIG_HOME -u XDG_DATA_HOME
