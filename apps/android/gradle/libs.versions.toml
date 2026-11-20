@@ -10,7 +10,7 @@ junit = "4.13.2"
 androidx-test-runner = "1.7.0"
 androidx-test-ext-junit = "1.3.0"
 # 推送只用 Firebase 的 messaging。
-firebase-bom = "34.18.0"
+firebase-bom = "35.2.0"
 google-services = "4.6.0"
 # Firebase 经 play-services 带进来的 fragment 是 1.1，要通知权限用的 ActivityResult 要 1.3 以上。
 fragment = "1.9.1"
