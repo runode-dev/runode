@@ -147,11 +147,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
-          cache-dependency-path: |
-            apps/android/**/*.gradle.kts
-            apps/android/gradle/libs.versions.toml
-            apps/android/gradle/wrapper/gradle-wrapper.properties
+      # 跑设备测试的 Gradle 另要 test 用不到的依赖（Unified Test Platform 的那些），所以 Gradle 的缓存和 test 的
+      # 分开存：共用一个键时命中的是 test 存的那份，这些依赖每次都要从 Maven Central 现下，被限流时测试就起不来。
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-emulator-gradle-${{ hashFiles('apps/android/**/*.gradle.kts', 'apps/android/gradle/libs.versions.toml', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
       - name: 装 NDK 和 CMake
         run: |
           ndk="$(sed -n 's/^ndk = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
