@@ -141,7 +141,7 @@ ring = "0.17"
 # 远程访问跨网络时的连接：iroh 按公钥拨号，先打洞直连，打不通走中继。密码学后端和 rustls 一样用 ring。
 iroh = { version = "1.4", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
 # 查别的电脑公布的远程访问；非 macOS 上还用它公布这台的 mDNS 服务（macOS 交给系统的 mDNSResponder）。
-mdns-sd = { version = "0.21", default-features = false }
+mdns-sd = { version = "0.22", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
 # Android 端经 JNI 调 Rust（iroh 拨号）。
 jni = "0.22"
