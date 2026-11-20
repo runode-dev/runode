@@ -7,6 +7,7 @@
 mod common;
 
 use std::{
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     sync::mpsc,
     time::{Duration, Instant},
@@ -126,6 +127,10 @@ struct RealShell {
     /// 临时的家目录，用完删掉。
     home: PathBuf,
     syntax: &'static Syntax,
+    /// 连着 elvish 历史守护进程的连接。守护进程是 shell 的子进程，一个客户端都没有时退出；elvish 的
+    /// `exec` 先断开它，macOS 的内核把它退出的 SIGCHLD 投到 exec 途中的进程上时，换上来的 shell
+    /// 会被 SIGILL 杀掉。留着这条连接，换 shell 时守护进程不退出。
+    _elvish_daemon: Option<UnixStream>,
 }
 
 /// 同一件事在各个 shell 里的写法和样子。
@@ -176,6 +181,24 @@ const REAL_WAIT: Duration = Duration::from_secs(10);
 const REPORT_TOKEN: &str = "0123456789abcdef";
 /// 家目录里交口令给集成的文件，集成读完就删。
 const TOKEN_FILE: &str = "report-token";
+/// 家目录里给 elvish 当 TMPDIR 的目录。
+const ELVISH_TMP: &str = "t";
+
+/// 连上家目录是 `home` 的那个 elvish 起的历史守护进程，等到它开始监听为止。
+fn elvish_daemon(home: &Path) -> UnixStream {
+    let start = Instant::now();
+    loop {
+        let stream = std::fs::read_dir(home.join(ELVISH_TMP))
+            .unwrap()
+            .flatten()
+            .find_map(|entry| UnixStream::connect(entry.path().join("sock")).ok());
+        if let Some(stream) = stream {
+            return stream;
+        }
+        assert!(start.elapsed() < REAL_WAIT, "elvish 的守护进程没起来");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 /// 仓库里的集成脚本所在的目录。
 fn integration_dir() -> PathBuf {
@@ -265,7 +288,15 @@ impl RealShell {
                 )
             }
             "elvish" => {
-                (".config/elvish/rc.elv", format!("{program} -rc {}", integration("elvish/runode.elv")), &ELVISH)
+                // elvish 把守护进程的 socket 放在 TMPDIR 下：指进临时家目录，各个 shell 各起各的守护进程，
+                // 不碰这台机器上别的 elvish 的。
+                let tmp = home.join(ELVISH_TMP);
+                std::fs::create_dir_all(&tmp).unwrap();
+                (
+                    ".config/elvish/rc.elv",
+                    format!("TMPDIR={} {program} -rc {}", quoted(tmp.display()), integration("elvish/runode.elv")),
+                    &ELVISH,
+                )
             }
             _ => {
                 let data = data_dir("nushell-data", "nushell/vendor/autoload/runode.nu", "nushell/runode.nu");
@@ -326,9 +357,22 @@ impl RealShell {
         handoff.report_token = Some(REPORT_TOKEN.into());
         let pty = Pty::adopt(handoff, sink(tx)).unwrap();
         let session = HostSession::new(REAL_SIZE, pty, None, &TermSettings::default()).unwrap();
-        let mut real =
-            Self { session, output, prompt, idle, prompts: 0, name: name.into(), raw: Vec::new(), home, syntax };
+        let mut real = Self {
+            session,
+            output,
+            prompt,
+            idle,
+            prompts: 0,
+            name: name.into(),
+            raw: Vec::new(),
+            home,
+            syntax,
+            _elvish_daemon: None,
+        };
         real.wait_for_prompt();
+        if shell == "elvish" {
+            real._elvish_daemon = Some(elvish_daemon(&real.home));
+        }
         Some(real)
     }
 
