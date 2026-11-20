@@ -17,6 +17,7 @@ use crate::ui::a11y::RevealOnHover;
 use crate::ui::button::{Button, ButtonSize, Toggle};
 use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
+use crate::ui::spinner::blinking_dot;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
     AccessibleAction, Action, AnyElement, App, Axis, Bounds, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
@@ -128,6 +129,12 @@ fn agent_icons(agents: &[Mark], room: f32, ring: Hsla, fg: Hsla, cx: &App) -> Di
         .children(icons)
         .when(more > 0, |row| row.child(div().flex_none().text_size(FontSize::Small).child(format!("+{more}"))))
 }
+
+/// 项目图标上等回答的圆点的直径，和它的描边伸出状态格（`AGENT_MARK_SIZE_SMALL` 见方）右下角多少。
+const ICON_WAITING_SIZE: f32 = 8.;
+const ICON_WAITING_OFFSET: f32 = 4.;
+/// 项目一个终端都没开时图标的不透明度。
+const NO_TERMINAL_ICON_OPACITY: f32 = 0.4;
 
 /// 侧栏顶上几段（搜索行、项目栏）之间的间距。
 const SECTION_GAP: f32 = 18.;
@@ -628,17 +635,39 @@ impl WindowView {
             .chain(workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()))
             .collect::<Vec<_>>()
             .join(" · ");
-        // 名字前是状态：代表整个项目、项目有图标时画图标，agent 的状态只看右边图标上的圆点；不然有 agent 时是
-        // 它的标记，没有时开着终端是 shell 的提示符，一个终端都没有是空心圆点。当前行的光标不闪，用户正看着它。
+        // 名字前是状态：代表整个项目、项目有图标时画图标，一个终端都没有时调淡，有 agent 等回答时右下角压一个
+        // 警示色的圆点，别的 agent 状态看右边图标上的圆点；不然有 agent 时是它的标记，没有时开着终端是 shell 的
+        // 提示符，一个终端都没有是空心圆点。当前行的光标不闪，用户正看着它。
         let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
+        let ring = if active { active_bg } else { sidebar_background(cx) };
         let status = if let Some(icon) = icon {
+            let waiting = blocked.then(|| {
+                div()
+                    .absolute()
+                    .right(px(-ICON_WAITING_OFFSET))
+                    .bottom(px(-ICON_WAITING_OFFSET))
+                    .p(px(1.5))
+                    .rounded_full()
+                    .bg(ring)
+                    .when(!active, |dot| dot.group_hover(group.clone(), |dot| dot.bg(hover_bg)))
+                    .text_color(cx.theme().warning)
+                    .map(|ring| {
+                        if active {
+                            ring.child(div().size(px(ICON_WAITING_SIZE)).rounded_full().bg(cx.theme().warning))
+                        } else {
+                            ring.child(blinking_dot(("workspace-icon-waiting", id), ICON_WAITING_SIZE))
+                        }
+                    })
+            });
             div()
+                .relative()
                 .flex_none()
                 .size(px(AGENT_MARK_SIZE_SMALL))
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(project_icon_image(icon))
+                .child(project_icon_image(icon).when(!live, |icon| icon.opacity(NO_TERMINAL_ICON_OPACITY)))
+                .children(waiting)
                 .into_any_element()
         } else if mark.is_some() || live {
             agent_mark(mark, ("workspace-agent", id), AGENT_MARK_SIZE_SMALL, !active && blocked, cx)
@@ -669,7 +698,6 @@ impl WindowView {
         };
         // 名字右边是各个 agent 的图标；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。代表整个项目
         // 的行没有组头，分支总写在图标前面。状态点的描边不跟着悬停的底色变：悬停时右边整个隐去。
-        let ring = if active { active_bg } else { sidebar_background(cx) };
         let logo_fg = if active { fg } else { fg.opacity(ROW_TEXT_OPACITY) };
         // 右边那格最多占行宽的 `TRAILING_MAX_WIDTH`；缩进在项目下的行让出缩进（竖线 1px），响铃的圆点另占一格。
         let tree_inset = if solo { 0. } else { TREE_LINE_INSET + 1. + TREE_ROW_INSET };

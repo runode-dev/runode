@@ -135,6 +135,8 @@ enum Look {
     Dots(&'static [u8]),
     /// 一格是光标的不透明度。
     Bar(&'static [f32]),
+    /// 一格是圆点的不透明度。
+    Dot(&'static [f32]),
     /// 一格是离 `until` 还剩的秒数，画的时候按 `font`、`font_size` 排成「分:秒」；不受 `ReduceMotion`
     /// 管，`Spin::still` 恒为假。
     Countdown { until: Instant, font: Font, font_size: Pixels },
@@ -145,7 +147,7 @@ impl Look {
         match self {
             Self::Glyphs { frames, .. } => frame_at(frames, frame_time, now),
             Self::Dots(frames) => frame_at(frames, frame_time, now),
-            Self::Bar(frames) => frame_at(frames, frame_time, now),
+            Self::Bar(frames) | Self::Dot(frames) => frame_at(frames, frame_time, now),
             Self::Countdown { until, .. } => {
                 let (secs, next) = countdown_at(*until, now);
                 (usize::try_from(secs).unwrap_or(usize::MAX), next)
@@ -158,7 +160,7 @@ impl Look {
 fn still_frame(look: &Look) -> usize {
     match look {
         Look::Dots(frames) => frames.iter().position(|mask| *mask == BRAILLE_STILL).unwrap_or(0),
-        Look::Glyphs { .. } | Look::Bar(_) | Look::Countdown { .. } => 0,
+        Look::Glyphs { .. } | Look::Bar(_) | Look::Dot(_) | Look::Countdown { .. } => 0,
     }
 }
 
@@ -183,6 +185,11 @@ impl Spin {
             Look::Glyphs { shaped, .. } => paint_glyphs(&shaped.lines[index], self.bounds, self.color, window),
             Look::Dots(frames) => paint_dots(frames[index], self.bounds, self.color, window),
             Look::Bar(frames) => paint_bar(frames[index], self.bounds, self.color, window),
+            Look::Dot(frames) => {
+                let side = self.bounds.size.width.min(self.bounds.size.height);
+                let dot = Bounds::centered_at(self.bounds.center(), size(side, side));
+                window.paint_quad(gpui::fill(dot, self.color.opacity(frames[index])).corner_radii(side / 2.));
+            }
             Look::Countdown { font, font_size, .. } => {
                 let line = shape_text(clock(index as u64).into(), font.clone(), *font_size, window);
                 paint_glyphs(&line, self.bounds, self.color, window);
@@ -302,6 +309,11 @@ pub fn blinking_cursor(id: impl Into<ElementId>, side: f32) -> impl IntoElement 
     SpinnerSlot { id: id.into(), source: Source::Shape(Look::Bar(&CURSOR_FRAMES), side), frame_time: MIN_FRAME_TIME }
 }
 
+/// 在 `id` 处画一个直径 `side`、和光标一样闪烁的圆点。颜色跟着外面的文字颜色。
+pub fn blinking_dot(id: impl Into<ElementId>, side: f32) -> impl IntoElement {
+    SpinnerSlot { id: id.into(), source: Source::Shape(Look::Dot(&CURSOR_FRAMES), side), frame_time: MIN_FRAME_TIME }
+}
+
 /// 在 `id` 处画离 `until` 还剩多久，写成「分:秒」，每秒变一次，到点后停在「0:00」。字体、字号和颜色跟着
 /// 外面的文字样式，占的宽按 `COUNTDOWN_WIDEST` 量，字在里面居中。辅助工具读不到它，调用方另给文字。
 pub fn countdown(id: impl Into<ElementId>, until: Instant) -> impl IntoElement {
@@ -311,7 +323,7 @@ pub fn countdown(id: impl Into<ElementId>, until: Instant) -> impl IntoElement {
 /// 倒计时每格停的时间。
 const COUNTDOWN_STEP: Duration = Duration::from_secs(1);
 
-/// `Spinner` 画什么：按文字样式排的几格字，`side` 见方画出来的形状（`Look::Dots`、`Look::Bar`），或者
+/// `Spinner` 画什么：按文字样式排的几格字，`side` 见方画出来的形状（`Look::Dots`、`Look::Bar`、`Look::Dot`），或者
 /// 到某一刻为止的倒计时。
 #[derive(Clone)]
 enum Source {
