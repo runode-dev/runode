@@ -37,7 +37,7 @@ runs:
       if: inputs.cache == 'true'
       shell: bash
       run: echo "CARGO_PROFILE_DEV_DEBUG=0" >> "$GITHUB_ENV"
-    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       if: inputs.cache == 'true'
       with:
         # 仓库的缓存有总量上限，超了先删最久没用的。PR 和标签读得到 main 存的，自己再各存一份只会把别的缓存挤掉。

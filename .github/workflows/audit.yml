@@ -36,7 +36,7 @@ jobs:
       # cargo 读依赖树要 libghostty-vt 的清单；只查清单，不编译，用不着 ghostty 的源码。
       - name: 拉 libghostty-rs 子模块
         run: git submodule update --init --depth 1 vendor/libghostty-rs
-      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-deny@0.20.2
       - name: 查已公布的漏洞
