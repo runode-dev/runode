@@ -58,11 +58,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
-          cache-dependency-path: |
-            apps/android/**/*.gradle.kts
-            apps/android/gradle/libs.versions.toml
-            apps/android/gradle/wrapper/gradle-wrapper.properties
+      # runner 从 Maven Central 现下依赖时常被限流，一份缓存都没有时 Gradle 起不来。键变了（升了依赖）先用上一份，
+      # 只下变了的那几个。
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-test-gradle-${{ hashFiles('apps/android/**/*.gradle.kts', 'apps/android/gradle/libs.versions.toml', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: android-test-gradle-
       # runner 自带的 NDK 和 CMake 不是 Gradle 要的那一版；ANDROID_NDK_HOME 原本指着自带的默认 NDK，编原生库的脚本和
       # cargo-ndk 都按它找 NDK。版本取 libs.versions.toml 里的 ndk、cmake。
       - name: 装 NDK 和 CMake
@@ -155,6 +159,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: android-emulator-gradle-${{ hashFiles('apps/android/**/*.gradle.kts', 'apps/android/gradle/libs.versions.toml', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: android-emulator-gradle-
       - name: 装 NDK 和 CMake
         run: |
           ndk="$(sed -n 's/^ndk = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"

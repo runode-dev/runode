@@ -32,8 +32,16 @@ runs:
         rustup toolchain install
         if [[ -n "$COMPONENTS" ]]; then rustup component add $COMPONENTS; fi
         if [[ -n "$TARGETS" ]]; then rustup target add $TARGETS; fi
+    # 缓存里存的主要是依赖的编译产物，调试信息占了将近一半；CI 上查失败看 panic 的消息和源码位置，用不着它。
+    - name: 编译时不带调试信息
+      if: inputs.cache == 'true'
+      shell: bash
+      run: echo "CARGO_PROFILE_DEV_DEBUG=0" >> "$GITHUB_ENV"
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       if: inputs.cache == 'true'
+      with:
+        # 仓库的缓存有总量上限，超了先删最久没用的。PR 和标签读得到 main 存的，自己再各存一份只会把别的缓存挤掉。
+        save-if: ${{ github.ref == 'refs/heads/main' }}
     # 检出后源码的修改时间都是新的，libghostty-vt-sys 的构建脚本每轮都会重跑，rust-cache 又不存 vendor 下
     # 路径依赖的构建输出；zig 的缓存在它的 OUT_DIR 里、按内容判断，单独存下来，重跑时就不用从头编
     # libghostty。这一步排在 rust-cache 后面，存缓存时先于 rust-cache 的清理执行。键里带上架构和 job 给构建脚本定的
