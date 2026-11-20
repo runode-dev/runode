@@ -176,7 +176,7 @@ zbus = "5"
 # 特性链，由 runode-screen 运行时 dlopen。
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "screencast", "remote_desktop"] }
 # 运行时载入系统的 libpipewire 和 libva，没装它们的 Linux 上可执行文件照样跑（ISC）。
-libloading = "0.8"
+libloading = "0.9"
 # Linux 上没有能用的硬件编码器时的软件 H.264 编码器（BSD-2-Clause）：编进 OpenH264 的源码，不依赖系统的库。
 openh264 = "0.9"
 
