@@ -697,12 +697,11 @@ impl WindowView {
                 .into_any_element(),
         };
         // 名字右边是各个 agent 的图标；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。代表整个项目
-        // 的行没有组头，分支总写在图标后面。状态点的描边不跟着悬停的底色变：悬停时右边整个隐去。
+        // 的行没有组头，分支总写出来，图标放在分支后面。状态点的描边不跟着悬停的底色变：悬停时右边整个隐去。
         let logo_fg = if active { fg } else { fg.opacity(ROW_TEXT_OPACITY) };
         // 右边那格最多占行宽的 `TRAILING_MAX_WIDTH`；缩进在项目下的行让出缩进（竖线 1px），响铃的圆点另占一格。
         let tree_inset = if solo { 0. } else { TREE_LINE_INSET + 1. + TREE_ROW_INSET };
         let row_width = self.sidebar_width() - 2. * SIDEBAR_INSET - tree_inset - 2. * WORKSPACE_ROW_PADDING;
-        let room = row_width * TRAILING_MAX_WIDTH - if workspace.bell() { BELL_DOT_SIZE + TRAILING_GAP } else { 0. };
         let branch = if solo {
             self.project_branch_label(&workspace.host, workspace.project_dir())
                 .map(SharedString::from)
@@ -715,6 +714,10 @@ impl WindowView {
         } else {
             None
         };
+        // 分支缩成零宽时，它和图标之间的间距还在。
+        let room = row_width * TRAILING_MAX_WIDTH
+            - if workspace.bell() { BELL_DOT_SIZE + TRAILING_GAP } else { 0. }
+            - if branch.is_some() { TRAILING_GAP } else { 0. };
         let branch = branch.map(|branch| div().min_w_0().truncate().font_family(mono_font(cx)).child(branch));
         let icons = (!agents.is_empty()).then(|| agent_icons(&agents, room, ring, logo_fg, cx));
         // 按着快捷键的修饰键或者单按 ⌘ 时这里换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是响铃的圆点。
@@ -734,7 +737,7 @@ impl WindowView {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
                 } else {
-                    trailing.children(icons).children(branch)
+                    trailing.children(branch).children(icons)
                 }
             })
             .when(workspace.bell(), |trailing| {
