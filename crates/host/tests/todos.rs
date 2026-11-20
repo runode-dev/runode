@@ -542,6 +542,8 @@ fn a_missed_schedule_fires_once_when_the_board_opens() {
             run_timeout: None,
         });
         let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
+        // 丢掉 `Host` 不停它的定时线程，先停下：这个定时只归下面的宿主办。
+        host.stop_schedules();
         id
     };
     runode_todo::Store::open(&db).unwrap().set_fired(&id, 1).unwrap();
@@ -762,6 +764,8 @@ fn a_schedule_whose_todo_cannot_start_does_not_pile_up() {
             run_timeout: None,
         });
         let HostMsg::TodoAdded { req: 1, id } = peer.reply() else { panic!("expected the schedule") };
+        // 丢掉 `Host` 不停它的定时线程，先停下：这个定时只归下面的宿主办。
+        host.stop_schedules();
         id
     };
     std::fs::remove_dir_all(&work).unwrap();
