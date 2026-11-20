@@ -1,0 +1,14 @@
+{
+  "name": "runode-push",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "routes": [{ "pattern": "push.runode.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  // namespace_id 在账号里唯一，换了就从零计数。
+  "ratelimits": [
+    { "name": "REGISTER_PER_IP", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "NOTIFY_PER_IP", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+    { "name": "NOTIFY_PER_HANDLE", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
+  ]
+}

@@ -1,0 +1,44 @@
+# 推送中转（TypeScript 写的 Cloudflare Worker）：查类型、跑测试；部署由人手动做。测试逐字节核对 protocol 的推送样例，
+# 样例一改也要跑。
+name: Push relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/push-relay/**"
+      - "crates/protocol/tests/fixtures/push/**"
+      - ".github/workflows/push-relay.yml"
+  pull_request:
+    paths:
+      - "apps/push-relay/**"
+      - "crates/protocol/tests/fixtures/push/**"
+      - ".github/workflows/push-relay.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: push-relay-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/push-relay
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/push-relay/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test

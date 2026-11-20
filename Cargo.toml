@@ -1,9 +1,8 @@
 [workspace]
 resolver = "3"
 # apps/ 下不全是 Rust 项目（手机端是各平台自己的工程），Rust 的 app 单独列出。
-members = ["crates/*", "apps/desktop", "apps/push-relay", "apps/android/tunnel"]
-# 不带 -p 的 cargo 命令覆盖全部 crate，推送中转和 Android 的 iroh 拨号除外：推送中转只在服务器上跑，开发桌面时
-# 不用跟着编 axum；Android 那个只给手机编。要编它们用 `-p` 或 `--workspace`。
+members = ["crates/*", "apps/desktop", "apps/android/tunnel"]
+# 不带 -p 的 cargo 命令覆盖全部 crate，Android 的 iroh 拨号除外：它只给手机编。要编它用 `-p` 或 `--workspace`。
 default-members = ["crates/*", "apps/desktop"]
 # vendor 下的依赖不是本 workspace 的成员；不排除的话，根目录下的 path 依赖
 # 会被自动收编为本 workspace 的成员。
@@ -145,10 +144,6 @@ mdns-sd = { version = "0.22", default-features = false }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "macros", "time"] }
 # Android 端经 JNI 调 Rust（iroh 拨号）。
 jni = "0.22"
-# 推送中转的 HTTP 服务和发给 APNs 的 HTTP/2 客户端；TLS 用上面那份 ring 后端的 rustls。
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-reqwest = { version = "0.13", default-features = false, features = ["http2", "rustls-no-provider"] }
-tower = { version = "0.5", features = ["util"] }
 # 看板的库（MIT）：任务和定时存在一个 SQLite 文件里。编进 SQLite 的源码（bundled），不依赖系统的
 # libsqlite3，单独跑的宿主在没装它的 Linux 上也能用。只许 runode-todo 直接依赖。
 rusqlite = { version = "0.43.0", default-features = false, features = ["bundled"] }
