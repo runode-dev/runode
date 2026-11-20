@@ -19,9 +19,9 @@ use crate::ui::icons::system_logos;
 use crate::ui::panel::split_handle;
 use crate::ui::theme::ActiveTheme as _;
 use gpui::{
-    AccessibleAction, Action, AnyElement, App, Axis, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
-    Modifiers, MouseButton, MouseDownEvent, Orientation, Render, Role, SharedString, Stateful, Window,
-    WindowControlArea, div, prelude::*, px, relative, svg,
+    AccessibleAction, Action, AnyElement, App, Axis, Bounds, Context, Div, ExternalPaths, Focusable, FontWeight, Hsla,
+    Modifiers, MouseButton, MouseDownEvent, Orientation, Pixels, Render, Role, SharedString, Stateful, Window,
+    WindowControlArea, canvas, div, point, prelude::*, px, relative, svg,
 };
 
 use super::{
@@ -169,6 +169,17 @@ const HOST_STATUS_DOT: f32 = 6.;
 /// 叠在系统图标右上角的连接状态圆点，连同和图标隔开的那圈描边。
 const HOST_STATUS_BADGE: f32 = 7.;
 
+/// 列表的滚动位置要挪多少，`row` 这一行才整个落在列表的可见区域 `list` 里；已经在里面时为空。
+fn reveal_shift(row: Bounds<Pixels>, list: Bounds<Pixels>) -> Option<Pixels> {
+    if row.top() < list.top() {
+        Some(list.top() - row.top())
+    } else if row.bottom() > list.bottom() {
+        Some(list.bottom() - row.bottom())
+    } else {
+        None
+    }
+}
+
 /// 快捷键要按着的修饰键：先找 `select` 的绑定，`is_last` 时再找 `last` 的，
 /// 都取最后一个绑定的第一键。
 pub(super) fn shortcut_modifiers(select: &dyn Action, last: &dyn Action, is_last: bool, cx: &App) -> Option<Modifiers> {
@@ -277,6 +288,8 @@ impl WindowView {
         let modifiers = window.modifiers();
         let inbox = self.render_inbox(window, cx);
         let rows = self.render_workspace_rows(modifiers, cx);
+        // 只滚这一次：那一行收在组里没画出来时也不留到以后。
+        self.sidebar_reveal = None;
         let drop_bg = if cards(cx) && cx.theme().is_light { cx.theme().mix(0.14) } else { cx.theme().mix(0.08) };
         div()
             .id("sidebar")
@@ -712,6 +725,26 @@ impl WindowView {
                     .mt(px(-TAB_CLOSE_SIZE / 2.))
                     .reveal_on_hover(group.clone())
             });
+        // 要滚进视野的行排好版后才知道露在列表外面多少，照差的挪滚动位置。这一帧已经照原来的位置排了版，画完
+        // 再要一帧。
+        let reveal = (self.sidebar_reveal == Some(id)).then(|| {
+            let scroll = self.sidebar_scroll.clone();
+            let view = cx.entity_id();
+            canvas(
+                move |row, _, cx| {
+                    if let Some(shift) = reveal_shift(row, scroll.bounds()) {
+                        let offset = scroll.offset();
+                        scroll.set_offset(point(offset.x, offset.y + shift));
+                        cx.defer(move |cx| cx.notify(view));
+                    }
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
         // 悬停时露出的按钮盖在右边那格上，那格至少要有它们那么宽，才不盖到名字。
         let buttons_width = if new_worktree.is_some() { 2. * TAB_CLOSE_SIZE + 2. } else { TAB_CLOSE_SIZE };
         div()
@@ -800,6 +833,7 @@ impl WindowView {
             }))
             // 右键菜单从指针处弹出，指针还停在行上，提示会盖住菜单的第一项。
             .when_some(dir.filter(|_| self.menu().is_none()), |row, dir| row.tooltip(tooltip(dir, None)))
+            .children(reveal)
             .child(status)
             .child(div().flex_1().min_w_0().child(name))
             .child(
@@ -883,7 +917,7 @@ impl WindowView {
             cx,
         );
         self.renaming = Some(Renaming { target: RenameTarget::Workspace(id), edit });
-        self.sidebar_scroll.scroll_to_item(ix);
+        self.sidebar_reveal = Some(id);
         cx.notify();
     }
 
@@ -943,5 +977,24 @@ impl WindowView {
         }
         self.save(cx);
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::size;
+
+    use super::*;
+
+    #[test]
+    fn reveal_shift_moves_a_row_just_into_the_list() {
+        let list = Bounds::new(point(px(0.), px(100.)), size(px(200.), px(300.)));
+        let row = |top: f32| Bounds::new(point(px(0.), px(top)), size(px(200.), px(30.)));
+        // 在可见区域里的不动，贴着上下边的也算在里面。
+        assert_eq!(reveal_shift(row(100.), list), None);
+        assert_eq!(reveal_shift(row(370.), list), None);
+        // 露在上边外面的往下挪到贴着上边，露在下边外面的往上挪到贴着下边。
+        assert_eq!(reveal_shift(row(40.), list), Some(px(60.)));
+        assert_eq!(reveal_shift(row(900.), list), Some(px(-530.)));
     }
 }

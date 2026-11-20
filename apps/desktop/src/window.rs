@@ -314,6 +314,8 @@ pub struct WindowView {
     sidebar_width: Option<f32>,
     /// 侧栏里 workspace 列表的滚动位置。
     sidebar_scroll: ScrollHandle,
+    /// 下次画侧栏时要滚进视野的那一行。
+    sidebar_reveal: Option<WorkspaceId>,
     /// 侧栏按主机分组时收起来的组，按收起的先后。
     collapsed_hosts: Vec<HostId>,
     /// 侧栏里收起来的项目：主机和项目目录（`Workspace::project_dir`），按收起的先后。
@@ -505,6 +507,7 @@ impl WindowView {
             sidebar_shown: None,
             sidebar_width: None,
             sidebar_scroll: ScrollHandle::new(),
+            sidebar_reveal: None,
             collapsed_hosts: Vec::new(),
             collapsed_projects: Vec::new(),
             panel_width: None,

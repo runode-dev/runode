@@ -772,7 +772,7 @@ impl WindowView {
         self.file_tree.update(cx, |tree, cx| tree.close_menu(window, cx));
         self.preview.update(cx, |preview, cx| preview.close_menu(window, cx));
         self.close_menu(window, cx);
-        self.sidebar_scroll.scroll_to_item(ix);
+        self.sidebar_reveal = Some(self.workspaces[ix].id);
         // 文件树切到这个 workspace 的树，搜索框换上它的搜索词。
         self.with_file_tree(cx, |_, _| {});
         self.refresh_project(cx);
