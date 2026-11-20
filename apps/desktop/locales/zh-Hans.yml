@@ -207,13 +207,7 @@ sidebar:
   phone: 手机
   phone_live: "%{name} 连着"
 inbox:
-  title: 需要你
-  watching: "正在看，等了 %{time}"
   waited: "等了 %{time}"
-  watching_just: 正在看，刚开始等
-  waited_just: 刚开始等
-  detail_blocked: "%{agent} 在 %{place} 里等你回答"
-  show_terminal: 看终端
 prompts:
   option_for: "%{number}. %{text}：%{title}"
   asking: "在问：%{question}"

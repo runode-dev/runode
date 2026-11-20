@@ -56,7 +56,7 @@ pub struct Theme {
     pub muted_foreground: Hsla,
     /// 次一级的字，比 `foreground` 淡、比 `muted_foreground` 浓。
     pub subtle_foreground: Hsla,
-    /// 非终端的卡片（右侧面板、收件箱、看板列、设置卡）的底色。
+    /// 非终端的卡片（右侧面板、看板列、设置卡）的底色。
     pub surface: Hsla,
     /// 嵌在窗口外框上的搜索框的底色。
     pub field: Hsla,

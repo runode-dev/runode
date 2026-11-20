@@ -207,13 +207,7 @@ sidebar:
   phone: Phone
   phone_live: "%{name} connected"
 inbox:
-  title: Needs you
-  watching: "Watching, waited %{time}"
   waited: "Waited %{time}"
-  watching_just: Watching, just asked
-  waited_just: Just asked
-  detail_blocked: "%{agent} is waiting for you in %{place}"
-  show_terminal: Show terminal
 prompts:
   option_for: "%{number}. %{text}: %{title}"
   asking: "Asking: %{question}"

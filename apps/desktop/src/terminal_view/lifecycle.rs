@@ -1189,11 +1189,6 @@ impl TerminalView {
         &self.host
     }
 
-    /// 到会话所在主机的连接。
-    pub fn host_link(&self) -> &HostLink {
-        &self.host_link
-    }
-
     /// 和宿主断开了，画面停在最后一屏。
     pub fn lost(&self) -> bool {
         self.screen.is_lost()

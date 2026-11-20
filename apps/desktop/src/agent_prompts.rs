@@ -1,5 +1,5 @@
-//! 等回答的 agent 屏幕上认出的带编号的提问（`runode_agent::prompt`），全 app 一份，窗口和看板都读，画成同一个
-//! 部件（`render_prompt`）；替用户按选项的编号键回答。
+//! 等回答的 agent 屏幕上认出的带编号的提问（`runode_agent::prompt`），全 app 一份，看板读来画成部件
+//! （`render_prompt`）；替用户按选项的编号键回答。
 //!
 //! 会话进入等回答（`AgentState::Blocked`）时读一次屏幕底部，离开等回答就忘掉（`watch`）。等回答期间调用方每报
 //! 一次状态再读一次；这一次等待已经读到过屏幕时（`PromptState::settled`），这样的重读之间至少隔 `SETTLED_GAP`。
@@ -16,15 +16,13 @@ use std::{
 };
 
 use anyhow::Result;
-use gpui::{AnyElement, App, Context, Div, Entity, Global, Task, Toggled, Window, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, Div, Global, Task, Toggled, Window, div, prelude::*, px};
 use runode_agent::prompt::{self, Prompt};
 use runode_protocol::SessionId;
-use runode_types::agent::AgentState;
 
 use crate::{
-    host_client::{Link, hosts::HostId},
+    host_client::hosts::HostId,
     i18n::action_for,
-    terminal_view::TerminalView,
     ui::{
         a11y::{Press as _, StaticText as _},
         button::{Button, ButtonSize, ButtonVariant},
@@ -75,8 +73,6 @@ const SETTLED_GAP: Duration = Duration::from_secs(3);
 const REREADS_AFTER: [Duration; 3] = [Duration::from_millis(300), Duration::from_secs(1), Duration::from_millis(2500)];
 /// `REREADS_AFTER` 都读过了、屏幕上还是答的那个提问时，隔这么久再读一次，直到 `ANSWERED_REREADS` 用完。
 const REREAD_GAP: Duration = Duration::from_millis(1500);
-/// 经 `Link` 读屏、按键最多等这么久：远端主机上一次来回要久些。
-const LINK_TIMEOUT: Duration = Duration::from_secs(10);
 /// 答过以后读到的屏幕上一直是答的那个提问时，最多这么多次不认提问；之后还是它，按键多半没起作用，提问照旧
 /// 认出来。
 const ANSWERED_REREADS: u8 = 5;
@@ -95,15 +91,6 @@ impl Access {
         keys: impl Fn(SessionId, Vec<String>) -> Result<()> + Send + Sync + 'static,
     ) -> Self {
         Self { read: Arc::new(read), keys: Arc::new(keys) }
-    }
-
-    /// 经到会话所在主机的连接读屏、按键，各最多等 `LINK_TIMEOUT`。
-    pub fn link(link: Link) -> Self {
-        let keys = link.clone();
-        Self::new(
-            move |id, lines| link.read_screen(id, lines, LINK_TIMEOUT),
-            move |id, list| keys.send_keys(id, list, LINK_TIMEOUT),
-        )
     }
 }
 
@@ -374,17 +361,6 @@ pub fn forget(key: &Key, cx: &mut App) {
         prompts.prompts.remove(key);
         prompts.answering.remove(key);
     }
-}
-
-/// 跟着窗口里的终端 `view` 的会话等不等回答，读屏、按键经它到所在主机的连接。还没开会话的不管。
-pub fn watch_terminal(view: &Entity<TerminalView>, cx: &mut App) {
-    let view = view.read(cx);
-    let Some(id) = view.session_id() else { return };
-    let blocked = view.agent().is_some_and(|agent| agent.state == AgentState::Blocked);
-    let key = (view.host().clone(), id);
-    let since = view.meta().agent_since_ms;
-    let link = view.host_link().clone();
-    watch(key, Access::link(link), blocked, since, cx);
 }
 
 /// 替用户回答会话 `key` 认出的提问，选编号 `number` 那一项：先重读屏幕，上面还是用户看到的那个提问（`Asked`）

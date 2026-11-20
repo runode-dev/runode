@@ -320,9 +320,6 @@ impl WindowView {
         cx: &mut Context<Self>,
     ) -> (EntityId, (Entity<TerminalView>, Subscription)) {
         let events = cx.subscribe_in(&view, window, Self::handle_terminal_event);
-        // 建好时就带着宿主给的状态的终端（显示着的本机终端）要等状态再变才发 `MetaChanged`，本来就在等回答的
-        // 在这里开始跟。
-        crate::agent_prompts::watch_terminal(&view, cx);
         (view.entity_id(), (view, events))
     }
 
@@ -611,10 +608,8 @@ impl WindowView {
                 self.forget_stale_done(id, wi, ti, cx);
                 cx.notify();
             }
-            // 侧栏、标签和状态栏是缓存的视图，只在窗口通知时重画，不跟着终端的输出。agent 等回答时
-            // 读它屏幕上的提问，不等了忘掉。
+            // 侧栏、标签和状态栏是缓存的视图，只在窗口通知时重画，不跟着终端的输出。
             TerminalEvent::MetaChanged => {
-                crate::agent_prompts::watch_terminal(view, cx);
                 cx.notify();
             }
             // 存档和报给宿主的布局里按会话记分屏，开好以前记不下它。

@@ -380,8 +380,6 @@ pub struct WindowView {
     status_popover: Option<status_bar::StatusPopover>,
     /// 显示着驱动标记时，到最早的那个该消失的时候（`now_ms` 的毫秒数）重画的计时器。
     driver_redraw: Option<(u64, Task<()>)>,
-    /// 侧栏「需要你」里有等回答的分屏时，到等得最久的那个满下一个整分钟的时刻重画的计时器。
-    inbox_redraw: Option<(Instant, Task<()>)>,
     /// 最近一次把路径打进终端（`insert_paths`）的任务：下一次等它打完再打，先后不乱。
     inserting: Option<Shared<Task<()>>>,
     /// workspace、标签和分屏节点的标识都从这里取。
@@ -408,8 +406,6 @@ pub struct WindowView {
     _visibility_watch: Subscription,
     /// 配置重载后重画，文件树的字号等跟着变。
     _config_watch: Subscription,
-    /// 认出的 agent 提问（`agent_prompts::Prompts`）变了时重画：侧栏是缓存的视图，只在窗口通知时重画。
-    _prompts_watch: Subscription,
     project_watcher: project::Watcher,
     /// 包成缓存视图的几块界面。第一次画窗口时才建：建 `WindowView` 时它还没有实体。
     slots: Option<Slots>,
@@ -542,7 +538,6 @@ impl WindowView {
             arrange_picker: None,
             status_popover: None,
             driver_redraw: None,
-            inbox_redraw: None,
             inserting: None,
             next_id: 0,
             layout: Rc::default(),
@@ -558,7 +553,6 @@ impl WindowView {
             _activation_watch: activation_watch,
             _visibility_watch: visibility_watch,
             _config_watch: config_watch,
-            _prompts_watch: cx.observe_global::<crate::agent_prompts::Prompts>(|_, cx| cx.notify()),
             project_watcher,
             slots: None,
             slot_theme: None,

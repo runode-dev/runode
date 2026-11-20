@@ -1,10 +1,9 @@
-//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是找 agent、新建任务的一行，下面是在等你
-//! 回答的 agent（`inbox`），最下面是导航（`nav`），列表和导航之间是后台会话（`background`）。workspace 按项目
-//! （`project_group`）归组；有 workspace 在别的主机上时先按主机分组，每组一个组头，能收起、在那台主机上新建。
+//! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是找 agent、新建任务的一行，最下面是导航
+//! （`nav`），列表和导航之间是后台会话（`background`）。workspace 按项目（`project_group`）归组；有 workspace
+//! 在别的主机上时先按主机分组，每组一个组头，能收起、在那台主机上新建。
 //! 每行一行字：状态标记和名字，右边是各个 agent 的图标，没有 agent 时是和项目不同的当前分支（`repo`）；代表
 //! 整个项目的行两样都写。
 
-pub(super) mod inbox;
 mod nav;
 mod project_group;
 mod repo;
@@ -128,7 +127,7 @@ fn agent_icons(agents: &[Mark], room: f32, ring: Hsla, fg: Hsla, cx: &App) -> Di
         .when(more > 0, |row| row.child(div().flex_none().text_size(FontSize::Small).child(format!("+{more}"))))
 }
 
-/// 侧栏顶上几段（搜索行、「需要你」、项目栏）之间的间距。
+/// 侧栏顶上几段（搜索行、项目栏）之间的间距。
 const SECTION_GAP: f32 = 18.;
 /// 侧栏里各段离侧栏左右两边的留白。
 const SIDEBAR_INSET: f32 = 6.;
@@ -286,7 +285,6 @@ impl WindowView {
 
     pub(super) fn render_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let modifiers = window.modifiers();
-        let inbox = self.render_inbox(window, cx);
         let rows = self.render_workspace_rows(modifiers, cx);
         // 只滚这一次：那一行收在组里没画出来时也不留到以后。
         self.sidebar_reveal = None;
@@ -312,7 +310,6 @@ impl WindowView {
                     .on_mouse_down(MouseButton::Left, drag_window),
             )
             .child(self.render_sidebar_search(cx))
-            .children(inbox.map(|inbox| div().flex_none().mt(px(SECTION_GAP)).px(px(SIDEBAR_INSET)).child(inbox)))
             .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
             .child(
                 div()

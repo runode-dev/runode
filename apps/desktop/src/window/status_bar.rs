@@ -48,7 +48,6 @@ use super::{
     files::MenuItem,
     project::SidePanel,
     remote,
-    sidebar::inbox::waiting_oldest_first,
 };
 use crate::host_client::hosts::{self, HostId};
 use crate::project_host::ProjectHost;
@@ -807,8 +806,11 @@ impl WindowView {
             .child(text)
             .on_press(cx, |this, window, cx| {
                 let entries = this.window_entries(window, cx);
-                let oldest = waiting_oldest_first(entries, |entry| (entry.mark.status, entry.changed_at));
-                if let Some(entry) = oldest.first() {
+                let oldest = entries
+                    .into_iter()
+                    .filter(|entry| entry.mark.status == agents::Status::Blocked)
+                    .min_by_key(|entry| entry.changed_at);
+                if let Some(entry) = oldest {
                     agents::reveal(entry.window, entry.pane, cx);
                 }
             })

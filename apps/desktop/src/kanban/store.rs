@@ -244,8 +244,8 @@ struct Followed(HashSet<SessionId>);
 
 impl Global for Followed {}
 
-/// 任务会话里的 agent 在等回答的读它屏幕上的提问，别的（包括会话已经没了的）忘掉。任务删掉或移走后，会话也
-/// 没了的忘掉；会话还在的可能有窗口在跟着，留给它。会话都在本机的宿主里。
+/// 任务会话里的 agent 在等回答的读它屏幕上的提问，别的（包括会话已经没了的）忘掉。任务删掉或移走后它的会话
+/// 也忘掉。会话都在本机的宿主里。
 fn watch_prompts(cx: &mut App) {
     let host = Host::get(cx);
     let access =
@@ -262,10 +262,8 @@ fn watch_prompts(cx: &mut App) {
         })
         .collect();
     let followed: HashSet<SessionId> = sessions.iter().map(|(id, ..)| *id).collect();
-    let gone: Vec<SessionId> = cx
-        .try_global::<Followed>()
-        .map(|before| before.0.difference(&followed).filter(|id| !data.sessions.contains_key(id)).copied().collect())
-        .unwrap_or_default();
+    let gone: Vec<SessionId> =
+        cx.try_global::<Followed>().map(|before| before.0.difference(&followed).copied().collect()).unwrap_or_default();
     cx.set_global(Followed(followed));
     for id in gone {
         agent_prompts::ended(&(HostId::Local, id), cx);
