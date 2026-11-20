@@ -282,6 +282,13 @@ pub fn origin_url(dir: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&out).trim().to_owned()).filter(|url| !url.is_empty())
 }
 
+/// `dir` 所在仓库的当前分支比上游多几个提交；没有上游、HEAD 分离或不在仓库里时为 0。
+pub fn ahead_of_upstream(dir: &Path) -> usize {
+    git(dir, &["rev-list", "--count", "@{upstream}..HEAD"])
+        .and_then(|out| String::from_utf8_lossy(&out).trim().parse().ok())
+        .unwrap_or(0)
+}
+
 /// git 给的仓库根解析过符号链接；按 `dir` 的写法换回来，界面拿 `dir` 下的路径和它比前缀
 /// 才对得上。`dir` 本身不在仓库根下面（仓库内部的符号链接）时保持原样。按层数往上数到的那一级
 /// 不一定就是仓库根：`dir` 经过仓库里指向别的深度的符号链接、或者是 `sub`、`.` 这样的相对写法

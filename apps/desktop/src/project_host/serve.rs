@@ -158,7 +158,13 @@ pub(super) fn repo_badge(dir: &std::path::Path) -> super::RepoSummary {
     if under_home_repo(&real(dir.to_path_buf()), main_worktree.as_deref(), home.as_deref()) {
         (common_git_dir, main_worktree) = (None, None);
     }
-    super::RepoSummary { branch: Some(branch), origin: runode_git::origin_url(dir), common_git_dir, main_worktree }
+    super::RepoSummary {
+        branch: Some(branch),
+        origin: runode_git::origin_url(dir),
+        common_git_dir,
+        main_worktree,
+        ahead: runode_git::ahead_of_upstream(dir),
+    }
 }
 
 /// `dir` 不是家目录、所在仓库的主工作树却是家目录：家目录是管配置文件的仓库，下面没进别的仓库的目录不归成它的

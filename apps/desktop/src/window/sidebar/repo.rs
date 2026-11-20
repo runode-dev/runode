@@ -35,6 +35,8 @@ pub(in crate::window) struct RepoBadge {
     pub avatar: Option<PathBuf>,
     /// 所在仓库的主工作树（`project_host::RepoSummary::main_worktree`），项目组头按它取名字、在它下面新建工作树。
     pub main_worktree: Option<PathBuf>,
+    /// 当前分支比上游多的提交数，和分支一起问。
+    pub ahead: usize,
     checked: Option<Instant>,
     checking: bool,
     /// 这次运行里找过头像了，找没找到都不再找，之后只刷新分支。
@@ -70,7 +72,7 @@ impl WindowView {
             let job = cx.background_spawn(async move {
                 let badge = host.repo_badge(&dir).ok()?;
                 let avatar = find_avatar.then(|| badge.origin.as_deref().and_then(avatar_for)).flatten();
-                Some((badge.branch, badge.common_git_dir, badge.main_worktree, avatar))
+                Some((badge.branch, badge.common_git_dir, badge.main_worktree, badge.ahead, avatar))
             });
             cx.spawn(async move |this, cx| {
                 let answer = job.await;
@@ -82,15 +84,17 @@ impl WindowView {
                     let badge = &mut workspace.repo;
                     badge.checking = false;
                     badge.checked = Some(Instant::now());
-                    let Some((branch, common_git_dir, main_worktree, avatar)) = answer else {
+                    let Some((branch, common_git_dir, main_worktree, ahead, avatar)) = answer else {
                         return;
                     };
                     let branch = branch.map(SharedString::from);
                     let changed = badge.branch != branch
                         || badge.main_worktree != main_worktree
+                        || badge.ahead != ahead
                         || (find_avatar && badge.avatar != avatar);
                     badge.branch = branch;
                     badge.main_worktree = main_worktree;
+                    badge.ahead = ahead;
                     if find_avatar {
                         badge.avatar = avatar;
                         badge.avatar_looked = true;

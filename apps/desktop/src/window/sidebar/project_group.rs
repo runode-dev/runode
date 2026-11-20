@@ -322,13 +322,13 @@ impl WindowView {
             .when(!renaming, |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
     }
 
-    /// 项目上写的分支：主工作树的分支，当前 workspace 就是它、有没推的提交时后面写 ↑ 和个数；没开主工作树、
+    /// 项目上写的分支：主工作树的分支，有没推的提交时后面写 ↑ 和个数；没开主工作树、
     /// 还没问到或者不在仓库里时为空。
     pub(super) fn project_branch_label(&self, host: &HostId, dir: &Path) -> Option<String> {
         let (ix, branch) = self.main_worktree_branch(host, dir)?;
-        // 只有当前 workspace 读着 git 状态。
+        // 当前 workspace 读着的 git 状态比定时问的新，先用它。
         let git = self.workspace().project.git.as_ref().filter(|_| ix == self.active);
-        Some(match git.map_or(0, |git| git.main.info.ahead) {
+        Some(match git.map_or(self.workspaces[ix].repo.ahead, |git| git.main.info.ahead) {
             0 => branch.to_string(),
             ahead => format!("{branch} ↑{ahead}"),
         })

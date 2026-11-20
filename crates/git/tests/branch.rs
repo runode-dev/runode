@@ -3,7 +3,7 @@
 mod common;
 
 use common::TestRepo;
-use runode_git::{current_branch, origin_url, valid_branch_name};
+use runode_git::{ahead_of_upstream, current_branch, origin_url, valid_branch_name};
 
 #[test]
 fn checks_branch_names() {
@@ -46,6 +46,21 @@ fn reads_current_branch_and_origin() {
     repo.git(&["remote", "add", "origin", "git@github.com:runode-dev/runode.git"]);
     assert_eq!(origin_url(repo.path()).as_deref(), Some("git@github.com:runode-dev/runode.git"));
     assert_eq!(current_branch(&repo.path().join("..")), None);
+}
+
+#[test]
+fn counts_commits_ahead_of_upstream() {
+    let remote = TestRepo::bare("ahead-remote");
+    let repo = TestRepo::new("ahead");
+    repo.commit_file("a.txt", "one\n", "init");
+    // 没有上游。
+    assert_eq!(ahead_of_upstream(repo.path()), 0);
+    repo.git(&["remote", "add", "origin", &remote.path().to_string_lossy()]);
+    repo.git(&["push", "-q", "-u", "origin", "main"]);
+    assert_eq!(ahead_of_upstream(repo.path()), 0);
+    repo.commit_file("b.txt", "two\n", "second");
+    repo.commit_file("c.txt", "three\n", "third");
+    assert_eq!(ahead_of_upstream(repo.path()), 2);
 }
 
 #[test]

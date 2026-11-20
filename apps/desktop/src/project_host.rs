@@ -46,6 +46,8 @@ pub(crate) struct RepoSummary {
     pub common_git_dir: Option<PathBuf>,
     /// 主工作树的根目录（`runode_git::RepoLocation::main_worktree`），解开了符号链接。
     pub main_worktree: Option<PathBuf>,
+    /// 当前分支比上游多的提交数（`runode_git::ahead_of_upstream`）。
+    pub ahead: usize,
 }
 
 #[derive(Clone, Default)]
