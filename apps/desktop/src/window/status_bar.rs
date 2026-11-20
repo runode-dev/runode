@@ -764,13 +764,13 @@ impl WindowView {
     fn render_branch_item(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let workspace = self.workspace();
         let branch = workspace.repo.branch.clone()?;
-        // 读着的 git 状态是终端所在目录的仓库，和工作区的分支对得上才用它的 ahead。
+        // 读着的 git 状态是终端所在目录的仓库，和工作区的分支对得上才用它的 ahead，对不上或没读着时用定时问到的。
         let ahead = workspace
             .project
             .git
             .as_ref()
             .filter(|git| git.main.info.branch.as_deref() == Some(branch.as_ref()))
-            .map_or(0, |git| git.main.info.ahead);
+            .map_or(workspace.repo.ahead, |git| git.main.info.ahead);
         let text = match ahead {
             0 => branch.to_string(),
             ahead => format!("{branch} ↑{ahead}"),
