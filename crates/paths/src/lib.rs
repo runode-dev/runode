@@ -415,6 +415,16 @@ impl Dirs {
         self.cache_file(&format!("github-avatars/{owner}.png"))
     }
 
+    /// 用户给侧栏里的项目换的图标，复制进来的图片。
+    pub fn project_icons_dir(&self) -> Option<PathBuf> {
+        self.data_file("project-icons")
+    }
+
+    /// 远端仓库里找到的项目图标，读回本机存的一份。
+    pub fn remote_project_icons_dir(&self) -> Option<PathBuf> {
+        self.cache_file("project-icons")
+    }
+
     /// Ghostty 配置文件的位置，按 Ghostty 的加载顺序：XDG 目录的旧名与新名，macOS 上再加
     /// Application Support 的旧名与新名。
     pub fn ghostty_config_files(&self) -> Vec<PathBuf> {

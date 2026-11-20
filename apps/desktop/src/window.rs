@@ -196,6 +196,16 @@ enum Dropdown {
 #[action(namespace = runode, no_json)]
 pub struct SelectWorkspace(pub usize);
 
+/// 弹出系统的文件选择框，选一张图片当这个 workspace 所在项目的图标。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct ChangeProjectIcon(pub WorkspaceId);
+
+/// 删掉这个 workspace 所在项目换过的图标，回到默认的。
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = runode, no_json)]
+pub struct ResetProjectIcon(pub WorkspaceId);
+
 /// 切换到标题栏里的第几个标签（从 0 数）：终端标签在前，文件标签接在后面。
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = runode, no_json)]
@@ -320,6 +330,9 @@ pub struct WindowView {
     collapsed_hosts: Vec<HostId>,
     /// 侧栏里收起来的项目：主机和项目目录（`Workspace::project_dir`），按收起的先后。
     collapsed_projects: Vec<(HostId, PathBuf)>,
+    /// 这次运行里找过仓库图标的项目（主机和 `Workspace::project_dir`）和找到的图标（`project_icon::repo_icon`），
+    /// 正在找的图标为空。
+    repo_icons: Vec<(HostId, PathBuf, Option<PathBuf>)>,
     /// 右侧面板拖动过宽度时是那个宽度，没拖过时用默认宽度；显示哪一页每个 workspace 各记一份（`Workspace::panel`）。
     panel_width: Option<f32>,
     /// 右侧面板的 Git 页：各 workspace 的面板都在它里面，显示设置和图表的高度也是。
@@ -506,6 +519,7 @@ impl WindowView {
             sidebar_reveal: None,
             collapsed_hosts: Vec::new(),
             collapsed_projects: Vec::new(),
+            repo_icons: Vec::new(),
             panel_width: None,
             git_panel,
             _git_panel_events: git_panel_events,
@@ -1013,6 +1027,8 @@ impl Render for WindowView {
             .on_action(Self::act(cx, Self::new_workspace))
             .on_action(Self::act(cx, Self::close_workspace))
             .on_action(Self::act(cx, Self::rename_workspace))
+            .on_action(Self::act(cx, Self::change_project_icon))
+            .on_action(Self::act(cx, Self::reset_project_icon))
             .on_action(Self::act(cx, Self::next_workspace))
             .on_action(Self::act(cx, Self::previous_workspace))
             .on_action(Self::act(cx, Self::select_workspace))

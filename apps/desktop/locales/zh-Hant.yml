@@ -65,6 +65,8 @@ menu:
   previous_workspace: 顯示上一個工作區
   next_workspace: 顯示下一個工作區
   rename_workspace: 重新命名工作區…
+  change_project_icon: 更換圖示…
+  reset_project_icon: 恢復預設圖示
   previous_split: 選擇上一個分割畫面
   next_split: 選擇下一個分割畫面
   zoom_split: 放大分割畫面
@@ -128,6 +130,9 @@ workspace:
   browse: 瀏覽檔案夾
   browse_hint: 本機專案、Git 儲存庫或任意檔案夾，也可以把檔案夾拖到視窗上
   picker_failed: "打不開系統的選擇資料夾視窗。可以把資料夾拖到 Runode 的視窗上打開。"
+  choose_icon: 選擇
+  icon_unsupported: "不支援這種圖片格式，請選 PNG、JPEG、WebP、GIF、SVG 或 ICO 檔案。"
+  icon_failed: "沒能儲存圖示：%{error}"
   picker_failed_linux: "打不開系統的選擇資料夾視窗：它要裝 xdg-desktop-portal 和你所用桌面的 portal 後端。沒裝之前可以把資料夾拖到 Runode 的視窗上打開。"
   create_failed: "建不了 %{dir}：%{error}"
   other: 其他方式

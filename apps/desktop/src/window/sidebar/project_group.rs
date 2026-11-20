@@ -8,8 +8,8 @@ use std::{
 };
 
 use gpui::{
-    AccessibleAction, AnyElement, App, Axis, ClickEvent, Context, Div, FontWeight, Modifiers, Render, Role,
-    SharedString, Stateful, Window, div, prelude::*, px, relative, svg,
+    AccessibleAction, AnyElement, App, Axis, ClickEvent, Context, Div, FontWeight, Modifiers, MouseButton,
+    MouseDownEvent, Render, Role, SharedString, Stateful, Window, div, prelude::*, px, relative, svg,
 };
 
 use super::{
@@ -114,10 +114,20 @@ impl WindowView {
     }
 
     /// `range` 里的 workspace 是一个项目的全部：只有一个、名字又和项目一样时并成一行，不画组头。
-    fn solo_project(&self, range: &Range<usize>) -> bool {
+    pub(super) fn solo_project(&self, range: &Range<usize>) -> bool {
         let [workspace] = &self.workspaces[range.clone()] else { return false };
         let dir = workspace.repo.main_worktree.as_deref().unwrap_or(workspace.project_dir());
         *workspace.name == *project_name(&workspace.host, dir)
+    }
+
+    /// 第 `ix` 个 workspace 所在项目的全部 workspace；同一个项目的在列表里挨着。
+    pub(super) fn project_range(&self, ix: usize) -> Range<usize> {
+        let same = |w: &super::super::model::Workspace| {
+            w.host == self.workspaces[ix].host && w.project_dir() == self.workspaces[ix].project_dir()
+        };
+        let start = self.workspaces[..ix].iter().rposition(|w| !same(w)).map_or(0, |at| at + 1);
+        let end = self.workspaces[ix..].iter().position(|w| !same(w)).map_or(self.workspaces.len(), |at| ix + at);
+        start..end
     }
 
     /// 画着组头、能收起的项目，按列表的先后。
@@ -356,7 +366,7 @@ impl WindowView {
         })
     }
 
-    /// 项目的组头：收起、展开的箭头和项目名，右边是分支（`project_branch_label`）；悬停时分支让给新建工作树
+    /// 项目的组头：收起、展开的箭头、项目图标（`project_icon`）和项目名，右边是分支（`project_branch_label`）；悬停时分支让给新建工作树
     /// 的按钮（项目是仓库时）。点一下收起、展开，按住能拖动排序。项目里的 workspace 是 `range`。
     fn render_project_header(
         &self,
@@ -367,9 +377,11 @@ impl WindowView {
         attention: bool,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let icon = self.project_icon(host, dir, cx);
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let workspaces = &self.workspaces[range.clone()];
+        let first = workspaces[0].id;
         let branch = self.project_branch_label(host, dir);
         // 名字和提示按主工作树写，不写 git 目录。
         let main_worktree = workspaces.iter().find_map(|workspace| workspace.repo.main_worktree.clone());
@@ -445,6 +457,13 @@ impl WindowView {
                 this.toggle_project(&press_host, &press_dir, None, cx);
             }))
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.open_project_menu(first, event.position, cx);
+                }),
+            )
             .child(
                 svg()
                     .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
@@ -452,6 +471,7 @@ impl WindowView {
                     .size(px(12.))
                     .text_color(muted),
             )
+            .children(icon.map(super::project_icon_image))
             .child(div().min_w_0().truncate().text_size(FontSize::Medium).font_weight(FontWeight::SEMIBOLD).child(name))
             .children(attention_mark)
             .child(

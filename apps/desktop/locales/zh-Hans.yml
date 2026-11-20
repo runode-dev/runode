@@ -65,6 +65,8 @@ menu:
   previous_workspace: 显示上一个工作区
   next_workspace: 显示下一个工作区
   rename_workspace: 重命名工作区…
+  change_project_icon: 更换图标…
+  reset_project_icon: 恢复默认图标
   previous_split: 选择上一个分屏
   next_split: 选择下一个分屏
   zoom_split: 放大分屏
@@ -128,6 +130,9 @@ workspace:
   browse: 浏览文件夹
   browse_hint: 本地项目、Git 仓库或任意文件夹，也可以把文件夹拖到窗口上
   picker_failed: "打不开系统的选择文件夹窗口。可以把文件夹拖到 Runode 的窗口上打开。"
+  choose_icon: 选择
+  icon_unsupported: "不支持这种图片格式，请选 PNG、JPEG、WebP、GIF、SVG 或 ICO 文件。"
+  icon_failed: "没能保存图标：%{error}"
   picker_failed_linux: "打不开系统的选择文件夹窗口：它要装 xdg-desktop-portal 和你所用桌面的 portal 后端。没装之前可以把文件夹拖到 Runode 的窗口上打开。"
   create_failed: "建不了 %{dir}：%{error}"
   other: 其他方式

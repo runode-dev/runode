@@ -65,6 +65,8 @@ menu:
   previous_workspace: Show Previous Workspace
   next_workspace: Show Next Workspace
   rename_workspace: Rename Workspace…
+  change_project_icon: Change Icon…
+  reset_project_icon: Reset Icon
   previous_split: Select Previous Split
   next_split: Select Next Split
   zoom_split: Zoom Split
@@ -128,6 +130,9 @@ workspace:
   browse: Browse Folder
   browse_hint: A local project, Git repository or any folder; you can also drop one on the window
   picker_failed: "Could not open the system folder picker. You can drag a folder onto the Runode window to open it."
+  choose_icon: Choose
+  icon_unsupported: "This image format is not supported. Choose a PNG, JPEG, WebP, GIF, SVG or ICO file."
+  icon_failed: "Could not save the icon: %{error}"
   picker_failed_linux: "Could not open the system folder picker; it needs xdg-desktop-portal and a portal backend for your desktop installed. Meanwhile you can drag a folder onto the Runode window to open it."
   create_failed: "Could not create %{dir}: %{error}"
   other: Other Ways

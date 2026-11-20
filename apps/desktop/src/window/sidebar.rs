@@ -6,6 +6,7 @@
 
 mod nav;
 mod project_group;
+mod project_icon;
 mod repo;
 
 pub(super) use project_group::RepoProject;
@@ -49,6 +50,7 @@ use crate::{
         tooltip::tooltip,
     },
 };
+use project_icon::project_icon_image;
 pub(super) use repo::RepoBadge;
 
 /// 侧栏的默认宽度，比红绿灯宽得多，红绿灯落在侧栏顶上。
@@ -595,6 +597,7 @@ impl WindowView {
     ) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
+        let icon = solo.then(|| self.project_icon(&workspace.host, workspace.project_dir(), cx)).flatten();
         // 开着配对设备页、看板时高亮的是导航里的那一行；开着引导页时哪个 workspace 都不高亮。
         let active = ix == self.active
             && !matches!(self.page, Some(super::Page::Mobile(_) | super::Page::Kanban(_) | super::Page::Onboarding(_)));
@@ -625,10 +628,19 @@ impl WindowView {
             .chain(workspace.bell().then(|| rust_i18n::t!("workspace.bell").into_owned()))
             .collect::<Vec<_>>()
             .join(" · ");
-        // 名字前是状态：有 agent 时是它的标记，没有时开着终端是 shell 的提示符，一个终端都没有是空心圆点。当前
-        // 行的光标不闪，用户正看着它。
+        // 名字前是状态：代表整个项目、项目有图标时画图标，agent 的状态只看右边图标上的圆点；不然有 agent 时是
+        // 它的标记，没有时开着终端是 shell 的提示符，一个终端都没有是空心圆点。当前行的光标不闪，用户正看着它。
         let blocked = mark.is_some_and(|mark| mark.status == AgentStatus::Blocked);
-        let status = if mark.is_some() || live {
+        let status = if let Some(icon) = icon {
+            div()
+                .flex_none()
+                .size(px(AGENT_MARK_SIZE_SMALL))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(project_icon_image(icon))
+                .into_any_element()
+        } else if mark.is_some() || live {
             agent_mark(mark, ("workspace-agent", id), AGENT_MARK_SIZE_SMALL, !active && blocked, cx)
         } else {
             div()
@@ -865,7 +877,8 @@ impl WindowView {
             )
     }
 
-    /// 右键点了 workspace `id`：先切过去，再在 `position` 弹出新建标签、改名、关掉这几样的菜单，都对着它办。
+    /// 右键点了 workspace `id`：先切过去，再在 `position` 弹出新建标签、改名、关掉这几样的菜单，都对着它办；
+    /// 它代表整个项目时另有给项目换图标的几项。
     fn open_workspace_menu(
         &mut self,
         id: WorkspaceId,
@@ -880,16 +893,19 @@ impl WindowView {
             return;
         }
         self.activate_workspace(ix, window, cx);
+        let solo = self.solo_project(&self.project_range(ix));
+        let icon_items = if solo { self.project_icon_menu_items(id, cx) } else { Vec::new() };
         let item = |key: &str, action: Box<dyn Action>| {
             let shortcut = crate::ui::tooltip::shortcut_text_in(action.as_ref(), &lookup, window);
             Some(MenuItem::new(rust_i18n::t!(key), action, true, cx).with_shortcut(shortcut))
         };
-        let items = vec![
-            item("menu.new_tab", Box::new(NewTab)),
-            item("menu.rename_workspace", Box::new(RenameWorkspace)),
-            None,
-            item("menu.close_workspace", Box::new(CloseWorkspace)),
-        ];
+        let mut items =
+            vec![item("menu.new_tab", Box::new(NewTab)), item("menu.rename_workspace", Box::new(RenameWorkspace))];
+        if !icon_items.is_empty() {
+            items.push(None);
+            items.extend(icon_items);
+        }
+        items.extend([None, item("menu.close_workspace", Box::new(CloseWorkspace))]);
         let focus = self.focus_handle(cx);
         self.open_context_menu(position, items, focus, cx);
     }

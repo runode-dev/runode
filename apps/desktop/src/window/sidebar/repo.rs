@@ -10,7 +10,8 @@ use std::{
 
 use gpui::{AppContext, Context, SharedString};
 
-use super::super::WindowView;
+use super::{super::WindowView, project_icon::repo_icon};
+use crate::WorkspaceId;
 use crate::{
     host_client::hosts::{self, Status},
     project_host::ProjectHost,
@@ -51,7 +52,7 @@ impl RepoBadge {
 
 impl WindowView {
     /// 在后台问各 workspace 的分支，当前的隔 `BRANCH_INTERVAL`、别的隔 `BACKGROUND_BRANCH_INTERVAL`；
-    /// 头像每次运行只找一次。远端没连上时不问，连上后的下一轮再问；问不到时留着上次的。
+    /// 头像和仓库图标每次运行只找一次。远端没连上时不问，连上后的下一轮再问；问不到时留着上次的。
     pub(in crate::window) fn refresh_repo_badges(&mut self, cx: &mut Context<Self>) {
         let active = self.active;
         for (ix, workspace) in self.workspaces.iter_mut().enumerate() {
@@ -94,6 +95,7 @@ impl WindowView {
                         badge.avatar = avatar;
                         badge.avatar_looked = true;
                     }
+                    let root = find_avatar.then(|| badge.main_worktree.clone()).flatten();
                     if workspace.common_git_dir != common_git_dir {
                         workspace.common_git_dir = common_git_dir;
                         this.regroup_workspace(id);
@@ -103,11 +105,43 @@ impl WindowView {
                     } else if changed {
                         cx.notify();
                     }
+                    if let Some(root) = root {
+                        this.find_repo_icon(id, root, cx);
+                    }
                 })
                 .ok();
             })
             .detach();
         }
+    }
+
+    /// 在后台替 workspace `id` 所在的项目找仓库 `root` 里的图标（`repo_icon`），记进 `repo_icons`；每个项目
+    /// 每次运行只找一次。
+    fn find_repo_icon(&mut self, id: WorkspaceId, root: PathBuf, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspaces.iter().find(|w| w.id == id) else { return };
+        let (host_id, project) = (workspace.host.clone(), workspace.project_dir().to_path_buf());
+        if self.repo_icons.iter().any(|(host, dir, _)| *host == host_id && *dir == project) {
+            return;
+        }
+        self.repo_icons.push((host_id.clone(), project.clone(), None));
+        let host = ProjectHost::of(&host_id);
+        let job = cx.background_spawn({
+            let host_id = host_id.clone();
+            async move { repo_icon(&host, &host_id, &root) }
+        });
+        cx.spawn(async move |this, cx| {
+            let Some(icon) = job.await else { return };
+            this.update(cx, |this, cx| {
+                if let Some(entry) =
+                    this.repo_icons.iter_mut().find(|(host, dir, _)| *host == host_id && *dir == project)
+                {
+                    entry.2 = Some(icon);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 }
 
