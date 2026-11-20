@@ -49,6 +49,10 @@ env:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    # 删旧键的 Gradle 缓存要 actions 的写权限。
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,6 +134,16 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
+      # 键一换，旧键的那份就用不上了，留着只会把别的缓存挤掉。新的存上了才删，免得一份都不剩。
+      - name: 删掉旧键的 Gradle 缓存
+        if: github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ steps.gradle-cache.outputs.cache-primary-key }}
+        run: |
+          [ "$(gh cache list --key "$KEY" --json key --jq length)" -gt 0 ] || exit 0
+          gh cache list --key "${KEY%-*}-" --limit 100 --json key --jq '.[].key' | grep -vxF "$KEY" | xargs -r -n 1 gh cache delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-native
@@ -146,6 +160,9 @@ jobs:
   emulator:
     needs: test
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -204,6 +221,16 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
           key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
+      # 键一换，旧键的那份就用不上了，留着只会把别的缓存挤掉。新的存上了才删，免得一份都不剩。
+      - name: 删掉旧键的 Gradle 缓存
+        if: github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ steps.gradle-cache.outputs.cache-primary-key }}
+        run: |
+          [ "$(gh cache list --key "$KEY" --json key --jq length)" -gt 0 ] || exit 0
+          gh cache list --key "${KEY%-*}-" --limit 100 --json key --jq '.[].key' | grep -vxF "$KEY" | xargs -r -n 1 gh cache delete
       # Gradle 的日志里只说哪个模块有测试没过，哪个测试、为什么在各模块的报告里。
       - name: 上传设备测试的报告
         if: failure()
