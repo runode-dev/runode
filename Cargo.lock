@@ -65,7 +65,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "serde",
- "zbus",
+ "zbus 5.19.0",
 ]
 
 [[package]]
@@ -342,7 +342,21 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols",
- "zbus",
+ "zbus 5.19.0",
+]
+
+[[package]]
+name = "ashpd"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72e703b2bc5ba8e903b7845ae92657c281391116ccb8eef89cf6a0ee68d96d76"
+dependencies = [
+ "bitflags 2.13.2",
+ "futures-util",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_repr",
+ "zbus 6.3.0",
 ]
 
 [[package]]
@@ -579,7 +593,7 @@ dependencies = [
  "enumflags2",
  "serde",
  "static_assertions",
- "zbus",
+ "zbus 5.19.0",
  "zbus-lockstep",
  "zbus-lockstep-macros",
  "zbus_names",
@@ -594,7 +608,7 @@ checksum = "2230e48787ed3eb4088996eab66a32ca20c0b67bbd4fd6cdfe79f04f1f04c9fc"
 dependencies = [
  "atspi-common",
  "serde",
- "zbus",
+ "zbus 5.19.0",
 ]
 
 [[package]]
@@ -2846,7 +2860,7 @@ checksum = "4f4e5aff50636223b268a687ad5788ec54fa77c8e57ca9e53d158f19e0425d95"
 dependencies = [
  "aho-corasick",
  "anyhow",
- "ashpd",
+ "ashpd 0.13.13",
  "async-channel",
  "chrono",
  "data-url",
@@ -3167,7 +3181,7 @@ dependencies = [
  "accesskit_unix",
  "anyhow",
  "as-raw-xcb-connection",
- "ashpd",
+ "ashpd 0.13.13",
  "bytemuck",
  "calloop",
  "calloop-wayland-source",
@@ -5497,7 +5511,7 @@ dependencies = [
  "mac-notification-sys",
  "serde",
  "tauri-winrt-notification",
- "zbus",
+ "zbus 5.19.0",
 ]
 
 [[package]]
@@ -6191,7 +6205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78f2bfed90f1618b4b48dcad9307f25e14ae894e2949642c87c351601d62cebd"
 dependencies = [
  "aes 0.8.4",
- "ashpd",
+ "ashpd 0.13.13",
  "async-fs",
  "async-io",
  "async-lock",
@@ -6213,8 +6227,8 @@ dependencies = [
  "serde_bytes",
  "sha2 0.10.9",
  "subtle",
- "zbus",
- "zbus_macros",
+ "zbus 5.19.0",
+ "zbus_macros 5.19.0",
  "zeroize",
  "zvariant",
 ]
@@ -7815,7 +7829,7 @@ dependencies = [
 name = "runode-screen"
 version = "0.2.2"
 dependencies = [
- "ashpd",
+ "ashpd 0.14.1",
  "block2 0.6.2",
  "dispatch2",
  "futures",
@@ -7835,7 +7849,7 @@ dependencies = [
  "tracing",
  "windows 0.62.2",
  "x11rb",
- "zbus",
+ "zbus 5.19.0",
 ]
 
 [[package]]
@@ -11708,9 +11722,36 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "winnow 1.0.4",
- "zbus_macros",
+ "zbus_macros 5.19.0",
  "zbus_names",
  "zvariant",
+]
+
+[[package]]
+name = "zbus"
+version = "6.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b4aae740b23927ceabed962431abab2cdefb9f7f885e5bbab062da09bf580e4"
+dependencies = [
+ "async-trait",
+ "bitflags 2.13.2",
+ "endi",
+ "futures-core",
+ "hex",
+ "libc",
+ "ordered-stream",
+ "rustix",
+ "serde",
+ "serde_repr",
+ "socket2",
+ "uds_windows",
+ "uuid",
+ "windows-sys 0.61.2",
+ "winnow 1.0.4",
+ "zbus_macros 6.4.0",
+ "zbus_utils",
+ "zcheapstr",
+ "zruntime",
 ]
 
 [[package]]
@@ -11753,6 +11794,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zbus_macros"
+version = "6.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab2435eef3e274c1727af87c31da148dc6cb2c613f5eecfac33d7952cf0e6f8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+ "zbus_utils",
+]
+
+[[package]]
 name = "zbus_names"
 version = "4.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11761,6 +11814,19 @@ dependencies = [
  "serde",
  "winnow 1.0.4",
  "zvariant",
+]
+
+[[package]]
+name = "zbus_utils"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af55e52da295311b368c45bcae221f020e28e97a2420360170ce389218e76ec7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.9",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -11997,6 +12063,19 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
+]
+
+[[package]]
+name = "zruntime"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac67096b97c00742108c4674db6bb6178adb78c4b66a506b0e4a7a9593aa5d9e"
+dependencies = [
+ "futures-core",
+ "futures-io",
+ "rustix",
+ "socket2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
