@@ -1,7 +1,8 @@
 //! 窗口左侧的 workspace 列表：切换、拖动排序、改名、关闭和新建；顶上是找 agent、新建任务的一行，下面是在等你
 //! 回答的 agent（`inbox`），最下面是导航（`nav`），列表和导航之间是后台会话（`background`）。workspace 按项目
 //! （`project_group`）归组；有 workspace 在别的主机上时先按主机分组，每组一个组头，能收起、在那台主机上新建。
-//! 每行一行字：状态标记和名字，右边是 agent 的名字，没有 agent 时是和项目不同的当前分支（`repo`）。
+//! 每行一行字：状态标记和名字，右边是各个 agent 的图标，没有 agent 时是和项目不同的当前分支（`repo`）；代表
+//! 整个项目的行两样都写。
 
 pub(super) mod inbox;
 mod nav;
@@ -139,6 +140,12 @@ const WORKSPACE_ROW_PADDING: f32 = 8.;
 const TRAILING_MAX_WIDTH: f32 = 0.5;
 const TRAILING_GAP: f32 = 6.;
 const BELL_DOT_SIZE: f32 = 6.;
+/// 主机组头、项目组头和代表整个项目的 workspace 行左边的留白：三处行首的箭头和状态标记排成一列。
+const HEADER_INSET: f32 = 5.;
+/// 代表整个项目的 workspace 行上状态标记后面的间距，名字的左边和项目组头上的名字对齐。
+const SOLO_ROW_GAP: f32 = 6.;
+/// 项目组头和代表整个项目的行没选中时的字色，比缩进在组头下面的行浓；主机组头悬停时也是它。
+const HEADER_TEXT_OPACITY: f32 = 0.9;
 /// 项目组头下面的 workspace 行往右缩进：左边的竖线离组头左边 `TREE_LINE_INSET`，行离竖线 `TREE_ROW_INSET`。
 const TREE_LINE_INSET: f32 = 10.;
 const TREE_ROW_INSET: f32 = 8.;
@@ -156,7 +163,7 @@ const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
 /// 按主机分组时每组顶上的组头。
-const HOST_HEADER_HEIGHT: f32 = 22.;
+const HOST_HEADER_HEIGHT: f32 = 24.;
 /// 组头上连接状态的圆点。
 const HOST_STATUS_DOT: f32 = 6.;
 /// 叠在系统图标右上角的连接状态圆点，连同和图标隔开的那圈描边。
@@ -330,12 +337,25 @@ impl WindowView {
                 // 收起时藏起来的 workspace 里有要用户处理的，组头上提示一下。
                 let attention =
                     collapsed && range.clone().any(|ix| ix != self.active && self.workspace_needs_attention(ix, cx));
-                rows.push(self.render_host_header(host, range.start == 0, collapsed, attention, cx).into_any_element());
+                // 主机和主机之间画一条线、多空一些，一眼看出哪些项目在哪台主机上。
+                if range.start > 0 {
+                    rows.push(
+                        div()
+                            .flex_none()
+                            .h(px(1.))
+                            .mx(px(WORKSPACE_ROW_PADDING))
+                            .mt(px(8.))
+                            .mb(px(6.))
+                            .bg(cx.theme().border)
+                            .into_any_element(),
+                    );
+                }
+                rows.push(self.render_host_header(host, collapsed, attention, cx).into_any_element());
                 if collapsed {
                     rows.extend(
                         range
                             .filter(|ix| *ix == self.active)
-                            .map(|ix| self.render_row(ix, modifiers, cx).into_any_element()),
+                            .map(|ix| self.render_row(ix, false, modifiers, cx).into_any_element()),
                     );
                     continue;
                 }
@@ -345,12 +365,11 @@ impl WindowView {
         rows
     }
 
-    /// 一组的组头：主机的图标、名字和远端的连接状态，悬停时露出在这台主机上新建、给远端主机改名和收起的
-    /// 按钮；按下收起、展开。
+    /// 一组的组头：收起、展开的箭头，主机的图标、名字和远端的连接状态，悬停时露出在这台主机上新建和给远端
+    /// 主机改名的按钮；按下收起、展开。
     fn render_host_header(
         &self,
         host: &HostId,
-        first: bool,
         collapsed: bool,
         attention: bool,
         cx: &mut Context<Self>,
@@ -463,18 +482,17 @@ impl WindowView {
             .flex_none()
             .h(scaled(HOST_HEADER_HEIGHT))
             .group(group.clone())
-            // 组和组之间多空一些，组头和自己的第一行挨近，一眼看出谁归谁。
-            .mt(px(if first { 2. } else { 10. }))
             .mb(px(2.))
-            .pl(px(8.))
+            .pl(px(HEADER_INSET))
             .pr(px(6.))
             .rounded(px(6.))
             .flex()
             .items_center()
             .gap(px(6.))
-            .text_size(FontSize::Small)
-            .text_color(fg.opacity(0.45))
-            .hover(|header| header.text_color(fg.opacity(0.75)))
+            .text_size(FontSize::Body)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(cx.theme().subtle_foreground)
+            .hover(|header| header.text_color(fg.opacity(HEADER_TEXT_OPACITY)))
             .when(!editing, |header| header.when_some(tooltip_text, |header, text| header.tooltip(tooltip(text, None))))
             // 改名时按在输入框里是挪光标、选字，不收起。辅助工具的按下、展开、收起各自登记：用通用的按下
             // 会把展开、收起也当成按下再切一次。
@@ -488,6 +506,13 @@ impl WindowView {
                 }),
             )
             .on_a11y_action(AccessibleAction::Click, flip)
+            .child(
+                svg()
+                    .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
+                    .flex_none()
+                    .size(px(12.))
+                    .text_color(cx.theme().muted_foreground),
+            )
             // 连接状态的圆点叠在系统图标的右上角，描一圈背景色和图标隔开。
             .child(
                 div()
@@ -497,7 +522,7 @@ impl WindowView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(svg().path(icon).size(px(12.)).text_color(fg.opacity(0.4)))
+                    .child(svg().path(icon).size(px(13.)).text_color(fg.opacity(0.6)))
                     .children(status_color.map(|color| {
                         div()
                             .absolute()
@@ -539,22 +564,6 @@ impl WindowView {
                         .on_press_down(cx, move |this, window, cx| this.new_workspace_on(new_on.clone(), window, cx)),
                 )
             })
-            // 收起时箭头一直显示，提醒这组里还有藏着的行。
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(16.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .when(!collapsed, |chevron| chevron.opacity(0.).group_hover(group, |chevron| chevron.opacity(1.)))
-                    .child(
-                        svg()
-                            .path(if collapsed { CHEVRON_RIGHT_ICON } else { CHEVRON_DOWN_ICON })
-                            .size(px(12.))
-                            .text_color(fg.opacity(0.35)),
-                    ),
-            )
     }
 
     /// 打开新建工作区的对话框，选好在 `host` 上开。
@@ -565,7 +574,15 @@ impl WindowView {
         }
     }
 
-    fn render_row(&self, ix: usize, modifiers: Modifiers, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// 第 `ix` 个 workspace 的那一行。`solo` 时它代表整个项目，不缩进在组头下面：名字照组头的样子写，右边先写
+    /// 项目的分支再画 agent 图标，悬停时另露出新建工作树的按钮；拖动由调用方挂。
+    pub(super) fn render_row(
+        &self,
+        ix: usize,
+        solo: bool,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let workspace = &self.workspaces[ix];
         let id = workspace.id;
         // 开着配对设备页、看板时高亮的是导航里的那一行；开着引导页时哪个 workspace 都不高亮。
@@ -618,33 +635,38 @@ impl WindowView {
             None => div()
                 .min_w_0()
                 .truncate()
-                .when(active, |name| name.font_weight(FontWeight::MEDIUM))
+                .map(|name| {
+                    if solo {
+                        name.font_weight(FontWeight::SEMIBOLD)
+                    } else {
+                        name.when(active, |name| name.font_weight(FontWeight::MEDIUM))
+                    }
+                })
                 .child(workspace.name.clone())
                 .into_any_element(),
         };
-        // 名字右边是各个 agent 的图标；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。状态点的
-        // 描边不跟着悬停的底色变：悬停时右边整个隐去。
+        // 名字右边是各个 agent 的图标；没有 agent 时，分支和项目组头上写的不一样才用等宽字写出来。代表整个项目
+        // 的行没有组头，分支总写在图标前面。状态点的描边不跟着悬停的底色变：悬停时右边整个隐去。
         let ring = if active { active_bg } else { sidebar_background(cx) };
         let logo_fg = if active { fg } else { fg.opacity(ROW_TEXT_OPACITY) };
-        // 右边那格最多占行宽的 `TRAILING_MAX_WIDTH`；行宽照项目下缩进的行估（竖线 1px），响铃的圆点另占一格。
-        let row_width = self.sidebar_width()
-            - 2. * SIDEBAR_INSET
-            - TREE_LINE_INSET
-            - 1.
-            - TREE_ROW_INSET
-            - 2. * WORKSPACE_ROW_PADDING;
+        // 右边那格最多占行宽的 `TRAILING_MAX_WIDTH`；缩进在项目下的行让出缩进（竖线 1px），响铃的圆点另占一格。
+        let tree_inset = if solo { 0. } else { TREE_LINE_INSET + 1. + TREE_ROW_INSET };
+        let row_width = self.sidebar_width() - 2. * SIDEBAR_INSET - tree_inset - 2. * WORKSPACE_ROW_PADDING;
         let room = row_width * TRAILING_MAX_WIDTH - if workspace.bell() { BELL_DOT_SIZE + TRAILING_GAP } else { 0. };
-        let label = if agents.is_empty() {
-            repo.branch
-                .clone()
-                .filter(|branch| {
-                    self.main_worktree_branch(&workspace.host, workspace.project_dir())
-                        .is_none_or(|(_, main)| main != branch)
-                })
-                .map(|branch| div().min_w_0().truncate().font_family(mono_font(cx)).child(branch))
+        let branch = if solo {
+            self.project_branch_label(&workspace.host, workspace.project_dir())
+                .map(SharedString::from)
+                .or_else(|| repo.branch.clone())
+        } else if agents.is_empty() {
+            repo.branch.clone().filter(|branch| {
+                self.main_worktree_branch(&workspace.host, workspace.project_dir())
+                    .is_none_or(|(_, main)| main != branch)
+            })
         } else {
-            Some(agent_icons(&agents, room, ring, logo_fg, cx))
+            None
         };
+        let branch = branch.map(|branch| div().min_w_0().truncate().font_family(mono_font(cx)).child(branch));
+        let icons = (!agents.is_empty()).then(|| agent_icons(&agents, room, ring, logo_fg, cx));
         // 按着快捷键的修饰键或者单按 ⌘ 时这里换成快捷键提示（按 ⌘ 是找快捷键时最先按的键）；后面是响铃的圆点。
         // 悬停时这些都让给关闭按钮。
         let is_last = ix + 1 == self.workspaces.len();
@@ -662,7 +684,7 @@ impl WindowView {
                 if held {
                     trailing.children(shortcut_hint(&SelectWorkspace(ix), &SelectLastWorkspace, is_last, cx))
                 } else {
-                    trailing.children(label)
+                    trailing.children(branch).children(icons)
                 }
             })
             .when(workspace.bell(), |trailing| {
@@ -679,6 +701,19 @@ impl WindowView {
         let group_key = (workspace.host.clone(), workspace.project_dir().to_path_buf());
         let drop_key = group_key.clone();
         let view = cx.entity().downgrade();
+        let new_worktree = solo
+            .then(|| self.new_worktree_button(&workspace.host, workspace.project_dir(), cx))
+            .flatten()
+            .map(|button| {
+                button
+                    .absolute()
+                    .right(px(TAB_CLOSE_SIZE + 2.))
+                    .top(relative(0.5))
+                    .mt(px(-TAB_CLOSE_SIZE / 2.))
+                    .reveal_on_hover(group.clone())
+            });
+        // 悬停时露出的按钮盖在右边那格上，那格至少要有它们那么宽，才不盖到名字。
+        let buttons_width = if new_worktree.is_some() { 2. * TAB_CLOSE_SIZE + 2. } else { TAB_CLOSE_SIZE };
         div()
             // 改名时换一个 id：双击那次按下被 GPUI 记作待拖动，改名期间不挂 `on_drag`，松开时也就没人清它，
             // 换了 id 旧的元素状态连同这次按下一起丢掉，改完名不会一动鼠标就拖起整行。
@@ -695,12 +730,14 @@ impl WindowView {
             .flex()
             .items_center()
             .gap(px(8.))
+            .when(solo, |row| row.pl(px(HEADER_INSET)).gap(px(SOLO_ROW_GAP)))
             .text_size(FontSize::Medium)
             .map(|row| {
                 if active {
                     row.bg(active_bg).text_color(fg)
                 } else {
-                    row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
+                    let opacity = if solo { HEADER_TEXT_OPACITY } else { ROW_TEXT_OPACITY };
+                    row.text_color(fg.opacity(opacity)).hover(|row| row.bg(hover_bg).text_color(fg))
                 }
             })
             .on_mouse_down(
@@ -740,7 +777,9 @@ impl WindowView {
                 }
             })
             // 改名时在输入框里拖选文字，不能把整行拖走。
-            .when(renaming.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
+            .when(renaming.is_none() && !solo, |row| {
+                row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            })
             // 只能在同一台主机、同一个项目的组里挪。
             .drag_over::<DraggedWorkspace>(move |style, dragged, _, cx| {
                 if (&dragged.host, &dragged.project) == (&group_key.0, &group_key.1) {
@@ -768,12 +807,13 @@ impl WindowView {
                     .flex_none()
                     .relative()
                     .h_full()
-                    .min_w(px(TAB_CLOSE_SIZE))
+                    .min_w(px(buttons_width))
                     .max_w(relative(TRAILING_MAX_WIDTH))
                     .flex()
                     .items_center()
                     .justify_end()
                     .child(trailing)
+                    .children(new_worktree)
                     .child(
                         Button::new(("workspace-close", id), close_label)
                             .with_size(ButtonSize::IconXs)

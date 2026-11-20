@@ -13,7 +13,7 @@ use crate::{
         a11y::{A11yPress as _, PressDown as _},
         button::{Button, ButtonSize, ButtonVariant},
         font_size::{FontSize, scaled},
-        icons::{KANBAN_ICON, PHONE_ICON, PLUS_ICON, SEARCH_ICON, SLIDERS_ICON},
+        icons::{KANBAN_ICON, KANBAN_PLUS_ICON, PHONE_ICON, SEARCH_ICON, SLIDERS_ICON},
         status_mark::{MarkKind, status_mark},
         theme::ActiveTheme as _,
         tooltip::{shortcut_text, tooltip},
@@ -96,8 +96,8 @@ impl WindowView {
         let new_todo = Button::new("sidebar-new-todo", new_label.clone())
             .variant(ButtonVariant::Default)
             .with_size(ButtonSize::Icon)
-            .icon(PLUS_ICON)
-            .icon_size(14.)
+            .icon(KANBAN_PLUS_ICON)
+            .icon_size(16.)
             .size(scaled(SEARCH_HEIGHT))
             .rounded(px(8.))
             .tooltip(tooltip(new_label, Some(&NewTodo)))

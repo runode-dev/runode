@@ -95,6 +95,8 @@ crate::icons! {
     /// 立即触发一次定时。
     pub ZAP_ICON = "zap",
     pub KANBAN_ICON = "kanban",
+    /// 新建任务。
+    pub KANBAN_PLUS_ICON = "kanban-plus",
     /// 返回和设置各页的图标。
     pub ARROW_LEFT_ICON = "arrow-left",
     pub SETTINGS_ICON = "settings",
