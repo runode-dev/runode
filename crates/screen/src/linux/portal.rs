@@ -21,7 +21,7 @@ use ashpd::{
         remote_desktop::{Axis, DeviceType, KeyState, RemoteDesktop, SelectDevicesOptions},
         screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
     },
-    enumflags2::BitFlags,
+    zbus,
 };
 use futures::{FutureExt as _, StreamExt as _, executor::block_on};
 use runode_types::{input::MouseButton, screen::ScreenInput};
@@ -114,22 +114,22 @@ impl Portal {
             .select_devices(
                 &session,
                 SelectDevicesOptions::default()
-                    .set_devices(DeviceType::Keyboard | DeviceType::Pointer)
+                    .set_devices(DeviceType::KEYBOARD | DeviceType::POINTER)
                     .set_persist_mode(PersistMode::ExplicitlyRevoked)
                     .set_restore_token(token.as_deref()),
             )
             .await
             .map_err(other)?;
         let cursor = match screencast.available_cursor_modes().await {
-            Ok(modes) if modes.contains(CursorMode::Embedded) => CursorMode::Embedded,
-            _ => CursorMode::Hidden,
+            Ok(modes) if modes.contains(CursorMode::EMBEDDED) => CursorMode::EMBEDDED,
+            _ => CursorMode::HIDDEN,
         };
         screencast
             .select_sources(
                 &session,
                 SelectSourcesOptions::default()
                     .set_cursor_mode(cursor)
-                    .set_sources(BitFlags::from(SourceType::Monitor))
+                    .set_sources(SourceType::MONITOR)
                     .set_multiple(true),
             )
             .await
@@ -162,7 +162,7 @@ impl Portal {
         if let Some(token) = selected.restore_token() {
             save_restore_token(token);
         }
-        if !selected.devices().contains(DeviceType::Pointer) {
+        if !selected.devices().contains(DeviceType::POINTER) {
             tracing::warn!("the portal did not allow controlling the pointer");
         }
         let screens: Vec<Screen> = selected
@@ -228,8 +228,8 @@ async fn closed_signal(
     session: &Session<RemoteDesktop>,
 ) -> zbus::Result<zbus::proxy::SignalStream<'static>> {
     // ashpd 不交出会话的对象路径，会话按 D-Bus 的对象路径序列化。
-    let context = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::LE, 0);
-    let (path, _): (zbus::zvariant::OwnedObjectPath, _) = zbus::zvariant::to_bytes(context, session)?.deserialize()?;
+    let context = zbus::wire::serialized::Context::new(zbus::wire::LE, 0);
+    let (path, _): (zbus::OwnedObjectPath, _) = zbus::wire::to_bytes(context, session)?.deserialize()?;
     let proxy =
         zbus::Proxy::new(remote.connection(), "org.freedesktop.portal.Desktop", path, "org.freedesktop.portal.Session")
             .await?;
