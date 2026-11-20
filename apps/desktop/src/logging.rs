@@ -26,7 +26,7 @@ pub fn init_file(path: Option<PathBuf>) {
     let Ok(file) = file else { return };
     tracing_subscriber::fmt()
         .with_env_filter(
-            // portal 的请求和会话对象在 zbus 建好代理之后才出现，它每次都为读不到属性报一条警告，不当回事。
+            // portal 的请求对象在 zbus 建好代理之后才出现，它每次都为读不到属性报一条警告，不当回事。
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,zbus::proxy=error")),
         )
