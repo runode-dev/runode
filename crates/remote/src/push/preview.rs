@@ -2,20 +2,29 @@
 
 /// 等回答时卡片上的几行：agent 问的问题和它上面的内容（比如要执行的命令），不要选项和按键提示。
 /// 屏幕上有编号的选项（「❯ 1. Yes」「2. No」这类，连同缩进到选项文字下面的续行）时去掉它们，最后一个
-/// 选项下面的（「Esc to cancel · Tab to amend」这类）也不要；没有选项时就是屏幕最底下的几行。去掉
-/// 行尾空白，跳过空行和只有空白、制表符（U+2500–U+257F，分隔线和边框）的行，取最后 `limit` 行。
+/// 选项下面的（「Esc to cancel · Tab to amend」这类）也不要；没有选项时就是屏幕最底下的几行。Claude 在
+/// 提问上面画一条只有 `─` 的分隔线，有选项时最后一块选项上面最近的这种线以上（之前的输出）都不要；一次问几个问题时
+/// 问题上面的标签条（`TAB_BAR_LEADS` 开头）也不要。去掉行尾空白，跳过空行和只有空白、制表符
+/// （U+2500–U+257F，分隔线和边框）的行，取最后 `limit` 行。
 pub(super) fn preview_lines(text: &str, limit: usize) -> Vec<String> {
     let mut kept: Vec<&str> = Vec::new();
     // 正在看的选项的文字从第几列起：缩进到这一列或更深的行是它的续行。
     let mut option: Option<usize> = None;
     // 最后一个选项出现时 `kept` 有多长：之后的都是选项下面的提示。
     let mut before_footer = None;
-    let meaningful = text
-        .split('\n')
-        .map(str::trim_end)
-        .filter(|line| line.chars().any(|c| !c.is_whitespace() && !('\u{2500}'..='\u{257f}').contains(&c)));
-    for line in meaningful {
-        if let Some(column) = option_column(line) {
+    // 最近一条只有 `─` 的分隔线出现时 `kept` 有多长，和最后一块选项开始时它的值：从那里取起。
+    let mut rule = 0;
+    let mut start = 0;
+    for line in text.split('\n').map(str::trim_end) {
+        if !line.chars().any(|c| !c.is_whitespace() && !('\u{2500}'..='\u{257f}').contains(&c)) {
+            if !line.trim().is_empty() && line.trim().chars().all(|c| c == '─') {
+                rule = kept.len();
+            }
+        } else if line.trim_start().starts_with(TAB_BAR_LEADS) {
+        } else if let Some(column) = option_column(line) {
+            if option.is_none() {
+                start = rule;
+            }
             option = Some(column);
             before_footer = Some(kept.len());
         } else if option.is_some_and(|column| indent(line) >= column) {
@@ -25,8 +34,12 @@ pub(super) fn preview_lines(text: &str, limit: usize) -> Vec<String> {
         }
     }
     kept.truncate(before_footer.unwrap_or(kept.len()));
-    kept[kept.len().saturating_sub(limit)..].iter().map(|&line| line.to_owned()).collect()
+    kept[start.max(kept.len().saturating_sub(limit))..].iter().map(|&line| line.to_owned()).collect()
 }
+
+/// Claude 一次问几个问题时画在问题上面的标签条（`←  ☐ 标题  ☒ 标题  ✔ Submit  →`，只问一个时是 `☐ 标题`）
+/// 行首的字。
+const TAB_BAR_LEADS: [char; 3] = ['←', '☐', '☒'];
 
 /// `line` 是编号选项（可以带「❯」这类选中标记，编号一两位，后面跟「.」或「)」和空格）时，选项文字
 /// 从第几列（按字符数）起。
@@ -73,7 +86,20 @@ mod tests {
         // 提问：选项下面的说明、分隔线下的选项和折成两行的提示都不要。
         let question = " ☐ 午饭\n\n午饭吃什么？\n\n❯ 1. 面条\n     吃面条\n  2. 米饭\n     吃米饭\n────\n  3. Chat about \
                         this\n\nEnter to select · Esc to\ncancel\n";
-        assert_eq!(preview_lines(question, 3), [" ☐ 午饭", "午饭吃什么？"]);
+        assert_eq!(preview_lines(question, 3), ["午饭吃什么？"]);
+        // 一次问几个问题：分隔线上面之前的输出和标签条都不要，只留问题；选项右边的预览框和下面的说明也不要。
+        let tabs = "  cargo test | head -40; ls src | grep -i alert\n────\n←  ☐ 限额区分  ☐ 开关  ✔ Submit  →\n\n\
+                    限额应该按什么维度区分？\n\n❯ 1. 按用户     ┌──────────┐\n  2. 按 IP      │ max: 60  │\n         \
+                    \u{20}      └──────────┘\n\n               Notes: press n to add notes\n────\n  Chat about this\n\n\
+                    Enter to select · Esc to cancel\n";
+        assert_eq!(preview_lines(tabs, 3), ["限额应该按什么维度区分？"]);
+        // 之前的输出以编号列表结尾，分隔线照样把它挡在外面。
+        let after_list = "● 我打算这样做：\n\n  1. 先读 limiter.rs\n  2. 再改测试\n\n────\n←  ☐ 限额区分  ✔ Submit  →\n\n\
+                          限额应该按什么维度区分？\n\n❯ 1. 按用户\n  2. 按 IP\n";
+        assert_eq!(preview_lines(after_list, 3), ["限额应该按什么维度区分？"]);
+        // 没有选项时分隔线不截：问题画在横线边框的输入框上面也留着。
+        let boxed_input = "Cline is asking a question\n> Which database?\n\n────\n❯\n────\n(Tab) Plan/Act\n";
+        assert_eq!(preview_lines(boxed_input, 3), ["> Which database?", "❯", "(Tab) Plan/Act"]);
         // 没有选项时是最底下的几行。
         assert_eq!(preview_lines("a\n─┼─\n\u{3000}\nb\nContinue? (y/n)", 2), ["b", "Continue? (y/n)"]);
     }
