@@ -60,7 +60,8 @@ jobs:
           java-version: "21"
       # runner 从 Maven Central 现下依赖时常被限流，一份缓存都没有时 Gradle 起不来。键变了（升了依赖）先用上一份，
       # 只下变了的那几个。
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: gradle-cache
         with:
           path: |
             ~/.gradle/caches
@@ -121,6 +122,14 @@ jobs:
       - name: 单元测试、lint 和调试包
         working-directory: apps/android
         run: ./gradlew test check assembleDebug
+      # 仓库的缓存有总量上限，超了先删最久没用的。PR 读得到 main 存的，自己再存一份只会把别的缓存挤掉。
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-native
@@ -153,7 +162,8 @@ jobs:
           java-version: "21"
       # 跑设备测试的 Gradle 另要 test 用不到的依赖（Unified Test Platform 的那些），所以 Gradle 的缓存和 test 的
       # 分开存：共用一个键时命中的是 test 存的那份，这些依赖每次都要从 Maven Central 现下，被限流时测试就起不来。
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: gradle-cache
         with:
           path: |
             ~/.gradle/caches
@@ -187,6 +197,13 @@ jobs:
           disable-animations: true
           working-directory: apps/android
           script: ./gradlew connectedDebugAndroidTest
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
       # Gradle 的日志里只说哪个模块有测试没过，哪个测试、为什么在各模块的报告里。
       - name: 上传设备测试的报告
         if: failure()
