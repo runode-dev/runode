@@ -1,7 +1,7 @@
 //! 把预览栏接到窗口上。预览栏本身在 `preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
 //! 的文件标签都在它里面。文件标签和终端标签一起排在标题栏里，
 //! 点中文件标签时预览盖满终端区，切到终端标签时退到后面；把文件标签拖到终端区靠边处，预览停靠在那一侧、和终端
-//! 并排，拖到终端区正中又盖满终端区。这里每次对它做什么之前告诉它当前是哪个
+//! 并排，拖到终端区正中或拖回标题栏又盖满终端区。这里每次对它做什么之前告诉它当前是哪个
 //! workspace、交给它那个 workspace 最近读到的 git 状态，画的时候交给它字体、宽度和配置里的预览字号（颜色
 //! 它自己从主题读）；它要窗口办的事（文件树定位、出现收起和到最前时重排窗口、开关变了要存档、把路径打进
 //! 终端、按块暂存）经 `PreviewEvent` 交回来。自动换行和 Markdown 显示源码的开关在它身上，随窗口存档。
@@ -89,14 +89,28 @@ impl WindowView {
         self.with_preview(cx, |panel, cx| panel.pin_tab(ix, cx));
     }
 
-    /// 把当前 workspace 的第 `from` 个文件标签挪到第 `to` 个位置并切过去。
+    /// 把当前 workspace 的第 `from` 个文件标签挪到第 `to` 个位置并切过去；挪了位置时停靠着的预览改回盖住终端区。
     pub(super) fn move_file_tab(&mut self, from: usize, to: usize, window: &mut Window, cx: &mut Context<Self>) {
         if !self.leave_pages(window, cx) {
             return;
         }
-        self.with_preview(cx, |panel, cx| panel.move_tab(from, to, window, cx));
+        self.with_preview(cx, |panel, cx| {
+            // 放回自己身上多半是点标签时手抖，不算拖回来。
+            if from != to {
+                panel.set_dock(None, cx);
+            }
+            panel.move_tab(from, to, window, cx);
+        });
         self.reveal_front_tab(cx);
         cx.notify();
+    }
+
+    /// 停靠着的预览改回盖住终端区，切到第 `ix` 个文件标签。
+    pub(super) fn undock_preview(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.preview_dock(cx).is_some() {
+            self.with_preview(cx, |panel, cx| panel.set_dock(None, cx));
+            self.show_file_tab(ix, window, cx);
+        }
     }
 
     /// 切到当前 workspace 的第 `ix` 个文件标签，在 `position` 弹出它的右键菜单。

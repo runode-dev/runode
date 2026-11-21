@@ -1321,6 +1321,10 @@ impl WindowView {
             .flex()
             .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
+            // 文件标签拖回标题栏（没落在别的文件标签上）：停靠着的预览改回盖住终端区。
+            .on_drop(cx.listener(|this, dragged: &titlebar::DraggedFileTab, window, cx| {
+                this.undock_preview(dragged.ix, window, cx);
+            }))
             // 给红绿灯和侧栏开关让出的位置；后面跟着标签时右边画一条分隔线，和新建标签按钮
             // 左边那条对称。
             .child(
@@ -1422,6 +1426,10 @@ impl WindowView {
             .pr(px(CARD_GAP + titlebar::window_controls_width(window)))
             .text_size(FontSize::Body)
             .on_mouse_down(MouseButton::Left, drag_window)
+            // 文件标签拖回标题栏（没落在别的文件标签上）：停靠着的预览改回盖住终端区。
+            .on_drop(cx.listener(|this, dragged: &titlebar::DraggedFileTab, window, cx| {
+                this.undock_preview(dragged.ix, window, cx);
+            }))
             // 拖来的分屏放到标签以外的地方：成为排在最后的新标签。
             .drag_over::<pane_move::DraggedPane>(move |style, _, _, _| style.bg(drop_bg))
             .on_drop(cx.listener(move |this, dragged: &pane_move::DraggedPane, window, cx| {
