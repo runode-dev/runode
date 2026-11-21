@@ -76,6 +76,13 @@ fn sidebar_background(cx: &App) -> Hsla {
     if cards(cx) { cx.theme().frame } else { cx.theme().mix(0.03) }
 }
 
+/// 给侧栏里的一段加上左右留白：`SIDEBAR_INSET` 各加上 `left`、`right`。卡片样式下侧栏右边外面还隔着
+/// `CARD_GAP` 才到卡片，挪一半留白到左边，行离窗口左边和离卡片看上去一样远。
+pub(super) fn sidebar_inset<E: Styled>(element: E, left: f32, right: f32, cx: &App) -> E {
+    let shift = if cards(cx) { CARD_GAP / 2. } else { 0. };
+    element.pl(px(SIDEBAR_INSET + left + shift)).pr(px(SIDEBAR_INSET + right - shift))
+}
+
 /// 侧栏里的行悬停时的底色，要和 `sidebar_background` 分得开。
 pub(super) fn sidebar_hover(cx: &App) -> Hsla {
     if cards(cx) { cx.theme().frame_hover } else { cx.theme().accent }
@@ -335,10 +342,10 @@ impl WindowView {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.sidebar_scroll)
-                    .px(px(SIDEBAR_INSET))
                     .flex()
                     .flex_col()
                     .gap(px(2.))
+                    .map(|list| sidebar_inset(list, 0., 0., cx))
                     .children(rows),
             )
             .children(self.render_background(cx))

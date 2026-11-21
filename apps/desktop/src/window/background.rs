@@ -25,7 +25,10 @@ use gpui::{
 };
 use runode_protocol::{ClientMsg, HostMsg, SessionId, SessionInfo};
 
-use super::{AGENT_MARK_SIZE_SMALL, PressDown, WindowView, agents::Mark, quit::held_sessions, titlebar::agent_mark};
+use super::{
+    AGENT_MARK_SIZE_SMALL, PressDown, WindowView, agents::Mark, quit::held_sessions, sidebar::sidebar_inset,
+    titlebar::agent_mark,
+};
 use crate::{
     host_client::{self, Mode},
     terminal_view::{DEFAULT_TITLE, TerminalView},
@@ -322,7 +325,7 @@ impl WindowView {
                 .flex_none()
                 .max_h(scaled(GROUP_MAX_HEIGHT))
                 .overflow_y_scroll()
-                .px(px(6.))
+                .map(|group| sidebar_inset(group, 0., 0., cx))
                 .pt(px(4.))
                 .border_t_1()
                 .border_color(cx.theme().border)

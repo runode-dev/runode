@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui::{AnyElement, App, Context, Div, Hsla, MouseButton, Role, Stateful, Window, div, prelude::*, px, svg};
 
-use super::{HEADER_INSET, ROW_TEXT_OPACITY, SECTION_GAP, SIDEBAR_INSET, SOLO_ROW_GAP};
+use super::{HEADER_INSET, ROW_TEXT_OPACITY, SECTION_GAP, SOLO_ROW_GAP, sidebar_inset};
 use crate::{
     kanban::Tally,
     menus::OpenSettings,
@@ -114,7 +114,7 @@ impl WindowView {
         div()
             .flex_none()
             .pt(px(6.))
-            .px(px(SIDEBAR_INSET))
+            .map(|row| sidebar_inset(row, 0., 0., cx))
             .flex()
             .items_center()
             .gap(px(6.))
@@ -124,7 +124,7 @@ impl WindowView {
 
     /// 搜索框下面的任务一行，看板的入口，开着看板时高亮。
     pub(super) fn render_sidebar_tasks(&self, cx: &mut Context<Self>) -> Div {
-        div().flex_none().pt(px(SECTION_GAP)).px(px(SIDEBAR_INSET)).child(self.render_nav_tasks(cx))
+        sidebar_inset(div().flex_none().pt(px(SECTION_GAP)), 0., 0., cx).child(self.render_nav_tasks(cx))
     }
 
     /// 侧栏最下面的一行：左边手机，开着配对设备页时高亮；右边设置的开关按钮，开着设置页时按下着。
@@ -155,7 +155,8 @@ impl WindowView {
             .flex_none()
             .border_t_1()
             .border_color(cx.theme().border)
-            .p(px(6.))
+            .py(px(6.))
+            .map(|row| sidebar_inset(row, 0., 0., cx))
             .flex()
             .items_center()
             .gap(px(4.))

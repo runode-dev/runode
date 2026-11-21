@@ -13,8 +13,8 @@ use gpui::{
 };
 
 use super::{
-    HEADER_INSET, HEADER_TEXT_OPACITY, SIDEBAR_INSET, TREE_LINE_INSET, TREE_ROW_INSET, drag_chip, drop_marker,
-    mono_font,
+    HEADER_INSET, HEADER_TEXT_OPACITY, TREE_LINE_INSET, TREE_ROW_INSET, drag_chip, drop_marker, mono_font,
+    sidebar_inset,
 };
 use crate::window::RenameTarget;
 use crate::{
@@ -189,13 +189,12 @@ impl WindowView {
         let add_label = rust_i18n::t!("workspace.add_project");
         let group = SharedString::from("projects-bar");
         let collapsible = !self.collapsible_projects().is_empty();
-        // 和列表一样先让出 `SIDEBAR_INSET`，「项目」和组头的箭头、行首的图标对齐。
+        // 和列表一样的留白再让出 `HEADER_INSET`，「项目」和组头的箭头、行首的图标对齐。
         div()
             .flex_none()
             .h(scaled(PROJECTS_BAR_HEIGHT))
             .group(group.clone())
-            .pl(px(SIDEBAR_INSET + HEADER_INSET))
-            .pr(px(SIDEBAR_INSET + 2.))
+            .map(|bar| sidebar_inset(bar, HEADER_INSET, 2., cx))
             .flex()
             .items_center()
             .gap(px(2.))
