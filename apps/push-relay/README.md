@@ -31,11 +31,11 @@ npm test        # vitest
 | `APNS_TEAM_ID` | 开发者账号的 team ID。 |
 | `FCM_SERVICE_ACCOUNT` | 可选。Firebase 项目的服务账号 JSON 的内容（Firebase 控制台的「项目设置 → 服务账号 → 生成新的私钥」），要有发 FCM 消息的权限：`npx wrangler secret put FCM_SERVICE_ACCOUNT < fcm-service-account.json`。不设时不给 Android 推，Android 的登记回 400 `FcmNotConfigured`。 |
 
-这几样有一样不对，中转就起不来，所有请求都回 500。限频的上限和域名在 `wrangler.jsonc` 里。
+这几样有一样不对，中转就起不来，所有请求都回 500。限频的上限在 `wrangler.jsonc` 里。
 
 ## 部署
 
-`runode.dev` 这个 zone 要在同一个 Cloudflare 账号里。登录一次后在这个目录里：
+Cloudflare 的 Workers Builds 连着这个仓库，main 上有新提交就自动部署。要在本机手动部署时，登录一次后在这个目录里：
 
 ```sh
 npx wrangler login
@@ -43,12 +43,6 @@ npm run deploy
 ```
 
 Worker 先跑在 `workers.dev` 的子域名上，还没绑 `push.runode.dev`。各端编进去的中转地址取自编译时的 `RUNODE_PUSH_RELAY`：发版和 TestFlight 的流水线读仓库的 Actions 变量 `RUNODE_PUSH_RELAY`，没设时编出来的包不带中转，换了地址要回来改它。之后用 `npx wrangler tail` 或控制台的 Workers Logs 看日志。
-
-### 从 Rust 版的服务器切过来
-
-1. 先设好上面的 secret，`RELAY_HANDLE_KEYS` 必须和老服务器 `/etc/runode-push/env` 里的一样，不然手机已经交给电脑的句柄全都解不开。Worker 还不存在时 `wrangler secret put` 会问要不要新建，答应即可。
-2. 删掉 DNS 里 `push.runode.dev` 指向老服务器的记录（自定义域名不能和已有记录重名），马上 `npm run deploy`。
-3. 用一台连着手机的电脑推一条通知，确认收到了，再停掉老服务器上的 `runode-push` 服务。
 
 ## 换密钥
 
