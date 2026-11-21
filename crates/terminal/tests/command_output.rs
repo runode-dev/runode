@@ -166,8 +166,9 @@ const ELVISH: Syntax = Syntax {
     pid: "echo $pid",
     ..POSIX
 };
+/// 读输入用外部的 `head`：内建的 `input` 开始读之前清掉已经敲进来的按键，测试发回车的时机赶不上它。
 const NUSHELL: Syntax =
-    Syntax { nothing: "^true", read: "print one; input | ignore; print two", pid: "print $nu.pid", ..POSIX };
+    Syntax { nothing: "^true", read: "print one; ^head -n 1 | ignore; print two", pid: "print $nu.pid", ..POSIX };
 
 impl Drop for RealShell {
     fn drop(&mut self) {
