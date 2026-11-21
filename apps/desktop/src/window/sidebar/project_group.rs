@@ -36,6 +36,8 @@ const PROJECT_HEADER_HEIGHT: f32 = 30.;
 const NEW_WORKTREE_SIZE: f32 = 16.;
 /// 列表顶上写「项目」的那一条。
 const PROJECTS_BAR_HEIGHT: f32 = 26.;
+/// 项目栏里「项目」字形上方留出的空白，按基准字号写。
+pub(super) const PROJECTS_BAR_TEXT_TOP: f32 = 8.;
 
 /// 能新建工作树的项目：知道主工作树的仓库。
 pub(in crate::window) struct RepoProject {

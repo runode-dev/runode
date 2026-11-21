@@ -320,7 +320,11 @@ impl WindowView {
             )
             .child(self.render_sidebar_search(cx))
             .child(self.render_sidebar_tasks(cx))
-            .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
+            // 扣掉项目栏自己在字上面留的空白，任务到「项目」看上去才和搜索框到任务一样宽。
+            .child(
+                self.render_projects_bar(cx)
+                    .mt(px(SECTION_GAP - project_group::PROJECTS_BAR_TEXT_TOP * font_size::scale(cx))),
+            )
             .child(
                 div()
                     .id("workspace-list")
