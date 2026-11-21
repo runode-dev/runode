@@ -481,6 +481,9 @@ git:
     head_moved: "看过以后 HEAD 换了分支，没有撤销"
     head_moved_restored: "撤销时 HEAD 换了分支，已经恢复，没有撤销"
     no_remote: "还没有配置远端"
+    not_head: "HEAD 已经不在这个提交上，没有撤销"
+    no_upstream: "当前分支没有上游，没有撤销"
+    no_parent: "这是第一个提交，或者上一个提交不在本地，没有撤销"
     stash_changed: "%{rev} 已经变了，什么也没做，看过最新的储藏列表再来"
   ai_message:
     title: 生成提交说明
@@ -653,9 +656,14 @@ git:
     copy_id: 复制提交号
     checkout: 切到这个提交（分离头指针）
     create_branch: 从这里新建分支…
+    undo_commit: 撤销提交
+    undo_push: 撤销推送…
     checkout_title: "切到提交 %{id}？"
     checkout_detail: HEAD 会分离在这个提交上。要保留在这里做的新提交，请新建一个分支。
     checkout_confirm: 切换
+    undo_push_title: "撤销 %{id} 的推送？"
+    undo_push_detail: "远端的 %{upstream} 会退回上一个提交，这个提交还留在本地分支上。已经拉取了它的人要自己处理。"
+    undo_push_confirm: 撤销推送
 driver:
   badge: "由 %{who} 操作 · %{action}"
   outside: "Runode 以外的程序"

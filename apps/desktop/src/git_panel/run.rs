@@ -533,15 +533,26 @@ impl GitPanel {
     /// 撤销上次提交，改动留在暂存区；说明框空着时把那次的说明放回去，改改再提交。
     pub(crate) fn git_undo_last_commit(&mut self, _: &GitUndoLastCommit, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(root) = self.git_target(window, cx) {
-            self.undo_last_commit(&root, window, cx);
+            self.undo_last_commit(&root, None, window, cx);
         }
     }
 
-    /// 撤销根目录是 `root` 的仓库的上次提交，改动留在暂存区；说明框空着时把那次的说明放回去。
-    pub(super) fn undo_last_commit(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    /// 撤销根目录是 `root` 的仓库的上次提交，改动留在暂存区；说明框空着时把那次的说明放回去。给了 `id` 时
+    /// HEAD 得还在这个提交上才撤。
+    pub(super) fn undo_last_commit(
+        &mut self,
+        root: &Path,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let root = root.to_path_buf();
         let area = self.commit_box(&root);
-        self.run_git(&root, Busy::Commit, window, cx, ProjectRepo::undo_last_commit, move |_, message, _, cx| {
+        let op = move |repo: &ProjectRepo| match id {
+            Some(id) => repo.undo_commit_at(&id),
+            None => repo.undo_last_commit(),
+        };
+        self.run_git(&root, Busy::Commit, window, cx, op, move |_, message, _, cx| {
             if let Some(area) = area
                 && area.read(cx).text().trim().is_empty()
             {

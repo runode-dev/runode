@@ -9,7 +9,7 @@ use std::{
 };
 
 use common::{TestRepo, read, read_all};
-use runode_git::{CommitOptions, GitError, Section};
+use runode_git::{CommitOptions, GitError, Refusal, Section};
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
@@ -352,6 +352,59 @@ fn undoes_the_last_commit() {
     assert_eq!(repo.git(&["branch", "--show-current"]), "main");
     assert_eq!(repo.status(), ["A  a.txt", "A  b.txt"]);
     assert_eq!(read(&repo).staged.len(), 2);
+}
+
+/// 撤销指定的提交：HEAD 已经不在它上面时什么也不动。
+#[test]
+fn undoes_only_the_given_head_commit() {
+    let repo = TestRepo::new("ops-undo-at");
+    repo.commit_file(
+        "a.txt", "one
+", "first",
+    );
+    let first = repo.git(&["rev-parse", "HEAD"]);
+    repo.commit_file(
+        "b.txt", "b
+", "second",
+    );
+    let second = repo.git(&["rev-parse", "HEAD"]);
+    let handle = read(&repo).repo();
+    assert_eq!(handle.undo_commit_at(&first), Err(GitError::Refused(Refusal::NotHead)));
+    assert_eq!(repo.git(&["log", "--format=%s"]), "second\nfirst");
+    assert_eq!(handle.undo_commit_at(&second).unwrap(), "second");
+    assert_eq!(repo.git(&["log", "--format=%s"]), "first");
+    assert_eq!(repo.status(), ["A  b.txt"]);
+}
+
+/// 撤销推送把远端分支退回父提交，本地的分支不动；远端已经不在那个提交上时远端拒绝。
+#[test]
+fn undoes_a_push() {
+    let remote = TestRepo::bare("ops-unpush-remote");
+    let repo = TestRepo::clone_of(&remote, "ops-unpush");
+    let handle = read(&repo).repo();
+    repo.commit_file(
+        "a.txt", "one
+", "first",
+    );
+    let first = repo.git(&["rev-parse", "HEAD"]);
+    assert_eq!(handle.undo_push(&first), Err(GitError::Refused(Refusal::NoUpstream)));
+    repo.commit_file(
+        "a.txt", "two
+", "second",
+    );
+    let second = repo.git(&["rev-parse", "HEAD"]);
+    repo.git(&["push", "-q", "-u", "origin", "main"]);
+    // 和分支同名的 tag 让分支的短名变成 `heads/main`，照样找得到上游。
+    repo.git(&["tag", "main", &first]);
+
+    assert!(handle.undo_push(&first).is_err());
+    assert_eq!(remote.git(&["rev-parse", "main"]), second);
+    handle.undo_push(&second).unwrap();
+    assert_eq!(remote.git(&["rev-parse", "main"]), first);
+    assert_eq!(repo.git(&["rev-parse", "origin/main"]), first);
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), second);
+    assert_eq!(handle.undo_push(&first), Err(GitError::Refused(Refusal::NoParent)));
+    assert_eq!(remote.git(&["rev-parse", "main"]), first);
 }
 
 /// 用户开了 `log.showSignature`、提交签过名时，读出的说明不混进签名的校验结果（这里没配信任的

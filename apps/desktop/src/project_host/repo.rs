@@ -46,6 +46,8 @@ pub(super) enum GitOp {
     PendingDiff { staged: bool },
     RecentMessages { limit: usize },
     UndoLastCommit,
+    UndoCommitAt { id: String },
+    UndoPush { id: String },
     Fetch,
     FetchUnattended,
     Pull,
@@ -88,6 +90,8 @@ impl GitOp {
             Self::PendingDiff { staged } => json(repo.pending_diff(staged)),
             Self::RecentMessages { limit } => json(repo.recent_messages(limit)),
             Self::UndoLastCommit => json(repo.undo_last_commit()),
+            Self::UndoCommitAt { id } => json(repo.undo_commit_at(&id)),
+            Self::UndoPush { id } => json(repo.undo_push(&id)),
             Self::Fetch => json(repo.fetch()),
             Self::FetchUnattended => json(repo.fetch_unattended()),
             Self::Pull => json(repo.pull()),
@@ -142,6 +146,8 @@ impl GitOp {
             | Self::PendingDiff { .. }
             | Self::RecentMessages { .. }
             | Self::UndoLastCommit
+            | Self::UndoCommitAt { .. }
+            | Self::UndoPush { .. }
             | Self::Fetch
             | Self::FetchUnattended
             | Self::Pull
@@ -286,6 +292,15 @@ impl ProjectRepo {
 
     pub(crate) fn undo_last_commit(&self) -> git::Result<String> {
         dispatch!(self, self.repo.undo_last_commit(), GitOp::UndoLastCommit, git_failed)
+    }
+
+    pub(crate) fn undo_commit_at(&self, id: &str) -> git::Result<String> {
+        let op = GitOp::UndoCommitAt { id: id.to_owned() };
+        dispatch!(self, self.repo.undo_commit_at(id), op, git_failed)
+    }
+
+    pub(crate) fn undo_push(&self, id: &str) -> git::Result {
+        dispatch!(self, self.repo.undo_push(id), GitOp::UndoPush { id: id.to_owned() }, git_failed)
     }
 
     pub(crate) fn fetch(&self) -> git::Result {

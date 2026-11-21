@@ -72,6 +72,12 @@ pub enum Refusal {
     /// 撤销上一个提交：撤销时 HEAD 换了分支，已经恢复。
     HeadMovedRestored,
     NoRemote,
+    /// 撤销指定的提交：HEAD 已经不在这个提交上。
+    NotHead,
+    /// 撤销推送：当前分支没有上游。
+    NoUpstream,
+    /// 撤销推送：这是第一个提交，或者它的父提交不在本地。
+    NoParent,
     /// 这条储藏已经变了，什么也没做。
     StashChanged(String),
 }
@@ -138,6 +144,11 @@ impl fmt::Display for Refusal {
                 f.write_str("HEAD moved to another branch while undoing; it was restored and nothing was undone")
             }
             Self::NoRemote => f.write_str("no remote is configured"),
+            Self::NotHead => f.write_str("HEAD is no longer on this commit; nothing was undone"),
+            Self::NoUpstream => f.write_str("the current branch has no upstream; nothing was undone"),
+            Self::NoParent => {
+                f.write_str("this is the first commit or its parent is not available locally; nothing was undone")
+            }
             Self::StashChanged(rev) => {
                 write!(f, "{rev} has changed; nothing was done, look at the latest stashes first")
             }

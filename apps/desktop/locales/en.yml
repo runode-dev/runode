@@ -481,6 +481,9 @@ git:
     head_moved: "HEAD moved to another branch. Nothing was undone."
     head_moved_restored: "HEAD moved to another branch while undoing. It was restored and nothing was undone."
     no_remote: "No remote is configured"
+    not_head: "HEAD is no longer on this commit. Nothing was undone."
+    no_upstream: "The current branch has no upstream. Nothing was undone."
+    no_parent: "This is the first commit, or its parent isn't available locally. Nothing was undone."
     stash_changed: "%{rev} has changed. Nothing was done; review the latest stashes first."
   ai_message:
     title: Generate Commit Message
@@ -653,9 +656,14 @@ git:
     copy_id: Copy Commit ID
     checkout: Checkout (Detached)
     create_branch: Create Branch from Here…
+    undo_commit: Undo Commit
+    undo_push: Undo Push…
     checkout_title: "Switch to commit %{id}?"
     checkout_detail: HEAD will be detached at this commit. Create a branch if you want to keep new commits made there.
     checkout_confirm: Switch
+    undo_push_title: "Undo the push of %{id}?"
+    undo_push_detail: "%{upstream} on the remote will move back to the previous commit. This commit stays in your local branch. Anyone who already pulled it will have to sort it out on their side."
+    undo_push_confirm: Undo Push
 driver:
   badge: "Driven by %{who} · %{action}"
   outside: a program outside Runode

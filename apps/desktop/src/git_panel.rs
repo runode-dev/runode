@@ -882,7 +882,7 @@ impl GitPanel {
                     let root = root.clone();
                     button
                         .cursor_pointer()
-                        .on_press(cx, move |this, window, cx| this.undo_last_commit(&root, window, cx))
+                        .on_press(cx, move |this, window, cx| this.undo_last_commit(&root, None, window, cx))
                 });
         div()
             .flex()

@@ -319,6 +319,44 @@ impl Repo {
         self.undo_commit(&head)
     }
 
+    /// 撤销提交 `id`：它得是 HEAD 指着的提交，不是时报 `Refusal::NotHead`，什么也不动；别的和
+    /// `undo_last_commit` 一样。
+    pub fn undo_commit_at(&self, id: &str) -> Result<String> {
+        let head = self.inspect_head()?;
+        if head.id != id {
+            return Err(Refusal::NotHead.into());
+        }
+        self.undo_commit(&head)
+    }
+
+    /// 撤销推送：把当前分支的上游在远端从 `id` 退回它的第一个父提交，本地的分支和工作区不动。远端分支已经
+    /// 不在 `id` 上（又有人推了）时远端拒绝，什么也不动。
+    pub fn undo_push(&self, id: &str) -> Result {
+        if !self.has_upstream() {
+            return Err(Refusal::NoUpstream.into());
+        }
+        // 分支按完整的引用名按原样用：短名在有同名 tag 时会变成 `heads/…`，不是 UTF-8 的名字换了字就找不到了。
+        let branch = git(&self.root, &["symbolic-ref", "-q", "HEAD"]).ok_or(Refusal::NoUpstream)?;
+        let format = OsStr::new("--format=%(upstream:remotename)%00%(upstream:remoteref)");
+        let args = [OsStr::new("for-each-ref"), format, &crate::os_str(branch.trim_ascii_end())];
+        let upstream = run(&self.root, args, None)?;
+        let (remote, merge) = upstream.trim_ascii_end().split_at(upstream.iter().position(|b| *b == 0).unwrap_or(0));
+        let merge = merge.strip_prefix(b"\0").unwrap_or_default();
+        if remote.is_empty() || merge.is_empty() {
+            return Err(Refusal::NoUpstream.into());
+        }
+        let (remote, merge) = (crate::os_str(remote), crate::os_str(merge));
+        let parent =
+            git(&self.root, &["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{id}^1^{{commit}}")])
+                .map(|parent| String::from_utf8_lossy(&parent).trim().to_owned())
+                .ok_or(Refusal::NoParent)?;
+        let mut lease = OsString::from("--force-with-lease=");
+        lease.extend([&*merge, OsStr::new(":"), OsStr::new(id)]);
+        let mut refspec = OsString::from(format!("{parent}:"));
+        refspec.push(&merge);
+        run(&self.root, [OsStr::new("push"), &lease, OsStr::new("--"), &remote, &refspec], None).map(drop)
+    }
+
     /// 撤销前看一眼 HEAD：所在的分支、指向的提交和它的父提交，后面都按这一次看到的来。
     fn inspect_head(&self) -> Result<HeadCommit> {
         // 分支名按原样用，不做有损转换：不是 UTF-8 的名字换了字就成了另一个（或不存在的）分支。

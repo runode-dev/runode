@@ -481,6 +481,9 @@ git:
     head_moved: "看過以後 HEAD 換了分支，沒有復原"
     head_moved_restored: "復原時 HEAD 換了分支，已經恢復，沒有復原"
     no_remote: "還沒有設定遠端"
+    not_head: "HEAD 已經不在這個提交上，沒有復原"
+    no_upstream: "目前的分支沒有上游，沒有復原"
+    no_parent: "這是第一個提交，或者上一個提交不在本機，沒有復原"
     stash_changed: "%{rev} 已經變了，什麼也沒做，看過最新的儲藏列表再來"
   ai_message:
     title: 產生提交說明
@@ -653,9 +656,14 @@ git:
     copy_id: 拷貝提交編號
     checkout: 切到這個提交（分離 HEAD）
     create_branch: 從這裡新增分支…
+    undo_commit: 復原提交
+    undo_push: 復原推送…
     checkout_title: "切到提交 %{id}？"
     checkout_detail: HEAD 會分離在這個提交上。要保留在這裡做的新提交，請新增一個分支。
     checkout_confirm: 切換
+    undo_push_title: "復原 %{id} 的推送？"
+    undo_push_detail: "遠端的 %{upstream} 會退回上一個提交，這個提交仍留在本機分支上。已經提取了它的人要自己處理。"
+    undo_push_confirm: 復原推送
 driver:
   badge: "由 %{who} 操作 · %{action}"
   outside: "Runode 以外的程式"

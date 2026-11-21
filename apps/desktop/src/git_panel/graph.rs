@@ -1,7 +1,7 @@
 //! Git 面板底部的「图表」，单独一栏：标题一行可以收起，上沿的分隔线
 //! 拖动改变高度，展开时每行一个提交，左边画分支的线和点，右边是引用标签和说明首行，行尾淡色写着
 //! 多久以前。点提交展开它改的文件，点文件在预览栏里看它在这个提交里的 diff；右键可以复制提交号、
-//! 切到这个提交或者从它新建分支。多个仓库时显示最近点过的那块的仓库（`PanelState::graph_repo`），
+//! 切到这个提交、从它新建分支，撤销 HEAD 上的提交或者撤销上游所在提交的推送。多个仓库时显示最近点过的那块的仓库（`PanelState::graph_repo`），
 //! 仓库名写在标题上。
 //!
 //! 历史在后台读，只在图表展开着时读显示的那个仓库的；仓库的 `RepoInfo` 变了（提交、切分支、拉取、
@@ -85,11 +85,17 @@ const GRAPH_MIN_HEIGHT: f32 = 90.;
 const CHANGES_MIN_HEIGHT: f32 = 120.;
 
 /// 图表里一个提交的右键菜单项。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommitOp {
     CopyId,
     Checkout,
     CreateBranch,
+    /// 撤销 HEAD 指着的这个提交。
+    UndoCommit,
+    /// 把上游 `upstream`（如 `origin/main`）在远端退回这个提交的父提交。
+    UndoPush {
+        upstream: String,
+    },
 }
 
 /// 对根目录是 `repo` 的仓库里提交号是 `id` 的提交做 `op`。
@@ -364,11 +370,11 @@ impl GitPanel {
         .detach();
     }
 
-    /// 提交的右键菜单：复制提交号、切到这个提交、从这里新建分支。
+    /// 提交的右键菜单：复制提交号、切到这个提交、从这里新建分支、撤销提交和撤销推送。
     pub(crate) fn git_commit_action(&mut self, action: &GitCommitAction, window: &mut Window, cx: &mut Context<Self>) {
         let root = action.repo.clone();
         let id = action.id.clone();
-        match action.op {
+        match &action.op {
             CommitOp::CopyId => cx.write_to_clipboard(ClipboardItem::new_string(id)),
             CommitOp::Checkout => {
                 let short: String = id.chars().take(7).collect();
@@ -397,14 +403,35 @@ impl GitPanel {
             CommitOp::CreateBranch => {
                 cx.emit(GitPanelEvent::OpenBranchPicker { root, create_only: true, start: Some(id) });
             }
+            CommitOp::UndoCommit => self.undo_last_commit(&root, Some(id), window, cx),
+            CommitOp::UndoPush { upstream } => {
+                let short: String = id.chars().take(7).collect();
+                let answer = crate::prompt::show(
+                    window,
+                    PromptLevel::Warning,
+                    &rust_i18n::t!("git.graph.undo_push_title", id = short),
+                    Some(&rust_i18n::t!("git.graph.undo_push_detail", upstream = upstream)),
+                    &[
+                        PromptButton::new(rust_i18n::t!("git.graph.undo_push_confirm")),
+                        PromptButton::cancel(rust_i18n::t!("git.cancel")),
+                    ],
+                    cx,
+                );
+                self.when_confirmed(answer, window, cx, move |this, window, cx| {
+                    this.run_git(&root, Busy::Push, window, cx, move |repo| repo.undo_push(&id), |_, (), _, _| {});
+                });
+            }
         }
     }
 
+    /// `head`：HEAD 指着这个提交；`upstream`：当前分支的上游指着这个提交时是上游的名字。
     fn open_commit_menu_at(
         &mut self,
         position: gpui::Point<Pixels>,
         root: PathBuf,
         id: String,
+        head: bool,
+        upstream: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let enabled = self.state().busy(&root).is_none();
@@ -417,6 +444,13 @@ impl GitPanel {
             None,
             item("git.graph.checkout", CommitOp::Checkout, enabled),
             item("git.graph.create_branch", CommitOp::CreateBranch, enabled),
+            None,
+            item("git.graph.undo_commit", CommitOp::UndoCommit, enabled && head),
+            item(
+                "git.graph.undo_push",
+                CommitOp::UndoPush { upstream: upstream.clone().unwrap_or_default() },
+                enabled && upstream.is_some(),
+            ),
         ];
         let target = self.focus.clone();
         self.open_context_menu(position, items, target, cx);
@@ -462,6 +496,11 @@ impl GitPanel {
         let expanded = graph.expanded.contains(&commit.id);
         let root = repo.root.clone();
         let id = commit.id.clone();
+        let upstream = repo
+            .info
+            .upstream
+            .clone()
+            .filter(|upstream| commit.refs.iter().any(|r| r.kind == RefKind::Remote && r.name == *upstream));
         // 下面估的宽度都是基准字号下的点数，面板和图的宽度先折成同样的单位再比。
         let scale = font_size::scale(cx);
         let fit = fit_commit_row(self.state().width / scale, width / scale, commit);
@@ -502,7 +541,7 @@ impl GitPanel {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
-                    this.open_commit_menu_at(event.position, root.clone(), id.clone(), cx);
+                    this.open_commit_menu_at(event.position, root.clone(), id.clone(), head, upstream.clone(), cx);
                 }),
             )
             .into_any_element()
