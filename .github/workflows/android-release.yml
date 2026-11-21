@@ -1,0 +1,111 @@
+# 编签好名的 Android 正式包（AAB），传到 Google Play 的内部测试轨道。只由 release.yml 调（workflow_call），
+# 对要发的那个标签编；versionCode 用调用方的 run_number，Play 要求它一次比一次大，所以不单独手动运行。
+#
+# 要在仓库里配：
+#   Secrets
+#     ANDROID_KEYSTORE              上传密钥的 keystore，base64 编码
+#     ANDROID_KEYSTORE_PASSWORD     keystore 的密码
+#     ANDROID_KEY_ALIAS             密钥的别名
+#     ANDROID_KEY_PASSWORD          密钥的密码
+#     ANDROID_GOOGLE_SERVICES_JSON  Firebase 给 dev.runode.mobile 的 google-services.json 的内容
+#     PLAY_SERVICE_ACCOUNT_JSON     能往 Play 管理中心发版的服务账号 JSON 的内容
+#   Variables
+#     RUNODE_PUSH_RELAY             推送中转的基址
+#
+# Play 的 API 建不了新 app：第一个包要在 Play 管理中心里手动传一次，之后才能由这里传。
+name: Android Release
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 要编的标签
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  play:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      # 只读 android.yml 在 main 上存的 Gradle 缓存，发版不另存。
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-test-gradle-${{ hashFiles('apps/android/**/*.gradle.kts', 'apps/android/gradle/libs.versions.toml', 'apps/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: android-test-gradle-
+      - name: 装 NDK 和 CMake
+        run: |
+          ndk="$(sed -n 's/^ndk = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          cmake="$(sed -n 's/^cmake = "\(.*\)"$/\1/p' apps/android/gradle/libs.versions.toml)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+      # 标签上存的 Rust 缓存下次发版用不上，不存。
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache: "false"
+          targets: aarch64-linux-android x86_64-linux-android
+          zig-cache-key: android
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-ndk@4.1.2
+      - name: 编 libghostty-vt
+        run: apps/android/scripts/build-ghostty-vt.sh
+      - name: 编拨号库
+        run: apps/android/scripts/build-tunnel.sh
+      - name: 取 sherpa-onnx
+        run: apps/android/scripts/fetch-sherpa-onnx.sh
+      - name: 写下签名密钥和 Firebase 配置
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          [ -n "$ANDROID_KEYSTORE" ] || { echo "::error::没配 ANDROID_KEYSTORE"; exit 1; }
+          [ -n "$GOOGLE_SERVICES_JSON" ] || { echo "::error::没配 ANDROID_GOOGLE_SERVICES_JSON，编出来的包登记不了推送"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE" | base64 -d >"$RUNNER_TEMP/upload.keystore"
+          printf '%s\n' "$GOOGLE_SERVICES_JSON" >apps/android/app/google-services.json
+      - name: 编 AAB
+        working-directory: apps/android
+        env:
+          RUNODE_VERSION_CODE: ${{ github.run_number }}
+          RUNODE_PUSH_RELAY: ${{ vars.RUNODE_PUSH_RELAY }}
+          RUNODE_KEYSTORE: ${{ runner.temp }}/upload.keystore
+          RUNODE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RUNODE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RUNODE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          [ -n "$RUNODE_PUSH_RELAY" ] || echo "::warning::没配仓库变量 RUNODE_PUSH_RELAY，这个包不带推送中转"
+          ./gradlew bundleRelease
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-release
+          path: apps/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - name: 传到 Play 的内部测试轨道
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.runode.mobile
+          releaseFiles: apps/android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+      - name: 删掉密钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.keystore" apps/android/app/google-services.json

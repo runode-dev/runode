@@ -10,7 +10,7 @@
 # aarch64 的 Linux 上各打一份只有可执行文件的 tar.gz（没有桌面界面，给服务器和 SSH 远端用），再各编一份
 # 带界面的，打成 AppImage（也是自动更新下载的包）、deb 和 rpm；在
 # Windows 上打 x86_64 的安装包 setup.exe（Inno Setup，装到用户目录）和装到 SSH 远端用的便携 zip，可执行文件和安装包
-# 都用自签名证书签名；
+# 都用自签名证书签名；另调 android-release.yml 编 Android 的 AAB、传到 Google Play 的内部测试轨道，它失败了不拦着发布；
 # 两份 Mac 包各在自己架构的 runner 上核对签名和公证票据、跑一下，Windows 的安装包核对签名、装一遍；CI 和各个包都成了才汇总起来生成版本清单 latest.json 和校验和 SHA256SUMS，先发成草稿、文件都传齐了再
 # 公开；最后在 macOS 和 Linux 上各用 scripts/install.sh、在 Windows 上静默运行 setup.exe 装一遍这个版本，
 # 确认装得上、跑得起来。
@@ -161,6 +161,14 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.prepare.outputs.tag }}
+
+  # 不等别的 job，也不拦着 publish：Play 那边出了错，桌面版照样发。
+  android:
+    needs: prepare
+    uses: ./.github/workflows/android-release.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
 
   build-macos:
     # 不等 CI，和它同时跑；publish 等两边都成了才发。
