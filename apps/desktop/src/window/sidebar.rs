@@ -136,8 +136,8 @@ const ICON_WAITING_OFFSET: f32 = 4.;
 /// 项目一个终端都没开时图标的不透明度。
 const NO_TERMINAL_ICON_OPACITY: f32 = 0.4;
 
-/// 搜索行和任务之间的间距。
-const SECTION_GAP: f32 = 6.;
+/// 侧栏顶上几段（搜索行、任务、项目栏）之间的间距。
+const SECTION_GAP: f32 = 10.;
 /// 侧栏里各段离侧栏左右两边的留白。
 const SIDEBAR_INSET: f32 = 6.;
 /// 每个 workspace 一项，一行字。
@@ -320,7 +320,7 @@ impl WindowView {
             )
             .child(self.render_sidebar_search(cx))
             .child(self.render_sidebar_tasks(cx))
-            .child(self.render_projects_bar(cx))
+            .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
             .child(
                 div()
                     .id("workspace-list")
