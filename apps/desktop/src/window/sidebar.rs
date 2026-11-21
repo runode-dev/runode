@@ -297,6 +297,10 @@ impl WindowView {
             // 压在拖窗口的区域上：不挡住的话 Windows 把这里当标题栏，按下被拿去拖窗口。
             .occlude()
             .on_press_down(cx, |this, window, cx| this.toggle_sidebar(&ToggleSidebar, window, cx))
+            // 挡着标题栏，拖回标题栏的文件标签落在这里也要接住：停靠着的预览改回盖住终端区。
+            .on_drop(cx.listener(|this, dragged: &super::titlebar::DraggedFileTab, window, cx| {
+                this.undock_preview(dragged.ix, window, cx);
+            }))
     }
 
     pub(super) fn render_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
