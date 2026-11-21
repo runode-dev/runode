@@ -1,9 +1,9 @@
-//! 侧栏最上面的一行：找 agent 的搜索框和新建任务的按钮；最下面的导航：任务（看板）、手机（配对设备页）
-//! 和设置，各行右边是它的近况。
+//! 侧栏的导航：最上面一行是找 agent 的搜索框和新建任务的按钮，下面是任务（看板）；最下面一行是手机
+//! （配对设备页）和设置。任务和手机右边是它的近况。
 
 use std::rc::Rc;
 
-use gpui::{AnyElement, Context, Div, MouseButton, Role, Stateful, Window, div, prelude::*, px, svg};
+use gpui::{AnyElement, App, Context, Div, Hsla, MouseButton, Role, Stateful, Window, div, prelude::*, px, svg};
 
 use super::{ROW_ICON_SIZE, ROW_TEXT_OPACITY, SIDEBAR_INSET};
 use crate::{
@@ -11,9 +11,9 @@ use crate::{
     menus::OpenSettings,
     ui::{
         a11y::{A11yPress as _, PressDown as _},
-        button::{Button, ButtonSize, ButtonVariant},
+        button::{Button, ButtonSize, ButtonVariant, Toggle},
         font_size::{FontSize, scaled},
-        icons::{KANBAN_ICON, KANBAN_PLUS_ICON, PHONE_ICON, SEARCH_ICON, SLIDERS_ICON},
+        icons::{KANBAN_ICON, KANBAN_PLUS_ICON, PHONE_ICON, SEARCH_ICON, SETTINGS_ICON},
         status_mark::{MarkKind, status_mark},
         theme::ActiveTheme as _,
         tooltip::{shortcut_text, tooltip},
@@ -113,21 +113,32 @@ impl WindowView {
             .child(new_todo)
     }
 
-    /// 侧栏最下面的导航：任务、手机和设置，开着哪一页哪一行高亮。
+    /// 搜索框下面的任务一行，看板的入口，开着看板时高亮。
+    pub(super) fn render_sidebar_tasks(&self, cx: &mut Context<Self>) -> Div {
+        div().flex_none().pt(px(6.)).px(px(SIDEBAR_INSET)).child(self.render_nav_tasks(cx))
+    }
+
+    /// 侧栏最下面的一行：左边手机，开着配对设备页时高亮；右边设置的开关按钮，开着设置页时按下着。
     pub(super) fn render_sidebar_nav(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let tasks = self.render_nav_tasks(cx);
-        let phone = self.render_nav_phone(cx);
+        let phone = self.render_nav_phone(cx).flex_1().min_w_0();
         let settings_label = rust_i18n::t!("workspace.settings").into_owned();
-        let settings = page_entry(
-            "nav-settings",
-            SLIDERS_ICON,
-            settings_label.clone(),
-            self.settings_page().is_some(),
-            None,
-            cx,
-            |this, window, cx| this.open_settings(window, cx),
-        )
-        .tooltip(tooltip(settings_label, Some(&OpenSettings)));
+        let active = self.settings_page().is_some();
+        let (active_bg, hover_bg, fg) = (active_bg(cx), super::sidebar_hover(cx), cx.theme().foreground);
+        let settings = Toggle::new("nav-settings", SETTINGS_ICON, settings_label.clone())
+            .pressed(active)
+            .icon_size(15.)
+            .map(|toggle| {
+                if active {
+                    toggle.bg(active_bg).text_color(fg).hover(|toggle| toggle.bg(active_bg))
+                } else {
+                    toggle.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|toggle| toggle.bg(hover_bg).text_color(fg))
+                }
+            })
+            .flex_none()
+            .size(scaled(NAV_ROW_HEIGHT))
+            .rounded(px(7.))
+            .tooltip(tooltip(settings_label, Some(&OpenSettings)))
+            .on_press_down(cx, |this, window, cx| this.open_settings(window, cx));
         div()
             .id("sidebar-nav")
             .role(Role::Group)
@@ -135,13 +146,10 @@ impl WindowView {
             .flex_none()
             .border_t_1()
             .border_color(cx.theme().border)
-            .pt(px(8.))
-            .px(px(6.))
-            .pb(px(6.))
+            .p(px(6.))
             .flex()
-            .flex_col()
-            .gap(px(1.))
-            .child(tasks)
+            .items_center()
+            .gap(px(4.))
             .child(phone)
             .child(settings)
     }
@@ -202,6 +210,11 @@ impl WindowView {
     }
 }
 
+/// 导航里开着那一页的项的底色。
+fn active_bg(cx: &App) -> Hsla {
+    if crate::window::cards(cx) { cx.theme().tab_active } else { cx.theme().accent_selected }
+}
+
 /// 导航里打开一页的一行，那一页开着时高亮，`trailing` 是靠右的近况。按下鼠标就开，辅助工具的按下另外登记。
 /// 开着的状态报成按下着（`aria_toggled`）而不是选中：AccessKit 不给带选中状态的按钮 Invoke，Windows 上
 /// 辅助工具就按不动它。近况由调用方写进 `aria_description`。
@@ -215,12 +228,8 @@ fn page_entry(
     open: impl Fn(&mut WindowView, &mut Window, &mut Context<WindowView>) + 'static,
 ) -> Stateful<Div> {
     let theme = cx.theme();
-    let (active_bg, hover_bg, fg, muted) = (
-        if crate::window::cards(cx) { theme.tab_active } else { theme.accent_selected },
-        super::sidebar_hover(cx),
-        theme.foreground,
-        theme.muted_foreground,
-    );
+    let (active_bg, hover_bg, fg, muted) =
+        (active_bg(cx), super::sidebar_hover(cx), theme.foreground, theme.muted_foreground);
     let open = Rc::new(open);
     let press = open.clone();
     let view = cx.entity().downgrade();

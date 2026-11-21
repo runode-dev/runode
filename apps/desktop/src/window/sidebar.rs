@@ -319,6 +319,7 @@ impl WindowView {
                     .on_mouse_down(MouseButton::Left, drag_window),
             )
             .child(self.render_sidebar_search(cx))
+            .child(self.render_sidebar_tasks(cx))
             .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
             .child(
                 div()
