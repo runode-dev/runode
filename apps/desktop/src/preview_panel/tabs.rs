@@ -13,7 +13,7 @@ use crate::ui::{
 };
 use gpui::{Action, Context, Focusable, Pixels, Point, SharedString, Window, actions};
 use runode_git as git;
-use runode_types::color::Rgb;
+use runode_types::{color::Rgb, pane::Direction};
 
 use crate::git_view::status_color;
 
@@ -39,8 +39,10 @@ pub(super) struct PreviewTabs {
     pub tabs: Vec<Preview>,
     /// 当前显示的标签。
     pub active: usize,
-    /// 预览在最前，盖住终端区；切到终端标签时退到后面，标签都关掉时也是。
+    /// 预览在最前：没停靠时盖住终端区，停靠着时是和终端并排的两边里当前的那边；切到终端、标签都关掉时为假。
     pub front: bool,
+    /// 停靠在终端区的哪一侧、和终端并排；为空时盖住终端区。标签都关掉时清掉。
+    pub dock: Option<Dock>,
     /// 这个 workspace 最近读到的 git 状态。
     pub git: Option<Arc<git::Repos>>,
     /// `git` 主仓库的根目录和它解析过符号链接的路径，`Preview::refresh_marks` 比字面上不在根下的文件用；
@@ -94,6 +96,9 @@ impl PreviewTabs {
         self.tabs = kept;
         self.active = kept_before_active.min(self.tabs.len().saturating_sub(1));
         self.front &= !self.tabs.is_empty();
+        if self.tabs.is_empty() {
+            self.dock = None;
+        }
         closed
     }
 
@@ -122,6 +127,13 @@ impl PreviewTabs {
         }
         old
     }
+}
+
+/// 预览停靠在终端区的哪一侧（`side`），占终端区这个方向上的多少（`ratio`，0 到 1）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dock {
+    pub side: Direction,
+    pub ratio: f32,
 }
 
 /// 标题栏里画一个文件标签要的东西。
@@ -232,9 +244,14 @@ impl PreviewPanel {
         self.workspaces.get(&ws).map_or(0, |previews| previews.tabs.len())
     }
 
+    /// workspace `ws` 的预览停靠着时，显示着的是第几个文件标签，在不在最前都算。
+    pub fn docked_file(&self, ws: WorkspaceId) -> Option<usize> {
+        self.dock(ws).map(|_| self.workspaces[&ws].active)
+    }
+
     /// workspace `ws` 的文件标签在最前时，当前的是第几个。
     pub fn front_file(&self, ws: WorkspaceId) -> Option<usize> {
-        self.front(ws).then(|| self.workspaces[&ws].active)
+        self.current(ws).then(|| self.workspaces[&ws].active)
     }
 
     /// 切到当前 workspace 的第 `ix` 个文件标签、带到最前，焦点交给预览栏。
@@ -353,9 +370,14 @@ mod tests {
         previews.active = 1;
         previews.retain(|ix, _| ix != 1);
         assert_eq!(tabs(&previews), [">c"]);
+        // 停靠着的预览关掉一部分标签时还停靠着，都关掉时下次打开改回盖住终端区。
+        previews.dock = Some(Dock { side: Direction::Right, ratio: 0.4 });
+        previews.retain(|_, _| true);
+        assert!(previews.dock.is_some());
         previews.retain(|_, _| false);
         assert!(previews.tabs.is_empty());
         assert!(previews.active().is_none());
+        assert!(previews.dock.is_none());
     }
 
     #[test]

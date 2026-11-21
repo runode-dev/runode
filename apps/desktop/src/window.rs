@@ -298,6 +298,8 @@ enum Divider {
     GitHubActions(usize),
     /// 吸附在右侧面板上的这台远程桌面挨着面板的分隔线，拖动改变它的高度。
     SnappedScreen(EntityId),
+    /// 停靠的预览和终端之间的分隔线，沿 `Axis` 拖动改变预览的大小。
+    Preview(Axis),
 }
 
 /// 侧栏里正在改名的 workspace 或主机组，以及改名用的输入框。
@@ -403,6 +405,8 @@ pub struct WindowView {
     float_drag: Option<pane_float::FloatDrag>,
     /// 拖着分屏经过的分屏和落点在它的哪一块，画落点提示用。
     pane_drop: Option<(EntityId, pane_move::DropZone)>,
+    /// 拖着文件标签经过终端区时落在哪一块。
+    file_tab_drop: Option<pane_move::DropZone>,
     /// 窗口的位置和大小，以及所在屏幕的 UUID，存布局用：窗口关掉以后就问不到了。
     bounds: WindowBounds,
     display: Option<String>,
@@ -558,6 +562,7 @@ impl WindowView {
             dragging_divider: None,
             float_drag: None,
             pane_drop: None,
+            file_tab_drop: None,
             bounds: window.window_bounds(),
             display: Self::display_uuid(window, cx),
             spawned: HashMap::new(),
@@ -867,7 +872,7 @@ impl WindowView {
 }
 
 impl Focusable for WindowView {
-    /// 开着设置页、配对设备页、看板、Review 页、引导页时是它，文件盖着终端区时是预览；否则是有焦点的终端，当前
+    /// 开着设置页、配对设备页、看板、Review 页、引导页时是它，文件在最前（盖着终端区，或停靠着、是当前的那边）时是预览；否则是有焦点的终端，当前
     /// workspace 里没有终端时是窗口自己的。
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.page {
@@ -881,7 +886,7 @@ impl Focusable for WindowView {
         if let Some(focus) = self.docked_screen_focus(cx) {
             return focus;
         }
-        if self.preview_front(cx) {
+        if self.preview_current(cx) {
             return self.preview.read(cx).focus_handle(cx);
         }
         match self.focused_view() {
@@ -899,6 +904,7 @@ impl Render for WindowView {
         // 拖动一结束 GPUI 就重画窗口；放在别处或取消时没人清的落点在这里清掉。
         if !cx.has_active_drag() {
             self.pane_drop = None;
+            self.file_tab_drop = None;
         }
         let (fg, bg) = self.colors(cx);
         self.follow_colors(fg, bg, cx);
@@ -1209,13 +1215,8 @@ impl WindowView {
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(f32::from(window.viewport_size().width));
-        // 在最前的预览盖在终端区上，宽度是终端区的宽度。
-        let front_preview = self.preview_front(cx).then(|| {
-            let width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
-            self.render_preview(width, window, cx)
-        });
-        // 没有预览在最前时，开着的审阅页盖在终端区上。
-        let covering = front_preview.or_else(|| self.render_review(window, cx));
+        let area_width = f32::from(window.viewport_size().width) - sidebar_width - widths.panel;
+        let area = self.render_terminal_area(panes, area_width, 1., window, cx);
         let panel =
             self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle =
@@ -1228,7 +1229,6 @@ impl WindowView {
                 .right(px(project::TOGGLE_MARGIN + titlebar::window_controls_width(window)))
         });
         let titlebar = titlebar_shown.then(|| row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx));
-        let panes = covered_panes(panes, covering.is_some());
         let main = div()
             .flex_1()
             .min_w_0()
@@ -1236,7 +1236,7 @@ impl WindowView {
             .flex()
             .flex_col()
             .children(titlebar)
-            .child(div().relative().flex_1().min_h_0().child(panes).children(covering));
+            .child(div().relative().flex_1().min_h_0().child(area));
         let mut body: Vec<AnyElement> = Vec::new();
         body.extend(sidebar);
         body.push(main.into_any_element());
@@ -1348,14 +1348,10 @@ impl WindowView {
         let sidebar_width = if sidebar.is_some() { self.sidebar_width() } else { 0. };
         let sidebar_handle = sidebar.is_some().then(|| self.render_sidebar_handle(cx));
         let widths = self.right_panel_widths(viewport);
-        // 在最前的预览盖在终端区上，宽度是终端区的宽度：除去侧栏、两边的空隙和右侧面板。
-        let front_preview = self.preview_front(cx).then(|| {
-            let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
-            let width = viewport - sidebar_width - 2. * CARD_GAP - panel;
-            self.render_preview(width, window, cx)
-        });
-        // 没有预览在最前时，开着的审阅页盖在终端区上。
-        let covering = front_preview.or_else(|| self.render_review(window, cx));
+        // 终端区的宽度：除去侧栏、两边的空隙和右侧面板。
+        let panel = if self.workspace().panel.is_some() { widths.panel + CARD_GAP } else { 0. };
+        let area =
+            self.render_terminal_area(panes, viewport - sidebar_width - 2. * CARD_GAP - panel, CARD_GAP, window, cx);
         let panel =
             self.workspace().panel.is_some().then(|| self.render_right_column(&slots.panel, widths.panel, window, cx));
         let right_handle = self.workspace().panel.is_some().then(|| {
@@ -1363,7 +1359,6 @@ impl WindowView {
             self.render_right_handle(Divider::Panel, right, cx)
         });
         let titlebar = row_slot(&slots.titlebar, TITLEBAR_HEIGHT, window, cx);
-        let panes = covered_panes(panes, covering.is_some());
         let content = div()
             .flex_1()
             .min_h_0()
@@ -1373,7 +1368,7 @@ impl WindowView {
             .pr(px(CARD_GAP))
             // 状态栏的文字上下本就留着空，再垫 `CARD_GAP` 会让卡片和状态栏离得比状态栏到窗口底边远。
             .when(!status_bar::shown(cx), |content| content.pb(px(CARD_GAP)))
-            .child(div().relative().flex_1().min_w_0().h_full().child(panes).children(covering))
+            .child(div().relative().flex_1().min_w_0().h_full().child(area))
             .children(panel);
         let main = div().flex_1().min_w_0().h_full().flex().flex_col().child(titlebar).child(content);
         let mut body: Vec<AnyElement> = Vec::new();

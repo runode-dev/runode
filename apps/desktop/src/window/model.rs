@@ -67,6 +67,8 @@ pub(super) struct PaneLayout {
     pub(super) splits: HashMap<SplitId, Bounds<Pixels>>,
     /// 当前标签的终端区，浮着的终端摆在它里面。
     pub(super) area: Option<Bounds<Pixels>>,
+    /// 终端区连同停靠在它旁边的预览。
+    pub(super) terminals: Option<Bounds<Pixels>>,
 }
 
 pub(super) fn home_dir() -> Option<PathBuf> {
@@ -614,9 +616,10 @@ impl WindowView {
             }
             // 存档和报给宿主的布局里按会话记分屏，开好以前记不下它。
             TerminalEvent::SessionOpened => self.save(cx),
-            // 终端拿到焦点时自己露出来，盖着它的文件退到后面，免得打的字进了看不见的 shell。
+            // 终端拿到焦点时自己露出来，在最前的文件退到后面，免得打的字进了看不见的 shell；停靠着的文件还看得见，
+            // 只是不再是当前的那边。
             TerminalEvent::Focused => {
-                if shown && self.preview_front(cx) {
+                if shown && self.preview_current(cx) {
                     self.send_preview_back(cx);
                     cx.notify();
                 }

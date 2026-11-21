@@ -1793,6 +1793,7 @@ divider:
   sidebar: 調整側欄的寬度
   panel: 調整右側面板的寬度
   split: 調整分割畫面的大小
+  preview: 調整預覽和終端機的大小
   snapped_screen: 調整遠端桌面的高度
 paired:
   lost: 連線中斷了

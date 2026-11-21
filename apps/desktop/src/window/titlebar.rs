@@ -106,11 +106,11 @@ impl Render for DraggedTab {
     }
 }
 
-/// 拖动中的文件标签：只能放到别的文件标签上，按 `ix` 挪位置。
+/// 拖动中的文件标签：放到别的文件标签上按 `ix` 挪位置，放到终端区上停靠预览或让它盖住终端区。
 #[derive(Clone)]
-struct DraggedFileTab {
+pub(super) struct DraggedFileTab {
     /// 开始拖动时是第几个文件标签：挪的是它，落点提示也按它画在目标标签的哪一边。
-    ix: usize,
+    pub(super) ix: usize,
     name: SharedString,
     width: Pixels,
 }
@@ -230,7 +230,7 @@ impl WindowView {
     /// 又不在最前时为空。
     pub(super) fn front_tab(&self, cx: &App) -> Option<usize> {
         let workspace = self.workspace();
-        match self.preview.read(cx).front_file(workspace.id).filter(|_| self.preview_front(cx)) {
+        match self.preview.read(cx).front_file(workspace.id).filter(|_| self.preview_current(cx)) {
             Some(file) => Some(workspace.tabs.len() + file),
             None => (workspace.active < workspace.tabs.len()).then_some(workspace.active),
         }
@@ -257,8 +257,10 @@ impl WindowView {
         let title = SharedString::from(tab.focused_view().read(cx).title().to_owned());
         let mark = tab.mark(cx);
         let front = self.front_tab(cx);
-        let active = front == Some(ix);
-        let after_front = front.is_some_and(|front| ix == front + 1);
+        // 预览停靠着时当前终端标签和文件标签一起显示，都算当前的。
+        let shown = self.preview.read(cx).docked_file(workspace.id).map(|_| workspace.active);
+        let active = front == Some(ix) || shown == Some(ix);
+        let after_front = [front, shown].into_iter().flatten().any(|current| ix == current + 1);
         let (active_bg, hover_bg) = tab_backgrounds(cards, cx);
         let label = cards.then(|| pane_label(tab.focused_view().read(cx)));
         // 报给辅助工具的名字是标签上写的标题，agent 的状态和响铃这些只画成图形的写进说明。
@@ -504,8 +506,10 @@ impl WindowView {
     ) -> Stateful<Div> {
         let pos = self.workspace().tabs.len() + ix;
         let front = self.front_tab(cx);
-        let active = front == Some(pos);
-        let after_front = front.is_some_and(|front| pos == front + 1);
+        // 停靠着的预览和终端一起显示，它的标签和当前终端标签都算当前的。
+        let docked = self.preview.read(cx).docked_file(self.workspace().id);
+        let active = front == Some(pos) || docked == Some(ix);
+        let after_front = front.is_some_and(|front| pos == front + 1) || docked.is_some_and(|docked| ix == docked + 1);
         let (active_bg, hover_bg) = tab_backgrounds(cards, cx);
         let fg = cx.theme().foreground;
         let color = tab.color.map_or(fg, hsla);

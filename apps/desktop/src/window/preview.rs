@@ -1,6 +1,7 @@
 //! 把预览栏接到窗口上。预览栏本身在 `preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
 //! 的文件标签都在它里面。文件标签和终端标签一起排在标题栏里，
-//! 点中文件标签时预览盖满终端区，切到终端标签时退到后面。这里每次对它做什么之前告诉它当前是哪个
+//! 点中文件标签时预览盖满终端区，切到终端标签时退到后面；把文件标签拖到终端区靠边处，预览停靠在那一侧、和终端
+//! 并排，拖到终端区正中又盖满终端区。这里每次对它做什么之前告诉它当前是哪个
 //! workspace、交给它那个 workspace 最近读到的 git 状态，画的时候交给它字体、宽度和配置里的预览字号（颜色
 //! 它自己从主题读）；它要窗口办的事（文件树定位、出现收起和到最前时重排窗口、开关变了要存档、把路径打进
 //! 终端、按块暂存）经 `PreviewEvent` 交回来。自动换行和 Markdown 显示源码的开关在它身上，随窗口存档。
@@ -10,16 +11,26 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::preview_panel::{Input, PreviewEvent, PreviewPanel};
+use crate::preview_panel::{Dock, Input, PreviewEvent, PreviewPanel};
+use crate::ui::{
+    panel::{DIVIDER_GRAB_WIDTH, split_handle},
+    theme::ActiveTheme as _,
+};
 use gpui::{
-    AnyElement, App, Context, Empty, Entity, EntityId, Focusable as _, IntoElement as _, ParentElement as _, Pixels,
-    Point, Styled as _, Window, div,
+    AnyElement, App, Context, DragMoveEvent, Empty, Entity, EntityId, Focusable as _, Pixels, Point, Stateful, Window,
+    canvas, div, prelude::*, px, relative,
 };
 use runode_config::PreviewClick;
+use runode_types::pane::{Axis, Direction};
 
 pub(in crate::window) use crate::preview_panel::DiffTarget;
 
-use super::{WindowView, cached_page, cards, status_bar};
+use super::{
+    Divider, RATIO_STEP, WindowView, cached_page, cards, covered_panes,
+    pane_move::{DropZone, zone_at, zone_overlay},
+    status_bar,
+    titlebar::DraggedFileTab,
+};
 use crate::WorkspaceId;
 use crate::{config::AppConfig, project_host::ProjectHost};
 
@@ -213,9 +224,9 @@ impl WindowView {
         self.preview.update(cx, |panel, _| panel.send_back(id));
     }
 
-    /// 焦点交给当前的终端，盖着终端区的文件先退到后面。
+    /// 焦点交给当前的终端，在最前的文件先退到后面。
     pub(super) fn focus_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.preview_front(cx) {
+        if self.preview_current(cx) {
             self.send_preview_back(cx);
             cx.notify();
         }
@@ -227,7 +238,171 @@ impl WindowView {
         self.preview.update(cx, |panel, cx| panel.forget_workspace(id, cx));
     }
 
-    /// 当前 workspace 的预览，宽 `width`，盖满终端区。没有标签时什么也不画。
+    /// 当前 workspace 的预览在最前：盖着终端区，或者停靠着、是当前的那边；看板、配对设备页这些铺满时为假。
+    pub(super) fn preview_current(&self, cx: &App) -> bool {
+        !self.page_covers_terminals() && self.preview.read(cx).current(self.workspace().id)
+    }
+
+    /// 当前 workspace 的预览停靠在哪；看板、配对设备页这些铺满时为空。
+    fn preview_dock(&self, cx: &App) -> Option<Dock> {
+        self.preview.read(cx).dock(self.workspace().id).filter(|_| !self.page_covers_terminals())
+    }
+
+    /// 终端区：终端（`panes`），预览停靠着时和它并排，宽 `width`；在最前的预览或开着的审阅页盖住整块。停靠的
+    /// 预览和终端之间空出 `gap`。拖来的文件标签放在靠边处时预览停靠到那一侧，放在正中时盖住终端区。
+    pub(super) fn render_terminal_area(
+        &mut self,
+        panes: AnyElement,
+        width: f32,
+        gap: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Stateful<gpui::Div> {
+        let front = self.preview_front(cx).then(|| self.render_preview(width, window, cx));
+        let covering = front.or_else(|| self.render_review(window, cx));
+        let panes = covered_panes(panes, covering.is_some());
+        let body = match self.preview_dock(cx) {
+            Some(dock) => self.render_docked_preview(panes, dock, width, gap, window, cx),
+            None => panes.into_any_element(),
+        };
+        let layout = self.layout.clone();
+        div()
+            .id("terminal-area")
+            .relative()
+            .size_full()
+            .child(body)
+            .children(covering)
+            .child(
+                canvas(move |bounds, _, _| layout.borrow_mut().terminals = Some(bounds), |_, (), _, _| {})
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+            )
+            .when(cx.has_active_drag(), |area| area.child(self.render_file_tab_drop(cx)))
+    }
+
+    /// 拖动期间铺在终端区最上面的一层，接拖来的文件标签：盖着的预览挡住了下面的元素，放下的事件到不了它们。
+    fn render_file_tab_drop(&self, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
+        div()
+            .id("file-tab-drop")
+            .absolute()
+            .inset_0()
+            .children(self.file_tab_drop.map(|zone| zone_overlay(zone, cx)))
+            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<DraggedFileTab>, _, cx| {
+                let zone = zone_at(event.bounds, event.event.position);
+                if zone != this.file_tab_drop {
+                    this.file_tab_drop = zone;
+                    cx.notify();
+                }
+            }))
+            .on_drop(cx.listener(|this, dragged: &DraggedFileTab, window, cx| {
+                let Some(zone) = this.file_tab_drop.take() else {
+                    return;
+                };
+                let side = match zone {
+                    DropZone::Edge(side) => Some(side),
+                    DropZone::Center => None,
+                };
+                this.with_preview(cx, |panel, cx| panel.set_dock(side, cx));
+                this.show_file_tab(dragged.ix, window, cx);
+            }))
+    }
+
+    /// 预览停靠在终端（`panes`）的 `dock` 一侧，中间一条能拖动改大小的分隔线。
+    fn render_docked_preview(
+        &mut self,
+        panes: Stateful<gpui::Div>,
+        dock: Dock,
+        width: f32,
+        gap: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let horizontal = matches!(dock.side, Direction::Left | Direction::Right);
+        let preview_first = matches!(dock.side, Direction::Left | Direction::Up);
+        // 预览在后一块时前面还隔着空隙。
+        let preview_width = match dock.side {
+            Direction::Left => width * dock.ratio,
+            Direction::Right => width * dock.ratio - gap,
+            Direction::Up | Direction::Down => width,
+        };
+        let preview = div().relative().size_full().child(self.render_preview(preview_width, window, cx));
+        let (first, second) = if preview_first {
+            (preview.into_any_element(), panes.into_any_element())
+        } else {
+            (panes.into_any_element(), preview.into_any_element())
+        };
+        // 分隔线停在前一块的这个比例处。
+        let split = if preview_first { dock.ratio } else { 1. - dock.ratio };
+        // 卡片样式下空隙本身就是分隔线；经典样式下是一像素的线。
+        let line = if cards(cx) { cx.theme().foreground.opacity(0.) } else { cx.theme().foreground.opacity(0.15) };
+        let grab = gap.max(DIVIDER_GRAB_WIDTH);
+        let axis = if horizontal { Axis::Horizontal } else { Axis::Vertical };
+        let handle = split_handle(
+            "preview-divider",
+            !horizontal,
+            rust_i18n::t!("divider.preview").into_owned(),
+            cx,
+            move |this, double, cx| {
+                if double {
+                    this.with_preview(cx, |panel, _| panel.set_dock_ratio(0.5));
+                } else {
+                    this.dragging_divider = Some(Divider::Preview(axis));
+                }
+            },
+            move |this, delta, _, cx| {
+                // 加是分隔线往右、往下挪。
+                let delta = if preview_first { delta } else { -delta };
+                this.with_preview(cx, |panel, _| panel.set_dock_ratio(dock.ratio + delta * RATIO_STEP));
+            },
+        )
+        .absolute()
+        .map(|handle| {
+            if horizontal {
+                handle.top_0().h_full().w(px(grab)).left(relative(split)).ml(px((gap - grab) / 2.))
+            } else {
+                handle.left_0().w_full().h(px(grab)).top(relative(split)).mt(px((gap - grab) / 2.))
+            }
+        });
+        div()
+            .relative()
+            .size_full()
+            .flex()
+            .when(!horizontal, |el| el.flex_col())
+            .child(
+                div()
+                    .flex_none()
+                    .map(|el| if horizontal { el.w(relative(split)).h_full() } else { el.h(relative(split)).w_full() })
+                    .min_w_0()
+                    .min_h_0()
+                    .child(first),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .bg(line)
+                    .map(|el| if horizontal { el.w(px(gap)).h_full() } else { el.h(px(gap)).w_full() }),
+            )
+            .child(div().flex_1().min_w_0().min_h_0().child(second))
+            .child(handle)
+            .into_any_element()
+    }
+
+    /// 拖着停靠的预览和终端之间的分隔线，鼠标到了 `position`。
+    pub(super) fn drag_preview_divider(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let (Some(bounds), Some(dock)) = (self.layout.borrow().terminals, self.preview_dock(cx)) else {
+            return;
+        };
+        let along = match dock.side {
+            Direction::Left | Direction::Right => (position.x - bounds.origin.x) / bounds.size.width,
+            Direction::Up | Direction::Down => (position.y - bounds.origin.y) / bounds.size.height,
+        };
+        let ratio = if matches!(dock.side, Direction::Left | Direction::Up) { along } else { 1. - along };
+        self.with_preview(cx, |panel, _| panel.set_dock_ratio(ratio));
+    }
+
+    /// 当前 workspace 的预览，宽 `width`，盖满所在的区域。没有标签时什么也不画。
     ///
     /// 缓存：它盖着的终端一输出窗口就重画，预览只在自己的标签、编辑、高亮这些变了时重画。辅助工具开着时
     /// 不缓存：照搬上一帧时跳过 prepaint，报给辅助工具的节点就丢了。

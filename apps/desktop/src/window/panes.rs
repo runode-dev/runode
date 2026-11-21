@@ -827,6 +827,7 @@ impl WindowView {
                 | Divider::GitGraph
                 | Divider::GitHubActions(_)
                 | Divider::SnappedScreen(_)
+                | Divider::Preview(Axis::Vertical)
         );
         div()
             .absolute()
@@ -875,6 +876,11 @@ impl WindowView {
                     }
                     Divider::SnappedScreen(id) => {
                         this.resize_snapped_screen(id, f32::from(event.position.y), cx);
+                        cx.notify();
+                        return;
+                    }
+                    Divider::Preview(_) => {
+                        this.drag_preview_divider(event.position, cx);
                         cx.notify();
                         return;
                     }

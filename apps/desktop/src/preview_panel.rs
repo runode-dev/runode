@@ -67,14 +67,18 @@ use gpui::{
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
+use runode_types::pane::Direction;
 
 pub use diff::DiffTarget;
 pub(crate) use diff::{ask_discard_hunk, hunk_name, hunk_quote, hunk_title};
 pub use edit::{GoToLine, SelectNextOccurrence};
 
 use marks::{Mark, line_marks};
-pub use tabs::FileTab;
 use tabs::PreviewTabs;
+pub use tabs::{Dock, FileTab};
+
+/// 停靠着的预览占终端区的比例的上下限。
+const DOCK_RATIO: std::ops::RangeInclusive<f32> = 0.15..=0.85;
 
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
@@ -91,7 +95,7 @@ type RealRoot = (PathBuf, PathBuf);
 /// app 每次画预览栏之前交进来的东西。
 #[derive(Clone, PartialEq)]
 pub struct Input {
-    /// 预览栏的宽度，即终端区的宽。
+    /// 预览栏的宽度：盖住终端区时是终端区的宽，停靠着时是它那一块的宽。
     pub width: f32,
     /// 正文用的终端字体。
     pub font: SharedString,
@@ -665,9 +669,34 @@ impl PreviewPanel {
         self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty())
     }
 
+    /// workspace `ws` 的预览在最前，盖住终端区或者停靠着、是当前的那边。
+    pub fn current(&self, ws: WorkspaceId) -> bool {
+        self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty() && tabs.front)
+    }
+
     /// workspace `ws` 的预览在最前，盖在终端区上。
     pub fn front(&self, ws: WorkspaceId) -> bool {
-        self.workspaces.get(&ws).is_some_and(|tabs| !tabs.tabs.is_empty() && tabs.front)
+        self.current(ws) && self.workspaces[&ws].dock.is_none()
+    }
+
+    /// workspace `ws` 的预览停靠在哪，没有文件标签或盖着终端区时为空。
+    pub fn dock(&self, ws: WorkspaceId) -> Option<Dock> {
+        self.workspaces.get(&ws).filter(|tabs| !tabs.tabs.is_empty()).and_then(|tabs| tabs.dock)
+    }
+
+    /// 把当前 workspace 的预览停靠到终端区的 `side` 一侧，已经停靠着时只换一侧、大小不变；为空时改回盖住终端区。
+    pub fn set_dock(&mut self, side: Option<Direction>, cx: &mut Context<Self>) {
+        let tabs = self.tabs_mut();
+        let ratio = tabs.dock.map_or(0.5, |dock| dock.ratio);
+        tabs.dock = side.map(|side| Dock { side, ratio });
+        cx.notify();
+    }
+
+    /// 停靠着的预览占终端区的比例，限在 `DOCK_RATIO` 里。
+    pub fn set_dock_ratio(&mut self, ratio: f32) {
+        if let Some(dock) = &mut self.tabs_mut().dock {
+            dock.ratio = ratio.clamp(*DOCK_RATIO.start(), *DOCK_RATIO.end());
+        }
     }
 
     /// 让 workspace `ws` 的预览退到终端后面，切到终端标签、焦点要交给终端时用；标签都留着。
@@ -1327,8 +1356,8 @@ impl PreviewPanel {
 }
 
 impl Render for PreviewPanel {
-    /// 当前 workspace 的预览；没有标签时什么也不画。app 只在它在最前时摆出来，盖满终端区，挡住下面终端的
-    /// 鼠标事件；终端不改尺寸，退到后面时原样露出来。标签的右键菜单也画在这里。
+    /// 当前 workspace 的预览；没有标签时什么也不画。app 把它摆成两种样子：在最前时盖满终端区，挡住下面终端的
+    /// 鼠标事件，终端不改尺寸，退到后面时原样露出来；停靠着时摆在终端区的一侧，和终端并排。标签的右键菜单也画在这里。
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focus_menu(window, cx);
         let Some(panel) = self.render_preview_panel(window, cx) else {
@@ -1340,6 +1369,8 @@ impl Render for PreviewPanel {
             .left_0()
             .size_full()
             .occlude()
+            // 停靠着时点进预览，它成了当前的那边。
+            .capture_any_mouse_down(cx.listener(|this, _, _, cx| this.bring_front(cx)))
             .children(self.render_context_menu(window, cx))
             .into_any_element()
     }

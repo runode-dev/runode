@@ -363,16 +363,21 @@ impl WindowView {
     /// 拖着分屏时分屏 `pane` 上的落点提示：落在哪一块就盖住哪一块；没在拖、没落在它上面时为 `None`。
     pub(super) fn pane_drop_overlay(&self, pane: EntityId, cx: &Context<Self>) -> Option<gpui::Div> {
         let (_, zone) = self.pane_drop.filter(|(target, _)| *target == pane)?;
-        let ring = cx.theme().ring;
-        let overlay = gpui::div().absolute().bg(ring.opacity(0.18)).border_2().border_color(ring.opacity(0.7));
-        let half = gpui::relative(0.5);
-        Some(match zone {
-            DropZone::Center => overlay.inset_0(),
-            DropZone::Edge(Direction::Left) => overlay.left_0().top_0().bottom_0().w(half),
-            DropZone::Edge(Direction::Right) => overlay.right_0().top_0().bottom_0().w(half),
-            DropZone::Edge(Direction::Up) => overlay.left_0().right_0().top_0().h(half),
-            DropZone::Edge(Direction::Down) => overlay.left_0().right_0().bottom_0().h(half),
-        })
+        Some(zone_overlay(zone, cx))
+    }
+}
+
+/// 落点提示：落在哪一块就盖住所在元素的哪一块。
+pub(super) fn zone_overlay(zone: DropZone, cx: &gpui::App) -> gpui::Div {
+    let ring = cx.theme().ring;
+    let overlay = gpui::div().absolute().bg(ring.opacity(0.18)).border_2().border_color(ring.opacity(0.7));
+    let half = gpui::relative(0.5);
+    match zone {
+        DropZone::Center => overlay.inset_0(),
+        DropZone::Edge(Direction::Left) => overlay.left_0().top_0().bottom_0().w(half),
+        DropZone::Edge(Direction::Right) => overlay.right_0().top_0().bottom_0().w(half),
+        DropZone::Edge(Direction::Up) => overlay.left_0().right_0().top_0().h(half),
+        DropZone::Edge(Direction::Down) => overlay.left_0().right_0().bottom_0().h(half),
     }
 }
 
