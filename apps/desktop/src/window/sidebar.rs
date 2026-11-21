@@ -136,7 +136,7 @@ const ICON_WAITING_OFFSET: f32 = 4.;
 /// 项目一个终端都没开时图标的不透明度。
 const NO_TERMINAL_ICON_OPACITY: f32 = 0.4;
 
-/// 侧栏顶上几段（搜索行、任务、项目栏）之间的间距。
+/// 搜索行和任务之间的间距。
 const SECTION_GAP: f32 = 6.;
 /// 侧栏里各段离侧栏左右两边的留白。
 const SIDEBAR_INSET: f32 = 6.;
@@ -148,9 +148,9 @@ const WORKSPACE_ROW_PADDING: f32 = 8.;
 const TRAILING_MAX_WIDTH: f32 = 0.5;
 const TRAILING_GAP: f32 = 6.;
 const BELL_DOT_SIZE: f32 = 6.;
-/// 主机组头、项目组头和代表整个项目的 workspace 行左边的留白：三处行首的箭头和状态标记排成一列。
+/// 侧栏各行行首那一列离各段左边的留白：行首的箭头、状态标记和图标排成一列。
 const HEADER_INSET: f32 = 5.;
-/// 代表整个项目的 workspace 行上状态标记后面的间距，名字的左边和项目组头上的名字对齐。
+/// 行首的状态标记或图标那一格后面的间距；代表整个项目的 workspace 行上，名字的左边和项目组头上的名字对齐。
 const SOLO_ROW_GAP: f32 = 6.;
 /// 项目组头和代表整个项目的行没选中时的字色，比缩进在组头下面的行浓；主机组头悬停时也是它。
 const HEADER_TEXT_OPACITY: f32 = 0.9;
@@ -166,7 +166,7 @@ const AGENT_DOT_SIZE: f32 = 6.;
 const AGENT_DOT_RING: f32 = 1.5;
 /// 没选中的行的字色，导航和 workspace 行一样。
 const ROW_TEXT_OPACITY: f32 = 0.78;
-/// 主机组头和导航每行名字前的图标那一格，两处的文字才对齐。
+/// 主机组头上系统图标那一格。
 const ROW_ICON_SIZE: f32 = 16.;
 /// 改名输入框的高度。
 const RENAME_FIELD_HEIGHT: f32 = 18.;
@@ -320,7 +320,7 @@ impl WindowView {
             )
             .child(self.render_sidebar_search(cx))
             .child(self.render_sidebar_tasks(cx))
-            .child(self.render_projects_bar(cx).mt(px(SECTION_GAP)))
+            .child(self.render_projects_bar(cx))
             .child(
                 div()
                     .id("workspace-list")

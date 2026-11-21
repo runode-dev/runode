@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui::{AnyElement, App, Context, Div, Hsla, MouseButton, Role, Stateful, Window, div, prelude::*, px, svg};
 
-use super::{ROW_ICON_SIZE, ROW_TEXT_OPACITY, SECTION_GAP, SIDEBAR_INSET};
+use super::{HEADER_INSET, ROW_TEXT_OPACITY, SECTION_GAP, SIDEBAR_INSET, SOLO_ROW_GAP};
 use crate::{
     kanban::Tally,
     menus::OpenSettings,
@@ -18,7 +18,7 @@ use crate::{
         theme::ActiveTheme as _,
         tooltip::{shortcut_text, tooltip},
     },
-    window::{GotoAgent, NewTodo, ToggleKanban, WindowView},
+    window::{AGENT_MARK_SIZE_SMALL, GotoAgent, NewTodo, ToggleKanban, WindowView},
 };
 
 /// 导航一行的高度。
@@ -76,18 +76,27 @@ impl WindowView {
             .flex_1()
             .min_w_0()
             .h(scaled(SEARCH_HEIGHT))
-            .px(px(10.))
+            // 图标那格和下面各行行首的那格排成一列；边框占掉 1px。
+            .pl(px(HEADER_INSET - 1.))
+            .pr(px(10.))
             .rounded(px(8.))
             .bg(field)
             .border_1()
             .border_color(border)
             .flex()
             .items_center()
-            .gap(px(8.))
+            .gap(px(SOLO_ROW_GAP))
             .text_size(FontSize::Medium)
             .text_color(muted)
             .hover(|search| search.text_color(fg))
-            .child(svg().path(SEARCH_ICON).flex_none().size(px(13.)).text_color(muted))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(AGENT_MARK_SIZE_SMALL))
+                    .flex()
+                    .justify_center()
+                    .child(svg().path(SEARCH_ICON).size(px(13.)).text_color(muted)),
+            )
             .child(div().flex_1().min_w_0().truncate().child(label))
             .children(
                 shortcut_text(&GotoAgent, cx).map(|text| div().flex_none().text_size(FontSize::Small).child(text)),
@@ -241,11 +250,12 @@ fn page_entry(
         .aria_toggled(active.into())
         .flex_none()
         .h(scaled(NAV_ROW_HEIGHT))
-        .px(px(8.))
+        .pl(px(HEADER_INSET))
+        .pr(px(8.))
         .rounded(px(7.))
         .flex()
         .items_center()
-        .gap(px(8.))
+        .gap(px(SOLO_ROW_GAP))
         .text_size(FontSize::Medium)
         .map(|row| {
             if active {
@@ -254,8 +264,9 @@ fn page_entry(
                 row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
             }
         })
-        .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().child(
-            svg().path(icon).size(px(15.)).map(|icon| {
+        // 图标那格和项目行上的状态标记一样宽，名字才和项目名对齐。
+        .child(div().flex_none().w(px(AGENT_MARK_SIZE_SMALL)).flex().justify_center().child(
+            svg().path(icon).flex_none().size(px(15.)).map(|icon| {
                 if active {
                     icon.text_color(fg)
                 } else {

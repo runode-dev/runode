@@ -187,12 +187,12 @@ impl WindowView {
         let add_label = rust_i18n::t!("workspace.add_project");
         let group = SharedString::from("projects-bar");
         let collapsible = !self.collapsible_projects().is_empty();
-        // 和列表一样先让出 `SIDEBAR_INSET`，「项目」和组头的箭头对齐。
+        // 和列表一样先让出 `SIDEBAR_INSET`，「项目」和组头的箭头、行首的图标对齐。
         div()
             .flex_none()
             .h(scaled(PROJECTS_BAR_HEIGHT))
             .group(group.clone())
-            .pl(px(SIDEBAR_INSET + 6.))
+            .pl(px(SIDEBAR_INSET + HEADER_INSET))
             .pr(px(SIDEBAR_INSET + 2.))
             .flex()
             .items_center()
