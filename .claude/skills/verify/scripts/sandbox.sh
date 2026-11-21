@@ -6,7 +6,8 @@
 #
 # 用法：sandbox.sh host|app|rn ARGS...|smoke|status|logs|stop
 #   host    只起宿主（`runode --host --stay`），给它一个空工作区，等到命令行连得上
-#   app     起桌面 app（它自己拉起宿主），等到宿主连得上、窗口开出来；ONBOARDING=1 时第一次启动打开引导页
+#   app     起桌面 app（它自己拉起宿主），等到宿主连得上、窗口开出来；ONBOARDING=1 时第一次启动打开引导页；
+#           接着副屏时窗口开在副屏上，不挡主屏
 #   rn      在沙盒里跑一条 runode 命令行，比如 `sandbox.sh rn list --json`
 #   smoke   用命令行走一遍主流程：开终端、打命令、等它跑完、读输出、看板加删任务、关终端
 #   status  沙盒目录和里面在跑什么
@@ -43,6 +44,7 @@ LOCK="$SANDBOX/.runode/run/host$DEV.lock"
 HOST_LOG="$SANDBOX/.runode/cache/host$DEV.log"
 HOST_LAYOUT="$SANDBOX/.runode/run/host-layout$DEV.json"
 ONBOARDING_FILE="$SANDBOX/.runode/onboarding$DEV"
+WINDOWS_FILE="$SANDBOX/.runode/windows$DEV.json"
 APP_LOG="$STATE/app.log"
 # 沙盒的环境。写成数组、直接展开在命令前：放进函数再后台跑时 `$!` 是子 shell，不是 runode。
 SANDBOX_ENV=(env -u RUNODE_SOCKET -u RUNODE_SESSION -u RUNODE_BIN -u XDG_CONFIG_HOME -u XDG_DATA_HOME
@@ -139,6 +141,47 @@ cmd_host() {
     echo "宿主就绪：pid $(host_pid)，socket $SOCK"
 }
 
+# 第一块不是主屏的屏幕：「UUID 宽 高」（宽高按点，UUID 小写），只有一块屏时什么也不打印。
+secondary_display() {
+    osascript -l JavaScript -e '
+ObjC.import("AppKit");
+ObjC.bindFunction("CGMainDisplayID", ["unsigned int", []]);
+ObjC.bindFunction("CGDisplayCreateUUIDFromDisplayID", ["void *", ["unsigned int"]]);
+ObjC.bindFunction("CFUUIDCreateString", ["id", ["void *", "void *"]]);
+const screens = $.NSScreen.screens;
+let found = "";
+for (let i = 0; i < screens.count && !found; i++) {
+    const screen = screens.objectAtIndex(i);
+    const id = screen.deviceDescription.objectForKey("NSScreenNumber").unsignedIntValue;
+    if (id === $.CGMainDisplayID()) continue;
+    const uuid = ObjC.unwrap($.CFUUIDCreateString(null, $.CGDisplayCreateUUIDFromDisplayID(id)));
+    found = [uuid.toLowerCase(), screen.frame.size.width, screen.frame.size.height].join(" ");
+}
+found' 2>/dev/null || true
+}
+
+# 还没有窗口存档、接着副屏时，写一份把窗口放在副屏正中的存档。窗口里要有一个 workspace，
+# 不然 app 不恢复这个窗口。
+place_on_secondary() {
+    [ -e "$WINDOWS_FILE" ] && return
+    local uuid width height
+    read -r uuid width height <<<"$(secondary_display)" || true
+    [ -n "${uuid:-}" ] || return 0
+    local w=960 h=620
+    mkdir -p "$(dirname "$WINDOWS_FILE")"
+    cat >"$WINDOWS_FILE" <<EOF
+{"version": 1, "windows": [{
+  "bounds": {"display": "$uuid", "mode": "windowed", "x": $(((${width%.*} - w) / 2)), "y": $(((${height%.*} - h) / 2)), "width": $w, "height": $h},
+  "workspaces": [{"name": "~", "dir": "$SANDBOX", "active": 0,
+    "tabs": [{"root": {"type": "leaf", "cwd": null}, "focused": 0, "zoomed": false}]}],
+  "active": 0, "preview_wrap": false, "preview_source": false, "show_ignored": false,
+  "hide_dotfiles": false, "git_tree": false, "git_hide_subs": false, "git_hide_worktrees": false,
+  "file_search_tree": false, "file_search_options": {}, "git_graph_collapsed": false,
+  "github_actions_heights": [null, null, null]
+}]}
+EOF
+}
+
 cmd_app() {
     prepare
     local pid
@@ -155,6 +198,7 @@ cmd_app() {
         mkdir -p "$(dirname "$ONBOARDING_FILE")"
         echo "done" >"$ONBOARDING_FILE"
     fi
+    place_on_secondary
     # runode::startup 的计时点里有 open_window：窗口开出来、画过第一帧以后才打。
     "${SANDBOX_ENV[@]}" RUST_LOG="${RUST_LOG:-info,runode::startup=info}" nohup "$BIN" </dev/null >"$APP_LOG" 2>&1 &
     pid=$!
@@ -167,6 +211,7 @@ cmd_app() {
         sleep 0.1
     done
     [ "$i" -lt "$tries" ] || die "等了 ${READY_SECS} 秒 app 还没开出窗口，看 sandbox.sh logs"
+    [ ! -e "$WINDOWS_FILE.bad" ] || echo "sandbox: 窗口存档的格式对不上，窗口开在了主屏；照 window::persist::format 改 place_on_secondary" >&2
     echo "app 就绪：pid ${pid}，宿主 pid $(host_pid)"
     echo "窗口归进程 $pid 所有（可执行文件 ${BIN}，不是 /Applications/Runode.app），界面操作按这个 pid 找窗口"
 }
