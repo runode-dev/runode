@@ -118,16 +118,16 @@ impl WindowView {
         let tasks = self.render_nav_tasks(cx);
         let phone = self.render_nav_phone(cx);
         let settings_label = rust_i18n::t!("workspace.settings").into_owned();
-        let settings_shortcut = shortcut_text(&OpenSettings, cx);
         let settings = page_entry(
             "nav-settings",
             SLIDERS_ICON,
-            settings_label,
+            settings_label.clone(),
             self.settings_page().is_some(),
-            settings_shortcut.map(|text| div().child(text).into_any_element()),
+            None,
             cx,
             |this, window, cx| this.open_settings(window, cx),
-        );
+        )
+        .tooltip(tooltip(settings_label, Some(&OpenSettings)));
         div()
             .id("sidebar-nav")
             .role(Role::Group)
@@ -226,6 +226,7 @@ fn page_entry(
     let view = cx.entity().downgrade();
     div()
         .id(id)
+        .group(id)
         .role(Role::Button)
         .aria_label(label.clone())
         .aria_toggled(active.into())
@@ -244,14 +245,15 @@ fn page_entry(
                 row.text_color(fg.opacity(ROW_TEXT_OPACITY)).hover(|row| row.bg(hover_bg).text_color(fg))
             }
         })
-        .child(
-            div()
-                .flex_none()
-                .w(px(ROW_ICON_SIZE))
-                .flex()
-                .justify_center()
-                .child(svg().path(icon).size(px(15.)).text_color(fg.opacity(if active { 0.9 } else { 0.6 }))),
-        )
+        .child(div().flex_none().w(px(ROW_ICON_SIZE)).flex().justify_center().child(
+            svg().path(icon).size(px(15.)).map(|icon| {
+                if active {
+                    icon.text_color(fg)
+                } else {
+                    icon.text_color(fg.opacity(ROW_TEXT_OPACITY)).group_hover(id, |icon| icon.text_color(fg))
+                }
+            }),
+        ))
         .child(div().flex_none().child(label))
         .children(trailing.map(|trailing| {
             div().flex_1().min_w_0().flex().justify_end().text_size(FontSize::Small).text_color(muted).child(trailing)
