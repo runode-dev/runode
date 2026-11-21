@@ -1,7 +1,7 @@
 # 打包 iOS app 传到 TestFlight：cd apps/ios && bundle exec fastlane beta
 #
 # 登录 App Store Connect 用 API 密钥，从环境变量读：ASC_KEY_ID、ASC_ISSUER_ID，
-# 和 .p8 私钥的路径 ASC_KEY_PATH。签名照工程里的自动签名，xcodebuild 也拿这把密钥去开发者账号里
+# 和 .p8 私钥的路径 ASC_KEY_PATH；推送中转的基址从 RUNODE_PUSH_RELAY 读，没设时不带中转。签名照工程里的自动签名，xcodebuild 也拿这把密钥去开发者账号里
 # 补证书和描述文件，所以不用在 Xcode 里登录，CI 上也能跑。
 opt_out_usage
 default_platform(:ios)
@@ -30,7 +30,8 @@ platform :ios do
       output_directory: "build/fastlane",
       derived_data_path: "build/dd-fastlane",
       # gym 导出时也带上 xcargs，所以签名的认证参数只在这里给一次。
-      xcargs: "#{auth} CURRENT_PROJECT_VERSION=#{build_number}"
+      xcargs: "#{auth} CURRENT_PROJECT_VERSION=#{build_number} " \
+              "RUNODE_PUSH_RELAY=#{ENV.fetch("RUNODE_PUSH_RELAY", "").shellescape}"
     )
     upload_to_testflight(skip_waiting_for_build_processing: true)
   end

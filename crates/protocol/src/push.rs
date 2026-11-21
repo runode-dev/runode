@@ -71,9 +71,12 @@ pub const BLOCKED_LINES: usize = 3;
 pub const EXPIRES_AFTER: u64 = 30 * 60;
 /// 中转请求体的版本（`v`）。
 pub const RELAY_VERSION: u32 = 1;
-/// 官方中转服务的基址，下面的接口路径接在它后面。只有发布流水线编译时设 `RUNODE_PUSH_RELAY`，
-/// 开发版和自己编译的版本里是 `None`，不经中转推官方 App；本地要测中转时编译前自己设上。
-pub const RELAY_URL: Option<&str> = option_env!("RUNODE_PUSH_RELAY");
+/// 官方中转服务的基址，下面的接口路径接在它后面，取自编译时的环境变量 `RUNODE_PUSH_RELAY`。
+/// 没设或设成空串时是 `None`，不经中转推官方 App。
+pub const RELAY_URL: Option<&str> = match option_env!("RUNODE_PUSH_RELAY") {
+    Some(url) if !url.is_empty() => Some(url),
+    _ => None,
+};
 /// 换句柄：`POST`，体是 `RelayRegister`，回 200 和 `RelayHandle`。
 pub const RELAY_REGISTER: &str = "/v1/register";
 /// 发通知：`POST`，体是 `RelayNotify`，回 200。

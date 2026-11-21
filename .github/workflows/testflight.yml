@@ -45,6 +45,7 @@ jobs:
           ASC_KEY_PATH: ${{ runner.temp }}/asc.p8
           ASC_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.NOTARY_ISSUER }}
+          RUNODE_PUSH_RELAY: ${{ vars.RUNODE_PUSH_RELAY }}
         run: bundle exec fastlane beta
       - name: 删掉密钥
         if: always()

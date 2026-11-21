@@ -12,13 +12,14 @@ if (file("google-services.json").exists()) {
 }
 
 /**
- * 推送中转的基址。release 默认用正式的中转；debug 默认不带中转，FCM 的 token 原文直接交给配了 Firebase 服务账号的电脑。
- * Gradle 属性 `RUNODE_PUSH_RELAY` 给了时所有构建类型都用它，空串表示不带中转，本地测中转时用
- * `-PRUNODE_PUSH_RELAY=https://…`；非空时必须是带主机的 https 地址。
+ * 推送中转的基址，取自 Gradle 属性 `RUNODE_PUSH_RELAY`（`-PRUNODE_PUSH_RELAY=https://…`），没给时取同名的环境变量，
+ * 非空时必须是带主机的 https 地址。
+ * 没给或给空串时不带中转，FCM 的 token 原文直接交给配了 Firebase 服务账号的电脑。
  */
-val pushRelayProperty: String? = providers.gradleProperty("RUNODE_PUSH_RELAY").orNull?.trim()
+val pushRelayProperty: String? = providers.gradleProperty("RUNODE_PUSH_RELAY")
+    .orElse(providers.environmentVariable("RUNODE_PUSH_RELAY")).orNull?.trim()
 
-fun pushRelay(default: String): String = (pushRelayProperty ?: default).also { relay ->
+val pushRelay: String = (pushRelayProperty ?: "").also { relay ->
     require(
         relay.isEmpty() ||
             runCatching { URI(relay) }.getOrNull()?.let { it.scheme == "https" && !it.host.isNullOrEmpty() } == true,
@@ -44,11 +45,8 @@ android {
     }
 
     buildTypes {
-        getByName("debug") {
-            buildConfigField("String", "RUNODE_PUSH_RELAY", "\"${pushRelay("")}\"")
-        }
-        getByName("release") {
-            buildConfigField("String", "RUNODE_PUSH_RELAY", "\"${pushRelay("https://push.runode.dev")}\"")
+        all {
+            buildConfigField("String", "RUNODE_PUSH_RELAY", "\"$pushRelay\"")
         }
     }
 

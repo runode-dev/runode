@@ -42,7 +42,7 @@ npx wrangler login
 npm run deploy
 ```
 
-Worker 先跑在 `workers.dev` 的子域名上，还没绑 `push.runode.dev`。之后用 `npx wrangler tail` 或控制台的 Workers Logs 看日志。
+Worker 先跑在 `workers.dev` 的子域名上，还没绑 `push.runode.dev`。各端编进去的中转地址取自编译时的 `RUNODE_PUSH_RELAY`：发版和 TestFlight 的流水线读仓库的 Actions 变量 `RUNODE_PUSH_RELAY`，没设时编出来的包不带中转，换了地址要回来改它。之后用 `npx wrangler tail` 或控制台的 Workers Logs 看日志。
 
 ### 从 Rust 版的服务器切过来
 
