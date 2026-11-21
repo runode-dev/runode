@@ -42,7 +42,7 @@ npx wrangler login
 npm run deploy
 ```
 
-`wrangler.jsonc` 把 `push.runode.dev` 设成 Worker 的自定义域名，Cloudflare 自己建 DNS 记录、发证书。之后用 `npx wrangler tail` 或控制台的 Workers Logs 看日志。
+Worker 先跑在 `workers.dev` 的子域名上，还没绑 `push.runode.dev`。之后用 `npx wrangler tail` 或控制台的 Workers Logs 看日志。
 
 ### 从 Rust 版的服务器切过来
 

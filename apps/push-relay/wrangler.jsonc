@@ -1,9 +1,8 @@
 {
-  "name": "runode-push",
+  "name": "runode",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "routes": [{ "pattern": "push.runode.dev", "custom_domain": true }],
-  "workers_dev": false,
+  "workers_dev": true,
   "observability": { "enabled": true },
   // namespace_id 在账号里唯一，换了就从零计数。
   "ratelimits": [
