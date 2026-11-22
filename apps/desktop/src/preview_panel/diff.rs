@@ -42,7 +42,7 @@ use super::{
     ARROW_UP_ICON, BODY_PADDING, Loaded, MAX_COLUMNS, Note, PreviewEvent, PreviewPanel, ROW_EXTRA_HEIGHT,
     body::{TEXT_RIGHT_PADDING, WRAP_SLACK, highlight_style, shown_text},
     file_stamp, gpui_format, picture, right_fade, shown_width,
-    wrap::{WrapCache, segment},
+    wrap::{WrapCache, Wrapped, segment},
 };
 
 /// 顶上那一条的高度。
@@ -124,6 +124,12 @@ impl DiffContent {
         (self.view.file.added, self.view.file.removed)
     }
 
+    /// 列表第 `row` 行（换行时是折出来的一段）在新文件里对应的行，从 0 数。
+    pub(super) fn new_line_at(&self, row: usize, wrapped: Option<&Wrapped>) -> Option<usize> {
+        let item = wrapped.map_or(Some(row), |wrapped| wrapped.rows.get(row).map(|(item, _)| *item));
+        new_line_near(&self.view, item.unwrap_or(usize::MAX))
+    }
+
     /// 新的一边是能打开来编辑的文件：删掉的文件和子模块的条目不是。不查文件现在还在不在工作区。
     pub(super) fn editable(&self) -> bool {
         self.view.file.status != FileStatus::Deleted && !self.view.file.gitlink
@@ -134,6 +140,19 @@ impl DiffContent {
     fn unhighlighted(&self) -> bool {
         self.new_spans.is_none() || self.removed_spans.is_none() || self.words.is_none()
     }
+}
+
+/// `rows` 第 `item` 行在新文件里对应的行，从 0 数：删掉的行和块头取它后面最近的一行新文件的行，后面
+/// 没有时取前面的；`item` 超出时从最后一行算。
+fn new_line_near(view: &DiffView, item: usize) -> Option<usize> {
+    let new = |row: &DiffRow| match *row {
+        DiffRow::Context { new, .. } => Some(new),
+        DiffRow::Hunk { hunk, line } => view.file.hunks[hunk].lines[line].new,
+        DiffRow::Header(_) => None,
+    };
+    let item = item.min(view.rows.len().checked_sub(1)?);
+    let line = view.rows[item..].iter().chain(view.rows[..item].iter().rev()).find_map(new)?;
+    usize::try_from(line).ok()?.checked_sub(1)
 }
 
 /// 一行的原文：块外和块里没改的、加的行用新文件的全文（没读全文时用 diff 里的）；删掉的行用 diff
@@ -484,6 +503,27 @@ impl PreviewPanel {
                     .child(scrollbar("preview-diff-scroll-x", handle, Axis::Horizontal)),
             )
             .into_any_element()
+    }
+
+    /// 打开 diff 标签的文件来编辑，选中 diff 视口正中那一行在新文件里对应的行。新文件是暂存区或提交里的那一版时，
+    /// 行号照它算，和工作区的文件可能差几行。
+    pub(super) fn edit_diff_file(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = self.preview() else {
+            return;
+        };
+        let Some(Loaded::Diff(content)) = &preview.content else {
+            return;
+        };
+        let handle = preview.scroll.0.borrow().base_handle.clone();
+        let middle = -f32::from(handle.offset().y) - BODY_PADDING + f32::from(handle.bounds().size.height) / 2.;
+        let row = (middle.max(0.) / (self.input.font_size + ROW_EXTRA_HEIGHT)) as usize;
+        let wrapped = self.wrap.then(|| content.wrap.current()).flatten();
+        let line = content.new_line_at(row, wrapped.as_deref());
+        let path = preview.path.clone();
+        match line {
+            Some(line) => self.open_at(&path, line, None, true, cx),
+            None => self.open(&path, true, cx),
+        }
     }
 
     /// 滚到下一处（`forward`）或上一处改动的块头。
@@ -907,6 +947,16 @@ mod tests {
         let new_lines = vec!["a much longer new line".to_owned(), "b".to_owned(), "c".to_owned()];
         let rows = git::merge_rows(&file, &new_lines).unwrap();
         DiffView { file, new_lines, rows }
+    }
+
+    #[test]
+    fn maps_diff_rows_to_new_file_lines() {
+        // 行：块头、删掉的 old、加的第 1 行、没改的第 2 行、块外的第 3 行。
+        let view = view();
+        let lines: Vec<_> = (0..6).map(|item| new_line_near(&view, item)).collect();
+        assert_eq!(lines, [Some(0), Some(0), Some(0), Some(1), Some(2), Some(2)]);
+        let empty = DiffView { rows: Vec::new(), ..view };
+        assert_eq!(new_line_near(&empty, 0), None);
     }
 
     /// 块头写 git 认出的函数；没有时写新文件里的行号，只删了行的写旧文件的，省掉的行数算一行。

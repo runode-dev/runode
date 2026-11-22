@@ -1287,10 +1287,8 @@ impl PreviewPanel {
                         .on_a11y_press(view.clone(), |this, _, cx| this.toggle_preview_source(cx)),
                 )
             })
-            // diff 标签打开同一个文件的普通标签，在编辑器里改。
             .when(matches!(&preview.content, Some(Loaded::Diff(content)) if content.editable()), |buttons| {
                 let text = rust_i18n::t!("preview.edit_file");
-                let path = preview.path.clone();
                 buttons.child(
                     Button::new("preview-edit-file", text.clone().into_owned())
                         .icon(PENCIL_ICON)
@@ -1299,7 +1297,7 @@ impl PreviewPanel {
                         .flex_none()
                         .size(px(22.))
                         .tooltip(tooltip(text, None))
-                        .on_press_down(cx, move |this, _, cx| this.open(&path, true, cx)),
+                        .on_press_down(cx, |this, _, cx| this.edit_diff_file(cx)),
                 )
             })
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图、编辑器和 diff 里有；图片这类不是文字的
