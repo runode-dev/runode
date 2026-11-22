@@ -1533,6 +1533,7 @@ preview:
   close_all: 全部關閉
   keep_open: 保持開啟
   wrap: 自動換行
+  edit_file: 編輯檔案
   show_source: 顯示原始碼
   show_rendered: 顯示排版
   go_to_line: 跳到行號

@@ -1533,6 +1533,7 @@ preview:
   close_all: Close All
   keep_open: Keep Open
   wrap: Word Wrap
+  edit_file: Edit File
   show_source: Show Source
   show_rendered: Show Formatted
   go_to_line: Go to Line

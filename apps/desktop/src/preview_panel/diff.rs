@@ -124,6 +124,11 @@ impl DiffContent {
         (self.view.file.added, self.view.file.removed)
     }
 
+    /// 新的一边是能打开来编辑的文件：删掉的文件和子模块的条目不是。不查文件现在还在不在工作区。
+    pub(super) fn editable(&self) -> bool {
+        self.view.file.status != FileStatus::Deleted && !self.view.file.gitlink
+    }
+
     /// 后台的高亮还没做完。换上新读的 diff 时挪过来了旧的高亮，那两份不空，`words` 却是空的，
     /// 所以要连它一起看，不然这时被下一次读取取消掉，就再也不重算了。
     fn unhighlighted(&self) -> bool {
