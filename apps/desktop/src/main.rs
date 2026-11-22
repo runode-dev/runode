@@ -214,6 +214,8 @@ fn main() {
     // 在后台线程里读配置、定宿主怎么跑、连上它，再提前拉起第一个 shell（启动要几十毫秒），和 GPUI
     // 初始化同时进行；主线程第一次用到宿主时等它连好。
     host_client::start(prespawn::start());
+    // 本进程里跑的 git 要用户的 PATH，先在后台问好。
+    std::thread::spawn(|| process_env::user_path(None));
     #[cfg(target_os = "linux")]
     desktop_entry::refresh();
 

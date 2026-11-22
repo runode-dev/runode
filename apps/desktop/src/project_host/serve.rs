@@ -66,6 +66,8 @@ struct Watched {
 type Shared = Arc<Mutex<Caches>>;
 
 pub(crate) fn run() -> i32 {
+    // ssh 拉起的进程只有 sshd 给的 PATH，这里跑的 git 要用户的 PATH 才找得到 git-lfs 和钩子要的程序。
+    std::thread::spawn(|| crate::process_env::user_path(None));
     serve(io::stdin().lock(), io::stdout())
 }
 

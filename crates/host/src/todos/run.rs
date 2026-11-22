@@ -295,12 +295,24 @@ fn shell_command(run: &str) -> Command {
     command
 }
 
-/// 命令的 PATH：登录 shell 配好的（问一次，记住），后面接上 `env` 里 `ENV_BIN` 所在的目录，命令里能直接敲
-/// `runode`。问不到时为空，照用宿主环境和 `env` 里的。
-fn command_path(env: &[(String, OsString)]) -> Option<OsString> {
+/// 登录 shell 配好的 PATH，问一次、记住，问不到时为空。问到时也交给 `runode_git::set_path`：从访达打开的 app
+/// 拉起的宿主继承的 PATH 里没有 brew 这类目录，git 拉起的 git-lfs 和钩子在那里找不到。第一次问要起一个交互的
+/// shell，会卡住，不在要马上回话的地方第一个调。
+pub(super) fn login_path() -> Option<OsString> {
     static LOGIN: OnceLock<Option<OsString>> = OnceLock::new();
-    let login =
-        LOGIN.get_or_init(|| login_shell_path(&runode_terminal::pty::default_shell(), Path::new("/"))).clone()?;
+    LOGIN
+        .get_or_init(|| {
+            let path = login_shell_path(&runode_terminal::pty::default_shell(), Path::new("/"))?;
+            runode_git::set_path(path.clone());
+            Some(path)
+        })
+        .clone()
+}
+
+/// 命令的 PATH：`login_path`，后面接上 `env` 里 `ENV_BIN` 所在的目录，命令里能直接敲 `runode`。问不到时为空，
+/// 照用宿主环境和 `env` 里的。
+fn command_path(env: &[(String, OsString)]) -> Option<OsString> {
+    let login = login_path()?;
     let Some(bin) = env.iter().find(|(key, _)| key == ENV_BIN).and_then(|(_, exe)| Path::new(exe).parent()) else {
         return Some(login);
     };

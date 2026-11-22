@@ -41,7 +41,23 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::OnceLock,
 };
+
+/// 起 git 时设给它的 `PATH`：git 本身、它拉起的过滤器（git-lfs）和钩子都照它找程序。没设时继承本进程的。
+pub(crate) static PATH: OnceLock<OsString> = OnceLock::new();
+
+/// 设定此后起的 git 用的 `PATH`，只有第一次设的算数。
+pub fn set_path(path: OsString) {
+    let _ = PATH.set(path);
+}
+
+/// 给 `command` 设上 `PATH`（设过的话）。
+fn apply_path(command: &mut Command) {
+    if let Some(path) = PATH.get() {
+        command.env("PATH", path);
+    }
+}
 
 /// 在 `dir` 里跑 git 的命令，各处共用的开头：标准输入是空的，非 ASCII 路径原样输出。
 /// 关掉 `core.fsmonitor` 和 `log.showSignature`：仓库自己的配置能把前者、以及校验签名用的
@@ -55,6 +71,7 @@ pub(crate) fn git_command(dir: &Path) -> Result<Command> {
     }
     let mut command = Command::new("git");
     hide_window(&mut command);
+    apply_path(&mut command);
     command
         .arg("-C")
         .arg(dir)
@@ -103,6 +120,7 @@ pub fn installed() -> bool {
     }
     let mut command = Command::new("git");
     hide_window(&mut command);
+    apply_path(&mut command);
     command
         .arg("--version")
         .stdin(Stdio::null())

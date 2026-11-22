@@ -15,11 +15,16 @@ pub fn fix() {
 
 /// app 自己找用户装的命令行工具（agent、gh）用的 PATH：`reported` 是本机终端里 shell 报告的 PATH，没有时用
 /// 登录 shell 配好的 PATH，再问不到才用 app 自己的。从访达打开时 app 自己的 PATH 里没有 brew、`~/.local/bin`
-/// 这类目录。第一次问登录 shell 要起一个交互的 shell，会卡住，放到后台调；问到的一个进程只问一次。
+/// 这类目录。第一次问登录 shell 要起一个交互的 shell，会卡住，放到后台调；问到的一个进程只问一次，也交给
+/// `runode_git::set_path`，git 拉起的 git-lfs 和钩子才找得到。
 pub fn user_path(reported: Option<OsString>) -> Option<OsString> {
     static LOGIN: OnceLock<Option<OsString>> = OnceLock::new();
     // 在 `/` 里起：项目目录里的 direnv 这类配置不该被它读到、执行。
-    let login = || runode_agent::oneshot::login_shell_path(&runode_terminal::pty::default_shell(), Path::new("/"));
+    let login = || {
+        let path = runode_agent::oneshot::login_shell_path(&runode_terminal::pty::default_shell(), Path::new("/"))?;
+        runode_git::set_path(path.clone());
+        Some(path)
+    };
     reported.or_else(|| LOGIN.get_or_init(login).clone()).or_else(|| std::env::var_os("PATH"))
 }
 

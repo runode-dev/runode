@@ -257,6 +257,10 @@ impl Host {
         self.shared.todos_changed();
         let todos = self.shared.todos.clone();
         let shared = Arc::downgrade(&self.shared);
+        // 宿主替前端跑的 git 也要用户的 PATH，先在后台问好。
+        if let Err(err) = std::thread::Builder::new().name("login-path".into()).spawn(run::login_path) {
+            tracing::warn!("cannot ask the login shell for PATH: {err}");
+        }
         if let Err(err) =
             std::thread::Builder::new().name("host-todos".into()).spawn(move || schedule::run(&todos, &shared))
         {

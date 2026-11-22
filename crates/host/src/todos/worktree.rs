@@ -19,6 +19,8 @@ const WORKTREE_ATTEMPTS: usize = 2;
 /// 加上任务的标识，还有的话再加上序号。已经被占了的名字（`taken`）直接跳过，不用 git 去试；
 /// 真去试的最多 `WORKTREE_ATTEMPTS` 个。返回工作树的根目录和分支。
 pub(super) fn add_worktree(todo: &Todo) -> Result<(PathBuf, String), String> {
+    // 检出时 git 要按用户的 PATH 找 git-lfs 这类过滤器。
+    super::run::login_path();
     let repo =
         Repo::open(&todo.spec.dir).ok_or_else(|| format!("{} is not in a git repository", todo.spec.dir.display()))?;
     let slug = slug(&todo.spec.title).unwrap_or_else(|| todo.id.clone());

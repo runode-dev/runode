@@ -41,7 +41,7 @@ pub(crate) fn git_runnable(recheck: bool) -> bool {
     if let Some(usable) = last.filter(|_| !recheck).and_then(|checked| still_valid(checked, now)) {
         return usable;
     }
-    let path = std::env::var_os("PATH");
+    let path = crate::PATH.get().cloned().or_else(|| std::env::var_os("PATH"));
     let found = find_on_path(path.as_deref().unwrap_or(OsStr::new(DEFAULT_PATH)), is_executable);
     let usable = usable(found.as_deref(), selected_developer_dir, is_executable);
     *last = Some(Checked { usable, at: now });
