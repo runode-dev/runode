@@ -793,11 +793,12 @@ impl PreviewPanel {
             preview.selection = Some((line, line));
             preview.hit = hit.clone().map(|hit| (line, hit));
             preview.reveal.set(Some((line, ScrollStrategy::Center)));
-            if let Some(editor) = &preview.editor {
+            if let Some(editor) = &mut preview.editor {
                 match hit {
                     Some(hit) => editor.select_in_line(line, hit, cx),
                     None => editor.select_lines(line..line + 1, cx),
                 }
+                editor.center_on(line, cx);
             }
         }
     }

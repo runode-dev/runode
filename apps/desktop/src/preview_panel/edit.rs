@@ -18,7 +18,7 @@ use crate::ui::{
 };
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, Modifiers, PromptButton, PromptLevel, Role,
-    SharedString, Subscription, Task, Window, div, prelude::*, px,
+    SharedString, Subscription, Task, Window, div, point, prelude::*, px,
 };
 use gpui_component::input::{Editor as CodeEditor, EditorState, InputEvent, Rope, RopeExt as _};
 use runode_files::Stamp;
@@ -58,6 +58,8 @@ pub(super) struct Editor {
     /// `SelectNextOccurrence` 上次之后的活动选区、加选到的位置、是不是从光标所在的词选起的（是就只加选整词）；
     /// 文字改了就作废。
     occurrence: Option<(Range<usize>, usize, bool)>,
+    /// 等编辑器排好版后滚到正中的行（从 0 数）。
+    pub(super) center: Option<usize>,
     /// 开着的「跳到行号」输入条。
     go_to_line: Option<(Entity<InputState>, Subscription)>,
     /// 这个文件在语言服务器上开着的文档；没有可用的服务器时为空。
@@ -169,7 +171,24 @@ fn select_in_line(area: &mut EditorState, line: usize, range: Range<usize>, cx: 
     area.set_selected_range((start + range.start).min(end)..(start + range.end).min(end), cx);
 }
 
+/// 把第 `line` 行（从 0 数）滚到编辑器正中；还没排过版、不知道行高和视口时返回假。
+fn center_line(area: &mut EditorState, line: usize, cx: &mut Context<EditorState>) -> bool {
+    let (Some(line_height), Some(bounds)) = (area.line_height(), area.text_bounds()) else {
+        return false;
+    };
+    let top = line_height * area.display_map().buffer_line_to_display_row(line) as f32;
+    let y = (top - (bounds.size.height - line_height) / 2.).max(px(0.));
+    area.set_scroll_offset(point(area.scroll_offset().x, -y), cx);
+    true
+}
+
 impl Editor {
+    /// 把第 `line` 行（从 0 数）滚到正中；还没排过版时等 `render_editor` 排完再滚。
+    pub(super) fn center_on(&mut self, line: usize, cx: &mut App) {
+        let centered = self.area.update(cx, |area, cx| center_line(area, line, cx));
+        self.center = (!centered).then_some(line);
+    }
+
     /// 选中这几行（从 0 数），滚到能看见。
     pub(super) fn select_lines(&self, lines: Range<usize>, cx: &mut App) {
         self.area.update(cx, |area, cx| select_lines(area, lines, cx));
@@ -259,7 +278,7 @@ impl PreviewPanel {
             let mut area =
                 EditorState::new(window, cx).language(language).line_number(true).folding(true).soft_wrap(wrap);
             area.set_value(source.text.clone(), window, cx);
-            match (hit, selected) {
+            match (hit, selected.clone()) {
                 (Some((line, range)), _) => select_in_line(&mut area, line, range, cx),
                 (None, Some(lines)) => select_lines(&mut area, lines, cx),
                 (None, None) => {}
@@ -291,6 +310,7 @@ impl PreviewPanel {
             stamp: source.stamp,
             saving: false,
             occurrence: None,
+            center: selected.map(|lines| lines.start),
             go_to_line: None,
             lsp: None,
             _changed: changed,
@@ -491,6 +511,18 @@ impl PreviewPanel {
     ) -> impl IntoElement {
         let font_size = self.input.font_size;
         let area = editor.area.clone();
+        // 新开的编辑器这一帧才排版，下一帧再滚；还滚不了就再画一帧。
+        if let Some(line) = editor.center {
+            let (view, area) = (cx.entity().downgrade(), area.clone());
+            window.on_next_frame(move |_, cx| {
+                let centered = area.update(cx, |area, cx| center_line(area, line, cx));
+                view.update(cx, |this, cx| match this.editor_mut(&area) {
+                    Some(editor) if centered => editor.center = None,
+                    _ => cx.notify(),
+                })
+                .ok();
+            });
+        }
         if theme::stale(cx.theme(), window.is_window_active(), cx) {
             let theme = cx.theme().clone();
             cx.defer(move |cx| theme::apply(&theme, cx));
