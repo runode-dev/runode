@@ -1532,6 +1532,9 @@ preview:
   close_right: Close to the Right
   close_all: Close All
   keep_open: Keep Open
+  split_right: Split Right
+  split_down: Split Down
+  unsplit: Merge Split
   wrap: Word Wrap
   edit_file: Edit File
   show_source: Show Source
@@ -1718,6 +1721,7 @@ divider:
   panel: Resize Side Panel
   split: Resize Split
   preview: Resize Preview
+  preview_split: Resize Preview Split
   snapped_screen: Resize Remote Desktop
 paired:
   lost: lost the connection

@@ -1532,6 +1532,9 @@ preview:
   close_right: 關閉右側
   close_all: 全部關閉
   keep_open: 保持開啟
+  split_right: 向右分割
+  split_down: 向下分割
+  unsplit: 合併分割畫面
   wrap: 自動換行
   edit_file: 編輯檔案
   show_source: 顯示原始碼
@@ -1795,6 +1798,7 @@ divider:
   panel: 調整右側面板的寬度
   split: 調整分割畫面的大小
   preview: 調整預覽和終端機的大小
+  preview_split: 調整預覽兩塊的大小
   snapped_screen: 調整遠端桌面的高度
 paired:
   lost: 連線中斷了

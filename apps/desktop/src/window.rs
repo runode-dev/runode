@@ -405,8 +405,8 @@ pub struct WindowView {
     float_drag: Option<pane_float::FloatDrag>,
     /// 拖着分屏经过的分屏和落点在它的哪一块，画落点提示用。
     pane_drop: Option<(EntityId, pane_move::DropZone)>,
-    /// 拖着文件标签经过终端区时落在哪一块。
-    file_tab_drop: Option<pane_move::DropZone>,
+    /// 拖着文件标签经过终端区时落在哪一块；后一项为真时落在停靠着的预览上，按预览那一块算。
+    file_tab_drop: Option<(pane_move::DropZone, bool)>,
     /// 窗口的位置和大小，以及所在屏幕的 UUID，存布局用：窗口关掉以后就问不到了。
     bounds: WindowBounds,
     display: Option<String>,

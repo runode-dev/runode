@@ -64,6 +64,7 @@ impl PreviewPanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_preview_body(
         &self,
+        tab: usize,
         preview: &Preview,
         width: f32,
         font: SharedString,
@@ -96,7 +97,10 @@ impl PreviewPanel {
                 };
                 let button = ui::button::Button::new("preview-other-side", open.into_owned())
                     .variant(ui::button::ButtonVariant::Outline)
-                    .on_press(cx, move |this, _, cx| this.open_diff(other.clone(), false, cx));
+                    .on_press(cx, move |this, _, cx| {
+                        this.focus_tab(tab, cx);
+                        this.open_diff(other.clone(), false, cx);
+                    });
                 div()
                     .id("preview-note")
                     .flex_1()
@@ -201,8 +205,10 @@ impl PreviewPanel {
                     )
                     .into_any_element()
             }
-            Some(Loaded::Diff(content)) => self.render_diff_body(content, width, font, font_size, cx),
-            Some(Loaded::Text { .. }) if self.markdown_shown(preview) => self.render_markdown(preview, width, font, cx),
+            Some(Loaded::Diff(content)) => self.render_diff_body(tab, content, width, font, font_size, cx),
+            Some(Loaded::Text { .. }) if self.markdown_shown(preview) => {
+                self.render_markdown(tab, preview, width, font, cx)
+            }
             Some(Loaded::Text { lines, truncated, widest, wrap, .. }) => {
                 let count = lines.len() + usize::from(*truncated);
                 let digits = lines.len().to_string().len();
@@ -219,7 +225,7 @@ impl PreviewPanel {
                     "preview",
                     rows,
                     cx.processor(move |this, range: Range<usize>, _, cx| {
-                        this.render_preview_rows(range, font_size, gutter, cx)
+                        this.render_preview_rows(tab, range, font_size, gutter, cx)
                     }),
                 )
                 .when(wrapped.is_none(), |list| {
@@ -269,15 +275,16 @@ impl PreviewPanel {
         }
     }
 
-    /// 预览栏的行，行高跟着字号 `font_size` 缩放。
+    /// 第 `tab` 个标签的行，行高跟着字号 `font_size` 缩放。
     fn render_preview_rows(
         &self,
+        tab: usize,
         range: Range<usize>,
         font_size: f32,
         gutter: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let Some(preview) = self.preview() else {
+        let Some(preview) = self.tab_at(tab) else {
             return Vec::new();
         };
         let Some(Loaded::Text { lines, highlights, wrap, .. }) = &preview.content else {
@@ -377,7 +384,7 @@ impl PreviewPanel {
                         }),
                     )
                     .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                        this.drag_preview_line(ix, event, cx);
+                        this.drag_preview_line(tab, ix, event, cx);
                     }))
                     .on_mouse_up(
                         MouseButton::Left,

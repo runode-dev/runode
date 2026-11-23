@@ -848,6 +848,8 @@ struct Paint {
     hover: Option<(TextKey, usize)>,
     texts: Texts,
     view: WeakEntity<PreviewPanel>,
+    /// 画的是第几个标签。
+    tab: usize,
     /// 这一帧辅助工具在读（`Window::is_a11y_active`）：链接节点只在这时画。
     a11y: bool,
 }
@@ -875,7 +877,7 @@ impl Paint {
         let styled = StyledText::new(rich.text.clone())
             .with_highlights(rich_highlights(rich, self.colors, hover))
             .with_font_family_overrides(mono);
-        let links = if self.a11y { link_nodes(rich, &self.view) } else { Vec::new() };
+        let links = if self.a11y { link_nodes(rich, &self.view, self.tab) } else { Vec::new() };
         self.text(styled, rich.text.len(), key).boxes(boxes).links(links)
     }
 
@@ -886,8 +888,8 @@ impl Paint {
 }
 
 /// `rich` 里的链接报给辅助工具：链接画在文字里，不是单独的元素，这里每个链接另给一个节点，连同它在
-/// 文字里的范围交给 `MdText` 摆到链接的字上；以链接的文字为名，按下时和点击一样打开它。
-fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<(Range<usize>, AnyElement)> {
+/// 文字里的范围交给 `MdText` 摆到链接的字上；以链接的文字为名，按下时和点击一样打开它，链接在第 `tab` 个标签里。
+fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>, tab: usize) -> Vec<(Range<usize>, AnyElement)> {
     rich.links
         .iter()
         .zip(link_keys(rich))
@@ -900,7 +902,11 @@ fn link_nodes(rich: &Rich, view: &WeakEntity<PreviewPanel>) -> Vec<(Range<usize>
                 .aria_label(rich.text.get(range.clone()).unwrap_or_default().to_owned())
                 .aria_description(url.clone())
                 .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                    view.update(cx, |this, cx| this.open_markdown_link(&url, cx)).ok();
+                    view.update(cx, |this, cx| {
+                        this.focus_tab(tab, cx);
+                        this.open_markdown_link(&url, cx);
+                    })
+                    .ok();
                 })
                 .into_any_element();
             (range.clone(), node)
@@ -926,6 +932,7 @@ impl PreviewPanel {
     /// 排版视图；还没解析完时空着。`width` 是预览栏的宽度，图片据此缩小；`mono` 是终端字体。
     pub(super) fn render_markdown(
         &self,
+        tab: usize,
         preview: &Preview,
         width: f32,
         mono: SharedString,
@@ -965,11 +972,12 @@ impl PreviewPanel {
         let rows = list(
             view.list.clone(),
             cx.processor(move |this, ix: usize, window, cx| {
-                this.render_markdown_row(ix, width, scroll, mono.clone(), window, cx)
+                this.render_markdown_row(tab, ix, width, scroll, mono.clone(), window, cx)
             }),
         )
         .size_full();
-        // 拖选时鼠标出了正文也接着跟；悬停的链接跟着鼠标换。
+        // 拖选时鼠标出了正文也接着跟；悬停的链接跟着鼠标换。分屏时只有当前块跟：拖选和悬停改的是当前标签的。
+        let current = self.tabs().is_some_and(|tabs| tabs.active == tab);
         let weak = cx.weak_entity();
         let events = canvas(
             |_, _, _| {},
@@ -993,7 +1001,7 @@ impl PreviewPanel {
         body.text_color(cx.theme().foreground)
             .cursor(if view.hover.is_some() { CursorStyle::PointingHand } else { CursorStyle::IBeam })
             .child(rows)
-            .child(events)
+            .when(current, |body| body.child(events))
             .child(list_scrollbar("markdown-scroll", view.list.clone()))
             .into_any_element()
     }
@@ -1001,6 +1009,7 @@ impl PreviewPanel {
     #[allow(clippy::too_many_arguments)]
     fn render_markdown_row(
         &self,
+        tab: usize,
         ix: usize,
         width: f32,
         (top, viewport): (ListOffset, f32),
@@ -1008,7 +1017,7 @@ impl PreviewPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(preview) = self.preview() else {
+        let Some(preview) = self.tab_at(tab) else {
             return div().into_any_element();
         };
         let doc = match &preview.content {
@@ -1029,6 +1038,7 @@ impl PreviewPanel {
             hover: view.hover,
             texts: view.texts.clone(),
             view: cx.entity().downgrade(),
+            tab,
             a11y: window.is_a11y_active(),
         };
         // 间距按正文字号算；脚注的字小一号。
@@ -1311,7 +1321,10 @@ impl PreviewPanel {
                             item.role(Role::Link)
                                 .aria_description(link.clone())
                                 .cursor_pointer()
-                                .on_press(cx, move |this, _, cx| this.open_markdown_link(&link, cx))
+                                .on_press(cx, move |this, _, cx| {
+                                    this.focus_tab(tab, cx);
+                                    this.open_markdown_link(&link, cx);
+                                })
                                 .child(shown)
                                 .into_any_element()
                         }

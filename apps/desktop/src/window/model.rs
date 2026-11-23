@@ -69,6 +69,8 @@ pub(super) struct PaneLayout {
     pub(super) area: Option<Bounds<Pixels>>,
     /// 终端区连同停靠在它旁边的预览。
     pub(super) terminals: Option<Bounds<Pixels>>,
+    /// 停靠着的预览那一块，上一次停靠时画的；没停靠时不管它。
+    pub(super) docked_preview: Option<Bounds<Pixels>>,
 }
 
 pub(super) fn home_dir() -> Option<PathBuf> {

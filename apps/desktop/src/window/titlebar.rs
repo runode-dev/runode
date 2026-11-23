@@ -246,7 +246,10 @@ impl WindowView {
         let terminals = (0..self.workspace().tabs.len()).map(|ix| self.render_tab(ix, width, cards, cx));
         let mut tabs: Vec<_> = terminals.collect();
         let (files, _) = self.preview.read(cx).file_tabs(self.workspace().id);
-        tabs.extend(files.iter().enumerate().map(|(ix, tab)| self.render_file_tab(ix, tab, width, cards, cx)));
+        tabs.extend(files.iter().enumerate().map(|(ix, tab)| {
+            let after_beside = ix.checked_sub(1).is_some_and(|prev| files[prev].beside);
+            self.render_file_tab(ix, tab, after_beside, width, cards, cx)
+        }));
         tabs
     }
 
@@ -500,16 +503,20 @@ impl WindowView {
         &self,
         ix: usize,
         tab: &FileTab,
+        after_beside: bool,
         width: Pixels,
         cards: bool,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let pos = self.workspace().tabs.len() + ix;
         let front = self.front_tab(cx);
-        // 停靠着的预览和终端一起显示，它的标签和当前终端标签都算当前的。
+        // 停靠着的预览和终端一起显示，它的标签和当前终端标签都算当前的；分屏另一块里的也是。
         let docked = self.preview.read(cx).docked_file(self.workspace().id);
-        let active = front == Some(pos) || docked == Some(ix);
-        let after_front = front.is_some_and(|front| pos == front + 1) || docked.is_some_and(|docked| ix == docked + 1);
+        let beside = !self.page_covers_terminals();
+        let active = front == Some(pos) || docked == Some(ix) || beside && tab.beside;
+        let after_front = front.is_some_and(|front| pos == front + 1)
+            || docked.is_some_and(|docked| ix == docked + 1)
+            || beside && after_beside;
         let (active_bg, hover_bg) = tab_backgrounds(cards, cx);
         let fg = cx.theme().foreground;
         let color = tab.color.map_or(fg, hsla);

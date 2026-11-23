@@ -1,7 +1,7 @@
 //! 把预览栏接到窗口上。预览栏本身在 `preview_panel`：一个窗口一个 `PreviewPanel`，各 workspace
 //! 的文件标签都在它里面。文件标签和终端标签一起排在标题栏里，
 //! 点中文件标签时预览盖满终端区，切到终端标签时退到后面；把文件标签拖到终端区靠边处，预览停靠在那一侧、和终端
-//! 并排，拖到终端区正中或拖回标题栏又盖满终端区。这里每次对它做什么之前告诉它当前是哪个
+//! 并排，拖到终端区正中或拖回标题栏又盖满终端区；拖到停靠着的预览靠边处，预览分成两块。这里每次对它做什么之前告诉它当前是哪个
 //! workspace、交给它那个 workspace 最近读到的 git 状态，画的时候交给它字体、宽度和配置里的预览字号（颜色
 //! 它自己从主题读）；它要窗口办的事（文件树定位、出现收起和到最前时重排窗口、开关变了要存档、把路径打进
 //! 终端、按块暂存）经 `PreviewEvent` 交回来。自动换行和 Markdown 显示源码的开关在它身上，随窗口存档。
@@ -297,28 +297,49 @@ impl WindowView {
     }
 
     /// 拖动期间铺在终端区最上面的一层，接拖来的文件标签：盖着的预览挡住了下面的元素，放下的事件到不了它们。
+    /// 落在停靠着的预览靠边处时预览分成两块、拖来的标签在那一侧，落在它正中时在当前块里显示；落在别处按终端区
+    /// 算，停靠或盖住终端区。
     fn render_file_tab_drop(&self, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
+        let layout = self.layout.borrow();
+        let docked = self.preview_dock(cx).and(layout.docked_preview);
+        let overlay = self.file_tab_drop.map(|(zone, in_preview)| match (in_preview, docked, layout.terminals) {
+            (true, Some(preview), Some(area)) => div()
+                .absolute()
+                .left(preview.origin.x - area.origin.x)
+                .top(preview.origin.y - area.origin.y)
+                .w(preview.size.width)
+                .h(preview.size.height)
+                .child(zone_overlay(zone, cx)),
+            _ => div().absolute().inset_0().child(zone_overlay(zone, cx)),
+        });
         div()
             .id("file-tab-drop")
             .absolute()
             .inset_0()
-            .children(self.file_tab_drop.map(|zone| zone_overlay(zone, cx)))
-            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<DraggedFileTab>, _, cx| {
-                let zone = zone_at(event.bounds, event.event.position);
+            .children(overlay)
+            .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedFileTab>, _, cx| {
+                let position = event.event.position;
+                let zone = match docked.filter(|preview| preview.contains(&position)) {
+                    Some(preview) => zone_at(preview, position).map(|zone| (zone, true)),
+                    None => zone_at(event.bounds, position).map(|zone| (zone, false)),
+                };
                 if zone != this.file_tab_drop {
                     this.file_tab_drop = zone;
                     cx.notify();
                 }
             }))
             .on_drop(cx.listener(|this, dragged: &DraggedFileTab, window, cx| {
-                let Some(zone) = this.file_tab_drop.take() else {
+                let Some((zone, in_preview)) = this.file_tab_drop.take() else {
                     return;
                 };
-                let side = match zone {
-                    DropZone::Edge(side) => Some(side),
-                    DropZone::Center => None,
-                };
-                this.with_preview(cx, |panel, cx| panel.set_dock(side, cx));
+                match (zone, in_preview) {
+                    (DropZone::Edge(side), true) => {
+                        this.with_preview(cx, |panel, cx| panel.split_tab(dragged.ix, side, cx));
+                    }
+                    (DropZone::Center, true) => {}
+                    (DropZone::Edge(side), false) => this.with_preview(cx, |panel, cx| panel.set_dock(Some(side), cx)),
+                    (DropZone::Center, false) => this.with_preview(cx, |panel, cx| panel.set_dock(None, cx)),
+                }
                 this.show_file_tab(dragged.ix, window, cx);
             }))
     }
@@ -341,7 +362,12 @@ impl WindowView {
             Direction::Right => width * dock.ratio - gap,
             Direction::Up | Direction::Down => width,
         };
-        let preview = div().relative().size_full().child(self.render_preview(preview_width, window, cx));
+        let layout = self.layout.clone();
+        let preview = div().relative().size_full().child(self.render_preview(preview_width, window, cx)).child(
+            canvas(move |bounds, _, _| layout.borrow_mut().docked_preview = Some(bounds), |_, (), _, _| {})
+                .absolute()
+                .size_full(),
+        );
         let (first, second) = if preview_first {
             (preview.into_any_element(), panes.into_any_element())
         } else {

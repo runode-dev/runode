@@ -19,6 +19,10 @@
 //!
 //! 顶上一条写着文件路径，右边能打开自动换行、Markdown 文件在排版和源码之间切（这两个整个窗口一份，app
 //! 随窗口存档）。
+//!
+//! 预览能分成左右或上下两块（`tabs::Split`），各显示一个标签，每块有自己顶上的一条。标签仍都排在标题栏里，
+//! 点哪个就在当前块里显示，它已经显示在另一块里时当前块换过去；点进另一块也一样。菜单、快捷键和各个操作都对
+//! 当前块的标签做。分屏不进存档。
 
 mod body;
 mod diff;
@@ -56,29 +60,34 @@ use crate::ui::{
         CODE_ICON, PENCIL_ICON, WRAP_ICON,
     },
     menu::{Menu, MenuHost},
-    panel::{panel_header, panel_shell},
+    panel::{DIVIDER_GRAB_WIDTH, panel_header, panel_shell, split_handle},
     theme::ActiveTheme as _,
     tooltip::tooltip,
 };
 use gpui::{
-    AnyWindowHandle, App, ClipboardItem, Context, Div, EventEmitter, FocusHandle, Focusable, Image, MouseButton,
-    MouseMoveEvent, Render, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle, ScrollStrategy, SharedString,
-    Stateful, SvgRenderer, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
+    AnyElement, AnyWindowHandle, App, ClipboardItem, Context, DispatchPhase, Div, EventEmitter, FocusHandle, Focusable,
+    Image, MouseButton, MouseMoveEvent, MouseUpEvent, Render, RenderImage, Role, SMOOTH_SVG_SCALE_FACTOR, ScrollHandle,
+    ScrollStrategy, SharedString, Stateful, SvgRenderer, UniformListScrollHandle, Window, canvas, div,
+    linear_color_stop, linear_gradient, prelude::*, px, relative,
 };
 use runode_git::{self as git, FileStatus, HunkAction, Section};
 use runode_preview::{Content, ImageFormat, Span};
-use runode_types::pane::Direction;
+use runode_types::pane::{Axis, Direction};
 
 pub use diff::DiffTarget;
 pub(crate) use diff::{ask_discard_hunk, hunk_name, hunk_quote, hunk_title};
 pub use edit::{GoToLine, SelectNextOccurrence};
 
 use marks::{Mark, line_marks};
-use tabs::PreviewTabs;
 pub use tabs::{Dock, FileTab};
+use tabs::{PreviewTabs, Split};
 
 /// 停靠着的预览占终端区的比例的上下限。
 const DOCK_RATIO: std::ops::RangeInclusive<f32> = 0.15..=0.85;
+/// 分屏时前一块占的比例的上下限。
+const SPLIT_RATIO: std::ops::RangeInclusive<f32> = 0.15..=0.85;
+/// 辅助工具把分屏的分隔线加减一下，前一块的比例变这么多。
+const SPLIT_STEP: f32 = 0.05;
 
 /// 行高比字号多出的部分。
 const ROW_EXTRA_HEIGHT: f32 = 8.;
@@ -294,6 +303,16 @@ impl Preview {
         {
             self.reload = true;
         }
+    }
+
+    /// 认这个标签的键，元素 id 用：路径，diff 标签再带上和什么比。按它取、不按下标：关掉、拖动标签后下标整体平移，
+    /// 辅助工具的焦点会跳。
+    fn key(&self) -> SharedString {
+        match &self.diff {
+            Some(diff) => format!("{}#{:?}", self.path.display(), diff.side),
+            None => self.path.display().to_string(),
+        }
+        .into()
     }
 
     /// 标签上的名字；diff 标签带上和什么比：「a.rs（工作区）」「a.rs（已暂存）」「a.rs @ 1a2b3c4」。
@@ -515,6 +534,8 @@ pub struct PreviewPanel {
     focus: FocusHandle,
     /// 开着的标签右键菜单。
     menu: Option<Menu>,
+    /// 在拖分屏的分隔线。
+    split_drag: bool,
     /// 预览的文本和 diff 按栏宽自动换行。整个窗口一份，app 存档。
     wrap: bool,
     /// Markdown 文件显示源码而不是排版后的样子。整个窗口一份，app 存档。
@@ -554,6 +575,7 @@ impl PreviewPanel {
             input: Input::default(),
             focus: cx.focus_handle(),
             menu: None,
+            split_drag: false,
             wrap: false,
             source: false,
             cell_width,
@@ -742,6 +764,16 @@ impl PreviewPanel {
         self.tabs()?.active()
     }
 
+    /// 当前 workspace 的第 `ix` 个预览标签。
+    fn tab_at(&self, ix: usize) -> Option<&Preview> {
+        self.tabs()?.tabs.get(ix)
+    }
+
+    /// 当前 workspace 显示着的预览标签：当前的，分屏时还有另一块里的。
+    fn shown_tabs(&self) -> Vec<usize> {
+        self.tabs().map(|tabs| tabs.shown().collect()).unwrap_or_default()
+    }
+
     /// 当前 workspace 的文件在哪台机器上。
     fn project(&self) -> ProjectHost {
         self.tabs().map(|tabs| tabs.project.clone()).unwrap_or_default()
@@ -806,16 +838,15 @@ impl PreviewPanel {
     /// 打开 `path` 的普通标签（`diff` 为空）或 diff 标签。
     fn open_tab(&mut self, path: &Path, diff: Option<DiffTarget>, pin: bool, cx: &mut Context<Self>) {
         let shown = self.preview_shown();
-        if let Some(old) = self.preview().filter(|old| old.path != path || old.diff != diff) {
-            old.release_image(cx);
-        }
         // 提交里的文件工作区里不一定还有，文件树不跟过去。
         let reveal = diff.as_ref().is_none_or(|diff| !matches!(diff.side, git::DiffSide::Commit { .. }));
         let previews = self.tabs_mut();
+        let before = previews.active().map(|tab| tab.cancel.clone());
         let replaced = previews.open(path, diff, pin);
         if let Some(old) = replaced {
             old.release_image(cx);
         }
+        self.release_hidden(before, cx);
         if shown {
             self.bring_front(cx);
         } else {
@@ -825,7 +856,8 @@ impl PreviewPanel {
         if reveal {
             cx.emit(PreviewEvent::Reveal(path.to_path_buf()));
         }
-        self.load_preview(cx);
+        let active = self.tabs_mut().active;
+        self.load_tab(active, cx);
         cx.notify();
     }
 
@@ -836,16 +868,25 @@ impl PreviewPanel {
             return;
         };
         let path = tab.path.clone();
-        // 换下去的标签不显示了，图片的解码结果先放掉，切回来时再解码。
-        if ix != previews.active
-            && let Some(old) = previews.active()
-        {
-            old.release_image(cx);
-        }
-        previews.active = ix;
+        let before = previews.active().map(|tab| tab.cancel.clone());
+        previews.activate(ix);
+        self.release_hidden(before, cx);
         cx.emit(PreviewEvent::Reveal(path));
         self.reload_if(Preview::stale, cx);
         cx.notify();
+    }
+
+    /// 原来当前的标签（按它的 `cancel` 认）换下去、不再显示了：图片的解码结果先放掉，切回来时再解码。
+    fn release_hidden(&self, before: Option<Arc<AtomicBool>>, cx: &mut App) {
+        let Some(tabs) = self.tabs() else {
+            return;
+        };
+        let shown = |tab: &Preview| tabs.shown().any(|ix| std::ptr::eq(&tabs.tabs[ix], tab));
+        if let Some(old) = tabs.tabs.iter().find(|tab| before.as_ref().is_some_and(|b| Arc::ptr_eq(&tab.cancel, b)))
+            && !shown(old)
+        {
+            old.release_image(cx);
+        }
     }
 
     /// 只留下 `keep` 为真的预览标签，当前标签关掉了就切到旁边的。都关掉时预览栏收起，焦点在
@@ -920,6 +961,9 @@ impl PreviewPanel {
             if focused {
                 window.focus(&self.focus_handle(cx), cx);
             }
+        } else {
+            // 分屏的另一块可能换上了别的标签。
+            self.reload_if(Preview::stale, cx);
         }
         cx.notify();
     }
@@ -949,8 +993,10 @@ impl PreviewPanel {
         for old in same_host.flat_map(|tabs| tabs.moved(from, to)) {
             old.release_image(cx);
         }
-        if self.preview().is_some_and(|tab| tab.content.is_none()) {
-            self.load_preview(cx);
+        for ix in self.shown_tabs() {
+            if self.tab_at(ix).is_some_and(|tab| tab.content.is_none()) {
+                self.load_tab(ix, cx);
+            }
         }
         cx.notify();
     }
@@ -961,16 +1007,22 @@ impl PreviewPanel {
         self.reload_if(Preview::needs_refresh, cx);
     }
 
-    /// 当前预览标签按 `check`（`Preview::stale` 或 `needs_refresh`）要重读就读。不看文件就定了的当场读；
+    /// 显示着的预览标签按 `check`（`Preview::stale` 或 `needs_refresh`）要重读就读。不看文件就定了的当场读；
     /// 跟着文件变的标签要比文件的大小和修改时间，在单独的线程上取（`fs_probe::off_thread`）。取回来时
-    /// 换了 workspace、换了标签或已经又读过一次（`cancel` 换了）就不管，切回来时会再比。
+    /// 换了 workspace、它不显示了或已经又读过一次（`cancel` 换了）就不管，切回来时会再比。
     fn reload_if(&mut self, check: fn(&Preview, Option<Stamp>) -> bool, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview() else {
+        for ix in self.shown_tabs() {
+            self.reload_tab_if(ix, check, cx);
+        }
+    }
+
+    fn reload_tab_if(&mut self, ix: usize, check: fn(&Preview, Option<Stamp>) -> bool, cx: &mut Context<Self>) {
+        let Some(preview) = self.tab_at(ix) else {
             return;
         };
         // 拿上次记下的当作文件现在的，比出来要读的就是不看文件也知道的那些。
         if check(preview, preview.stamp) {
-            self.load_preview(cx);
+            self.load_tab(ix, cx);
             return;
         }
         // 没读过的上面已经定了（第一次读还在路上的不打断），不随文件变的不用比。
@@ -983,9 +1035,13 @@ impl PreviewPanel {
         cx.spawn(async move |this, cx| {
             let stamp = job.await;
             this.update(cx, |this, cx| {
-                let current = this.preview().filter(|preview| this.ws == id && Arc::ptr_eq(&preview.cancel, &cancel));
-                if current.is_some_and(|preview| check(preview, stamp)) {
-                    this.load_preview(cx);
+                let current = this.shown_tabs().into_iter().find(|&ix| {
+                    this.tab_at(ix).is_some_and(|preview| this.ws == id && Arc::ptr_eq(&preview.cancel, &cancel))
+                });
+                if let Some(ix) = current
+                    && this.tab_at(ix).is_some_and(|preview| check(preview, stamp))
+                {
+                    this.load_tab(ix, cx);
                 }
             })
             .ok();
@@ -993,7 +1049,7 @@ impl PreviewPanel {
         .detach();
     }
 
-    /// 监听到 `paths` 变了：当前预览的文件在里面就重读。别的工作区 diff 标签记下要重读，切过去时再读；
+    /// 监听到 `paths` 变了：显示着的预览的文件在里面就重读。别的工作区 diff 标签记下要重读，切过去时再读；
     /// 普通标签切过去时自己比文件的改动时间。
     pub fn files_changed(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         for tab in self.workspaces.get_mut(&self.ws).into_iter().flat_map(|tabs| &mut tabs.tabs) {
@@ -1001,12 +1057,14 @@ impl PreviewPanel {
                 tab.reload = true;
             }
         }
-        if self.preview().is_some_and(|preview| preview.affected_by(paths)) {
-            self.load_preview(cx);
+        for ix in self.shown_tabs() {
+            if self.tab_at(ix).is_some_and(|preview| preview.affected_by(paths)) {
+                self.load_tab(ix, cx);
+            }
         }
     }
 
-    /// 监听说不准哪里变了（丢了事件、要求重扫）：当作所有文件都变了。当前预览跟着文件变的直接重读，
+    /// 监听说不准哪里变了（丢了事件、要求重扫）：当作所有文件都变了。显示着的预览跟着文件变的直接重读，
     /// 不按大小和修改时间比，大小没变、修改时间又被设回去的改写也认得出；别的跟着文件变的标签记下要重读，
     /// 切过去时再读，文件没了的也重读。
     pub fn all_files_changed(&mut self, cx: &mut Context<Self>) {
@@ -1015,19 +1073,21 @@ impl PreviewPanel {
                 tab.reload = true;
             }
         }
-        if self.preview().is_some_and(Preview::follows_file) {
-            self.load_preview(cx);
+        for ix in self.shown_tabs() {
+            if self.tab_at(ix).is_some_and(Preview::follows_file) {
+                self.load_tab(ix, cx);
+            }
         }
     }
 
-    /// 在后台读当前 workspace 预览的文件，读完换上；是文本时接着在后台高亮。diff 标签读 diff。
-    fn load_preview(&mut self, cx: &mut Context<Self>) {
-        if self.preview().is_some_and(|preview| preview.diff.is_some()) {
-            self.load_diff(cx);
+    /// 在后台读当前 workspace 第 `ix` 个预览标签的文件，读完换上；是文本时接着在后台高亮。diff 标签读 diff。
+    fn load_tab(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.tab_at(ix).is_some_and(|preview| preview.diff.is_some()) {
+            self.load_diff(ix, cx);
             return;
         }
         let id = self.ws;
-        let Some(preview) = self.preview_mut() else {
+        let Some(preview) = self.tabs_mut().tabs.get_mut(ix) else {
             return;
         };
         // 起读之前就清掉要重读的标记：读的期间文件又变了时重新标上，读完不能把它抹掉。
@@ -1234,8 +1294,11 @@ impl PreviewPanel {
         cx.notify();
     }
 
-    /// 拖选时鼠标移到第 `ix` 行；松开了按键就停。
-    fn drag_preview_line(&mut self, ix: usize, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    /// 拖选时鼠标移到第 `tab` 个标签的第 `ix` 行；松开了按键就停。分屏时移到另一块里的行不算。
+    fn drag_preview_line(&mut self, tab: usize, ix: usize, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.tabs().is_none_or(|tabs| tabs.active != tab) {
+            return;
+        }
         let Some(preview) = self.preview_mut().filter(|preview| preview.selecting) else {
             return;
         };
@@ -1251,9 +1314,17 @@ impl PreviewPanel {
         }
     }
 
-    fn render_preview_panel(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        let preview = self.preview()?;
-        let Input { width, font_size, cards, .. } = self.input;
+    /// 第 `tab` 个标签的一块，宽 `width`：顶上一条写着路径和开关，下面是正文。分屏时 `current` 说它是不是当前块，
+    /// 不是时点进去先换成当前块。
+    fn render_block(
+        &self,
+        tab: usize,
+        width: f32,
+        current: Option<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        let preview = self.tab_at(tab)?;
         let font = self.input.font.clone();
         let toggle = |id: &'static str, icon: &'static str, on: bool, text: Cow<'static, str>| {
             Toggle::new(id, icon, SharedString::from(text.clone()))
@@ -1298,7 +1369,7 @@ impl PreviewPanel {
                         .flex_none()
                         .size(px(22.))
                         .tooltip(tooltip(text, None))
-                        .on_press_down(cx, |this, _, cx| this.edit_diff_file(cx)),
+                        .on_press_down(cx, move |this, _, cx| this.edit_diff_file(tab, cx)),
                 )
             })
             // 排版视图的正文总是按栏宽换行（代码块横着滚），自动换行的开关只在源码视图、编辑器和 diff 里有；图片这类不是文字的
@@ -1327,7 +1398,12 @@ impl PreviewPanel {
             .flex_1()
             .min_w_0()
             .truncate()
-            .text_color(cx.theme().foreground.opacity(0.55))
+            // 分屏时当前块的路径写得更清楚。
+            .text_color(cx.theme().foreground.opacity(match current {
+                None => 0.55,
+                Some(true) => 0.85,
+                Some(false) => 0.4,
+            }))
             .child(ui::display_dir(&shown))
             .tooltip(tooltip(shown.display().to_string(), None));
         // 顶上这条是界面，不跟着正文的 `preview-font-size`；不拖动窗口，标题栏在它上面。
@@ -1343,8 +1419,30 @@ impl PreviewPanel {
             .flex_col()
             .map(|body| match self.shown_editor(preview) {
                 Some(editor) => body.child(self.render_editor(editor, preview.name(), font, window, cx)),
-                None => body.child(self.render_preview_body(preview, width, font, window, cx)),
+                None => body.child(self.render_preview_body(tab, preview, width, font, window, cx)),
             });
+        Some(
+            div()
+                .id(SharedString::from(format!("preview-block:{}", preview.key())))
+                .size_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .when(current == Some(false), |block| {
+                    block.capture_any_mouse_down(cx.listener(move |this, _, _, cx| this.focus_tab(tab, cx)))
+                })
+                .child(header)
+                .child(body),
+        )
+    }
+
+    fn render_preview_panel(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let tabs = self.tabs()?;
+        let Input { width, font_size, cards, .. } = self.input;
+        let blocks = match tabs.split {
+            Some(split) => self.render_split(split, tabs.active, window, cx),
+            None => self.render_block(tabs.active, width, None, window, cx)?.into_any_element(),
+        };
         Some(
             panel_shell("preview-panel", width, cards, cx)
                 .key_context("Preview")
@@ -1361,11 +1459,133 @@ impl PreviewPanel {
                 .on_action(cx.listener(Self::close_previews_to_right))
                 .on_action(cx.listener(Self::close_all_previews))
                 .on_action(cx.listener(Self::keep_preview_open))
+                .on_action(cx.listener(Self::split_preview_right))
+                .on_action(cx.listener(Self::split_preview_down))
+                .on_action(cx.listener(Self::unsplit_preview))
                 .bg(cx.theme().background)
                 .text_size(px(font_size))
-                .child(header)
-                .child(body),
+                .child(blocks),
         )
+    }
+
+    /// 分成两块的预览：当前块显示第 `active` 个标签，中间一条能拖动改大小的分隔线。
+    fn render_split(&self, split: Split, active: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let horizontal = split.axis == Axis::Horizontal;
+        let (first, second) = if split.active_first { (active, split.other) } else { (split.other, active) };
+        let width = self.input.width;
+        let (first_width, second_width) =
+            if horizontal { ((width - 1.) * split.ratio, (width - 1.) * (1. - split.ratio)) } else { (width, width) };
+        let first_block = self.render_block(first, first_width, Some(first == active), window, cx);
+        let second_block = self.render_block(second, second_width, Some(second == active), window, cx);
+        let handle = split_handle(
+            "preview-split-divider",
+            !horizontal,
+            rust_i18n::t!("divider.preview_split").into_owned(),
+            cx,
+            |this, double, _| {
+                if double {
+                    this.set_split_ratio(0.5);
+                } else {
+                    this.split_drag = true;
+                }
+            },
+            |this, delta, _, cx| {
+                let ratio = this.tabs().and_then(|tabs| tabs.split).map_or(0.5, |split| split.ratio);
+                this.set_split_ratio(ratio + delta * SPLIT_STEP);
+                cx.notify();
+            },
+        )
+        .absolute()
+        .map(|handle| {
+            let offset = px(-DIVIDER_GRAB_WIDTH / 2.);
+            if horizontal {
+                handle.top_0().h_full().w(px(DIVIDER_GRAB_WIDTH)).left(relative(split.ratio)).ml(offset)
+            } else {
+                handle.left_0().w_full().h(px(DIVIDER_GRAB_WIDTH)).top(relative(split.ratio)).mt(offset)
+            }
+        });
+        // 拖着分隔线时鼠标出了预览栏也接着跟，松开就停。
+        let drag = self.split_drag.then(|| {
+            let view = cx.weak_entity();
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let moved = view.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Bubble {
+                            return;
+                        }
+                        moved
+                            .update(cx, |this, cx| {
+                                if event.pressed_button != Some(MouseButton::Left) {
+                                    this.split_drag = false;
+                                } else if horizontal {
+                                    this.set_split_ratio((event.position.x - bounds.origin.x) / bounds.size.width);
+                                } else {
+                                    this.set_split_ratio((event.position.y - bounds.origin.y) / bounds.size.height);
+                                }
+                                cx.notify();
+                            })
+                            .ok();
+                    });
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                            view.update(cx, |this, cx| {
+                                this.split_drag = false;
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .size_full()
+        });
+        div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .when(!horizontal, |el| el.flex_col())
+            .child(
+                div()
+                    .flex_none()
+                    .map(|el| {
+                        if horizontal {
+                            el.w(relative(split.ratio)).h_full()
+                        } else {
+                            el.h(relative(split.ratio)).w_full()
+                        }
+                    })
+                    .min_w_0()
+                    .min_h_0()
+                    .children(first_block),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .bg(cx.theme().border)
+                    .map(|el| if horizontal { el.w(px(1.)).h_full() } else { el.h(px(1.)).w_full() }),
+            )
+            .child(div().flex_1().min_w_0().min_h_0().children(second_block))
+            .child(handle)
+            .children(drag)
+            .into_any_element()
+    }
+
+    /// 分屏时前一块占的比例，限在 `SPLIT_RATIO` 里。
+    fn set_split_ratio(&mut self, ratio: f32) {
+        if let Some(split) = &mut self.tabs_mut().split {
+            split.ratio = ratio.clamp(*SPLIT_RATIO.start(), *SPLIT_RATIO.end());
+        }
+    }
+
+    /// 第 `tab` 个标签显示在分屏的另一块里时把当前块换过去，否则不动。
+    fn focus_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
+        if self.tabs().is_some_and(|tabs| tabs.other() == Some(tab)) {
+            self.activate_preview(tab, cx);
+        }
     }
 }
 

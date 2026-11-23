@@ -1532,6 +1532,9 @@ preview:
   close_right: 关闭右侧
   close_all: 全部关闭
   keep_open: 保持打开
+  split_right: 向右分屏
+  split_down: 向下分屏
+  unsplit: 合并分屏
   wrap: 自动换行
   edit_file: 编辑文件
   show_source: 显示源码
@@ -1795,6 +1798,7 @@ divider:
   panel: 调整右侧面板的宽度
   split: 调整分屏的大小
   preview: 调整预览和终端的大小
+  preview_split: 调整预览两块的大小
   snapped_screen: 调整远程桌面的高度
 paired:
   lost: 连接断了

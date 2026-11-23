@@ -226,30 +226,33 @@ impl PreviewPanel {
 
     /// 按块操作做完了：当前显示的是 diff 标签时马上重读，不等扫描。
     pub fn reload_diff(&mut self, cx: &mut Context<Self>) {
-        self.load_diff(cx);
+        let active = self.tabs_mut().active;
+        self.load_diff(active, cx);
     }
 
-    /// 扫描结果换上以后，当前显示的 diff 标签对应的 git 状态变了就重读；别的标签等切过去时再读。
+    /// 扫描结果换上以后，显示着的 diff 标签对应的 git 状态变了就重读；别的标签等切过去时再读。
     pub fn reload_stale_diff(&mut self, cx: &mut Context<Self>) {
-        if self.preview().is_some_and(|preview| preview.diff.is_some() && preview.reload) {
-            self.load_diff(cx);
+        for ix in self.shown_tabs() {
+            if self.tab_at(ix).is_some_and(|preview| preview.diff.is_some() && preview.reload) {
+                self.load_diff(ix, cx);
+            }
         }
     }
 
-    /// 在后台读当前 diff 标签的整篇 diff，读完换上，接着在后台高亮。第一次读时滚到第一处改动，
+    /// 在后台读第 `ix` 个标签的整篇 diff，读完换上，接着在后台高亮。第一次读时滚到第一处改动，
     /// 重读时滚动位置不动。
-    pub(super) fn load_diff(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn load_diff(&mut self, ix: usize, cx: &mut Context<Self>) {
         let id = self.ws;
         let Some(tabs) = self.tabs() else {
             return;
         };
-        let Some(target) = tabs.active().and_then(|preview| preview.diff.clone()) else {
+        let Some(target) = tabs.tabs.get(ix).and_then(|preview| preview.diff.clone()) else {
             return;
         };
         let repo = tabs.git.as_ref().and_then(|git| git.iter().find(|repo| repo.root == target.root));
         let repo = repo.map(|repo| tabs.project.repo(repo.repo()));
         let remote = tabs.project.is_remote();
-        let Some(preview) = self.preview_mut() else {
+        let Some(preview) = self.tabs_mut().tabs.get_mut(ix) else {
             return;
         };
         preview.reload = false;
@@ -393,13 +396,14 @@ impl PreviewPanel {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_diff_body(
         &self,
+        tab: usize,
         content: &DiffContent,
         width: f32,
         font: SharedString,
         font_size: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(preview) = self.preview() else {
+        let Some(preview) = self.tab_at(tab) else {
             return div().into_any_element();
         };
         let view = &content.view;
@@ -421,7 +425,9 @@ impl PreviewPanel {
         let list = uniform_list(
             "preview-diff",
             rows,
-            cx.processor(move |this, range: Range<usize>, _, cx| this.render_diff_rows(range, row_height, number, cx)),
+            cx.processor(move |this, range: Range<usize>, _, cx| {
+                this.render_diff_rows(tab, range, row_height, number, cx)
+            }),
         )
         .when(wrapped.is_none(), |list| {
             list.with_width_from_item(Some(content.widest))
@@ -454,13 +460,13 @@ impl PreviewPanel {
             Button::new(id, rust_i18n::t!(key))
                 .icon(icon)
                 .with_size(ButtonSize::IconSm)
-                .on_a11y_press(view, move |this, _, cx| this.jump_to_change(forward, row_height, cx))
+                .on_a11y_press(view, move |this, _, cx| this.jump_to_change(tab, forward, row_height, cx))
                 .tooltip(tooltip(rust_i18n::t!(key), None))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        this.jump_to_change(forward, row_height, cx);
+                        this.jump_to_change(tab, forward, row_height, cx);
                     }),
                 )
         };
@@ -507,7 +513,8 @@ impl PreviewPanel {
 
     /// 打开 diff 标签的文件来编辑，选中 diff 视口正中那一行在新文件里对应的行。新文件是暂存区或提交里的那一版时，
     /// 行号照它算，和工作区的文件可能差几行。
-    pub(super) fn edit_diff_file(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn edit_diff_file(&mut self, tab: usize, cx: &mut Context<Self>) {
+        self.focus_tab(tab, cx);
         let Some(preview) = self.preview() else {
             return;
         };
@@ -526,9 +533,9 @@ impl PreviewPanel {
         }
     }
 
-    /// 滚到下一处（`forward`）或上一处改动的块头。
-    fn jump_to_change(&mut self, forward: bool, row_height: f32, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview() else {
+    /// 第 `tab` 个标签滚到下一处（`forward`）或上一处改动的块头。
+    fn jump_to_change(&mut self, tab: usize, forward: bool, row_height: f32, cx: &mut Context<Self>) {
+        let Some(preview) = self.tab_at(tab) else {
             return;
         };
         let Some(Loaded::Diff(content)) = &preview.content else {
@@ -549,7 +556,16 @@ impl PreviewPanel {
     }
 
     /// 块头上的按钮：`action` 为空的是「交给 agent」，把这一块连同路径和行号贴进当前终端（`PreviewEvent::Quote`）。
-    fn hunk_button(&mut self, hunk: usize, action: Option<HunkAction>, window: &mut Window, cx: &mut Context<Self>) {
+    #[allow(clippy::too_many_arguments)]
+    fn hunk_button(
+        &mut self,
+        tab: usize,
+        hunk: usize,
+        action: Option<HunkAction>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_tab(tab, cx);
         if let Some(action) = action {
             self.diff_hunk_action(hunk, action, window, cx);
             return;
@@ -611,12 +627,13 @@ impl PreviewPanel {
     /// 工作区 diff 里没删掉的行，把「路径:新行号」打进终端。
     fn render_diff_rows(
         &self,
+        tab: usize,
         range: Range<usize>,
         row_height: f32,
         number: f32,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let Some(preview) = self.preview() else {
+        let Some(preview) = self.tab_at(tab) else {
             return Vec::new();
         };
         let (Some(target), Some(Loaded::Diff(content))) = (&preview.diff, &preview.content) else {
@@ -646,7 +663,7 @@ impl PreviewPanel {
             .map(|(item, ix, row, piece, first)| {
                 let base = div().flex_none().h(px(row_height)).w_full().flex().items_center().whitespace_nowrap();
                 if let DiffRow::Header(hunk) = row {
-                    return self.render_diff_header(hunk, actionable, target, base, cx);
+                    return self.render_diff_header(tab, hunk, actionable, target, base, cx);
                 }
                 let (kind, new) = match row {
                     DiffRow::Context { new, .. } => (LineKind::Context, Some(new)),
@@ -745,13 +762,14 @@ impl PreviewPanel {
     /// agent。按钮和复选框的名字带上块的 `hunk_name`。
     fn render_diff_header(
         &self,
+        tab: usize,
         hunk: usize,
         actionable: bool,
         target: &DiffTarget,
         row: gpui::Div,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(Loaded::Diff(content)) = self.preview().and_then(|preview| preview.content.as_ref()) else {
+        let Some(Loaded::Diff(content)) = self.tab_at(tab).and_then(|preview| preview.content.as_ref()) else {
             return row.into_any_element();
         };
         let header = &content.view.file.hunks[hunk].header;
@@ -774,7 +792,7 @@ impl PreviewPanel {
             let label = action_for(&rust_i18n::t!("git.stage_hunk"), &name);
             Checkbox::new(("preview-diff-hunk-check", hunk), label, state)
                 .cursor_pointer()
-                .on_press_down(cx, move |this, window, cx| this.hunk_button(hunk, Some(action), window, cx))
+                .on_press_down(cx, move |this, window, cx| this.hunk_button(tab, hunk, Some(action), window, cx))
         });
         // id 按块号取，不按行号：暂存一块后前面的行少了，行号整体平移，辅助工具会按到别的块上。
         row.id(("preview-diff-header", hunk))
@@ -793,7 +811,7 @@ impl PreviewPanel {
                     .id(("preview-diff-hunk-button", hunk * 4 + bi))
                     .role(Role::Button)
                     .aria_label(action_for(&text, &name))
-                    .on_a11y_press(view, move |this, window, cx| this.hunk_button(hunk, action, window, cx))
+                    .on_a11y_press(view, move |this, window, cx| this.hunk_button(tab, hunk, action, window, cx))
                     .flex_none()
                     .px(px(6.))
                     .h(px(font_size + ROW_EXTRA_HEIGHT - 3.))
@@ -810,7 +828,7 @@ impl PreviewPanel {
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.hunk_button(hunk, action, window, cx);
+                            this.hunk_button(tab, hunk, action, window, cx);
                         }),
                     )
             }))
