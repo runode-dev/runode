@@ -15,6 +15,8 @@ make run-ios-device   # 构建 iOS app，装到连着的 iPhone 上
 
 已经克隆过的话，用 `make submodules` 拉子模块。`make help` 列出所有目标。
 
+`make hooks` 启用仓库里的 git 钩子：每次推送前在本机跑一遍 CI 在 macOS 上的检查和测试，过了才推。它要用 [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) 和 shellcheck（`cargo install cargo-deny`、`brew install shellcheck`）；装上 [cargo-nextest](https://nexte.st) 的话测试并行跑，快得多。
+
 Windows 用 Visual Studio 的 C++ 构建工具、同一版 zig 和 Rust。装有 GNU Make 时同样运行 `make run`，
 它会先构建命令行 `rn.exe`，再启动桌面程序 `runode.exe`；发布构建用 `make run-release`。
 没有 Make 时，在 PowerShell 里运行：

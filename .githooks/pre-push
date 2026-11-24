@@ -1,0 +1,53 @@
+#!/bin/sh
+# 推送前在本机跑一遍 CI 里 macOS 上的 check 和 test 两个任务，过了才推。查的是工作区，所以有要查的改动时，
+# 推的必须是 HEAD，工作区里也不能有没提交的改动（包括没跟踪的文件）；推的提交只改了 CI 的 paths-ignore 里的
+# 文件时不查。本机没装的 shell 相关的测试会跳过；Linux 和 Windows 专有的问题这里拦不住。
+# 急用时 git push --no-verify 跳过。
+set -euf
+
+# 位置参数是 ci.yml 里 push 的 paths-ignore 写成的 git pathspec 排除项；git 的 glob 里 * 不跨目录，和 GitHub 一样。
+patterns=$(sed -n '/^  push:/,/^  [a-z_]*:$/s/^      - "\(.*\)"$/\1/p' .github/workflows/ci.yml)
+set --
+IFS='
+'
+for pattern in $patterns; do
+	set -- "$@" ":(exclude,glob)$pattern"
+done
+unset IFS
+
+head=$(git rev-parse HEAD)
+relevant=""
+not_head=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+	# 删远端的分支或标签
+	case $local_sha in *[!0]*) ;; *) continue ;; esac
+	base=""
+	case $remote_sha in *[!0]*) git cat-file -e "$remote_sha^{commit}" 2>/dev/null && base=$remote_sha ;; esac
+	[ -n "$base" ] || base=$(git merge-base "$local_sha" refs/remotes/origin/HEAD 2>/dev/null) || base=""
+	if [ -z "$base" ] || ! git diff --quiet "$base" "$local_sha" -- . "$@"; then
+		relevant=1
+		[ "$(git rev-parse "$local_sha^{commit}")" = "$head" ] || not_head=1
+	fi
+done
+[ -n "$relevant" ] || exit 0
+
+if [ -n "$not_head" ]; then
+	echo "pre-push: 推的不是 HEAD，查不了；先切到要推的提交，或者 git push --no-verify" >&2
+	exit 1
+fi
+dirty=$(git status --porcelain --untracked-files=all -- . "$@")
+if [ -n "$dirty" ]; then
+	echo "pre-push: 工作区里有没提交的改动，查出来的不是要推的提交；先提交或 stash，或者 git push --no-verify：" >&2
+	echo "$dirty" >&2
+	exit 1
+fi
+
+echo "pre-push: 照 CI 查一遍（git push --no-verify 跳过）" >&2
+set +f
+make fmt-check
+cargo metadata --locked --format-version 1 >/dev/null
+make layers
+shellcheck scripts/install.sh crates/todo/src/run_scripts/*.sh
+make clippy CLIPPY_ARGS="-- -D warnings"
+make test
+make test-ssh
