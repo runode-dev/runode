@@ -687,6 +687,14 @@ impl Store {
         Ok(())
     }
 
+    /// 记下任务没开始成：清掉开始的时刻和会话，看板上算没开始；工作树和分支留着，下次开始接着用。
+    pub fn set_unstarted(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE todos SET started = NULL, session = NULL WHERE id = ?1", params![id])
+            .map_err(failed)?;
+        Ok(())
+    }
+
     /// 记下任务的结局和结果，`None` 的那项不动。没有这个任务时为假。
     pub fn set_outcome(&self, id: &str, outcome: Option<Outcome>, result: Option<&str>) -> Result<bool> {
         let changed = self

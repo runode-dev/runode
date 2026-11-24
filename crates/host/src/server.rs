@@ -243,6 +243,13 @@ impl UiPort {
         }
     }
 
+    /// 会话 `session` 的 shell 报一条命令跑完了，退出码是 `exit`；宿主没了时不办。
+    pub(crate) fn todo_command_finished(&self, session: SessionId, exit: Option<i32>) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.todo_command_finished(session, exit);
+        }
+    }
+
     /// 请界面办 `request`，返回这条请求的编号；宿主没了或者没有界面接得了时为 `None`。
     pub(crate) fn ask(&self, session: SessionId, preferred: Option<u64>, request: ClientMsg) -> Option<u64> {
         self.0.upgrade()?.ask_ui(session, preferred, request)

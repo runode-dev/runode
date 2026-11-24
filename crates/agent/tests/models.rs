@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use runode_agent::models::{
-    LAUNCHERS, Pick, auto_settings, listed, resume_command, same_kind, start_command, subagent_name, with_options,
+    LAUNCHERS, Pick, auto_settings, known, listed, resume_command, same_kind, start_command, subagent_name,
+    with_options,
 };
 
 /// 命令开头是 `command` 的那一项。
@@ -117,6 +118,15 @@ fn start_commands_pin_the_session_where_they_can() {
     assert_eq!(start_command("claude --model opus", "S"), "claude --session-id S --model opus");
     assert_eq!(start_command("codex -m gpt-5", "S"), "codex -m gpt-5");
     assert_eq!(start_command("claudex", "S"), "claudex");
+}
+
+/// 认得的 agent 按开头的程序名认，名字只是开头像的不算。
+#[test]
+fn known_agents_are_recognised_by_their_program() {
+    assert!(known("claude --model opus"));
+    assert!(known("opencode2 mini"));
+    assert!(!known("claude-wrapper"));
+    assert!(!known("true"));
 }
 
 /// 续接的命令插在程序名后面，别的参数照留，末尾等提示词的参数去掉；能指定对话号的按号接回；认不出的、

@@ -243,7 +243,7 @@ pub struct TodoDialog {
     /// `ClientMsg::QueueTodo` 交给宿主。
     queued: bool,
     after: Option<String>,
-    /// 任务开始过了：目录和要不要工作树不能再改。
+    /// 任务开始过了、或者留着开过的工作树：目录和要不要工作树不能再改。
     locked: bool,
     /// 读不懂的定时规则（`When::Unknown`）在用户选一种之前为空，存的时候规则照原样留着。
     kind: Option<Kind>,
@@ -513,7 +513,8 @@ impl TodoDialog {
             Some(Editing::Schedule(schedule)) => Some(schedule.spec.clone()),
             None => None,
         };
-        let locked = matches!(&editing, Some(Editing::Todo(todo)) if todo.started.is_some());
+        let locked =
+            matches!(&editing, Some(Editing::Todo(todo)) if todo.started.is_some() || todo.worktree_dir.is_some());
         let dir = spec.as_ref().map_or(dir, |spec| spec.dir.clone());
         // 新建任务时目录在 git 仓库里就默认开工作树（`check_repo` 在后台看完再打开）；定时默认不开，每次到点都
         // 开一个会越堆越多。

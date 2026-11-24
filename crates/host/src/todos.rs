@@ -92,6 +92,12 @@ struct Watched {
     /// 排着队却没开始成的任务（按 `Todo::id`）：试过几次，下次什么时候再试；到时候放回队里。宿主重启后忘掉，
     /// 那张任务留在队里照常排。
     retries: HashMap<String, (u32, Instant)>,
+    /// 开始任务时开的会话：开始打的那一行（初始化命令和 agent）还没跑完，也还没认出过 agent。只记 agent 是
+    /// `LAUNCHERS` 里的一家的：自己写的命令跑起来认不出，看不出它起没起来。
+    starting: HashSet<SessionId>,
+    /// `starting` 里没认出过 agent、开始打的那一行就以非零退出码跑完了的会话，值是退出码；定时的线程把它的
+    /// 任务记成没做成、没开始。
+    failed_starts: HashMap<SessionId, i32>,
     /// 任务会话第一次读到的 Unix 时间：接回（`resume_todo`）的会话不沿用任务第一次开始的时刻，时限从这里重新
     /// 算起。宿主接手或重启后从那时算起，只会宽、不会冤枉。
     begun: HashMap<SessionId, u64>,
@@ -386,6 +392,12 @@ impl Shared {
         if ended && let Some(at @ None) = watched.ending.get_mut(&id) {
             *at = Some(Instant::now());
         }
+        if ended || agent.is_some() {
+            watched.starting.remove(&id);
+        }
+        if ended {
+            watched.failed_starts.remove(&id);
+        }
         let Some(watch) = watched.sessions.get(&id).copied() else { return };
         let mut nudge = false;
         if ended || agent != Some(AgentState::Blocked) {
@@ -419,6 +431,19 @@ impl Shared {
             self.todos.nudge();
         }
         self.peers().todos_changed();
+    }
+
+    /// 会话 `id` 的 shell 报一条命令跑完了，退出码是 `exit`（shell 没报时为空）。是开始任务打的那一行、没认出过
+    /// agent 就以非零退出码结束的（初始化命令失败、agent 起不来），叫定时的线程把任务记成没做成。
+    pub(crate) fn todo_command_finished(&self, id: SessionId, exit: Option<i32>) {
+        let mut watched = self.todos.watched();
+        if !watched.starting.remove(&id) {
+            return;
+        }
+        let Some(code) = exit.filter(|&code| code != 0) else { return };
+        watched.failed_starts.insert(id, code);
+        drop(watched);
+        self.todos.nudge();
     }
 
     /// 有没有在用的定时或者排着队的任务：有时单独跑的宿主不因空闲退出。
@@ -533,7 +558,9 @@ impl Shared {
         if let Some(spec) = spec {
             check_title(spec)?;
             let old = self.todos.with_db(|db| db.todo_by_id(id))?.ok_or_else(|| no_todo(id))?;
-            if old.started.is_none() {
+            // 没开始成的任务留着开过的工作树，再开始时接着用，目录和工作树也得照旧。
+            let fixed = old.started.is_some() || old.worktree_dir.is_some();
+            if !fixed {
                 check_spec(spec)?;
             } else if old.spec.dir != spec.dir || old.spec.worktree != spec.worktree {
                 return Err(format!("todo {id} has started; its directory and worktree stay as they are"));
@@ -884,7 +911,10 @@ impl Shared {
             }
         };
         let instructions = todo.spec.instructions();
-        let setup = made.as_ref().and_then(|_| runode_tasks::worktree_setup(&todo.spec.dir));
+        // 留着的工作树、任务又记着没开始的，是上次没开始成：初始化命令再跑一遍。
+        let setup = (made.is_some() || kept.is_some() && todo.started.is_none())
+            .then(|| runode_tasks::worktree_setup(&todo.spec.dir))
+            .flatten();
         let shell = runode_terminal::pty::default_shell();
         let quoted = passes_command_line(&shell).then(|| (windows_quote(&instructions), batch_quote(&instructions)));
         if quoted.as_ref().is_some_and(|(arg, _)| arg.encode_utf16().count() >= WINDOWS_COMMAND_LINE) {
@@ -910,6 +940,10 @@ impl Shared {
                 return Err(format!("{err:#}"));
             }
         };
+        // 先记上再打：初始化命令可能一下子就失败了。
+        if runode_agent::models::known(&todo.spec.agent) {
+            self.todos.watched().starting.insert(session);
+        }
         // 任务会话不指定 shell，起的是 `default_shell`。
         let started = unix_now();
         let agent =

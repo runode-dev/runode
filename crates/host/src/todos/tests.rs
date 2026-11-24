@@ -302,6 +302,74 @@ fn stuck_todos_are_failed_and_their_terminals_ended() {
     }
 }
 
+/// 开始打的那一行没认出 agent 就失败了的任务记成没做成、退回没开始，结果里留着屏幕；认出过 agent 的、成功了的
+/// 不动，自己写的 agent 命令不看。shell 报不报跑完的命令看集成，这里直接喂退出码。
+#[cfg(unix)]
+#[test]
+fn todos_whose_agent_fails_to_start_are_failed() {
+    let dir = std::env::temp_dir().join(format!("rnh-unit-{}-todo-start-fails", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let host = Host::new(runode_protocol::BuildId("test".into()));
+    host.shared.todos.lock().path = Some(dir.join("todos.db"));
+    let shared = &host.shared;
+    let add = |agent: &str| {
+        let spec = TodoSpec { title: agent.into(), dir: dir.clone(), agent: agent.into(), ..TodoSpec::default() };
+        let HostMsg::TodoAdded { id, .. } = shared.add_todo(1, &spec).unwrap() else { panic!("no todo") };
+        let session = shared.spawn(SpawnOptions::headless(Some(dir.clone()))).unwrap();
+        shared.todos.with_db(|db| db.set_started(&id, unix_now(), session, None, true)).unwrap();
+        shared.todos.watched().starting.insert(session);
+        (id, session)
+    };
+    let (failing, failing_session) = add("claude");
+    let (fine, fine_session) = add("claude");
+    let (seen, seen_session) = add("claude");
+    shared.todos_changed();
+    shared.todo_command_finished(failing_session, Some(1));
+    shared.todo_command_finished(fine_session, Some(0));
+    shared.todo_session_changed(seen_session, false, Some(AgentState::Working));
+    shared.todo_command_finished(seen_session, Some(1));
+    // 跑完的那一行只看一次。
+    shared.todo_command_finished(fine_session, Some(1));
+
+    shared.fail_stuck_todos();
+    let read = |id: &str| shared.todos.with_db(|db| db.todo_by_id(id)).unwrap().unwrap();
+    let todo = read(&failing);
+    assert_eq!((todo.outcome, todo.started, todo.session), (Some(Outcome::Failed), None, None));
+    assert!(todo.result.is_some_and(|result| result.contains("could not start the agent")));
+    assert!(!shared.running(failing_session));
+    assert!(!shared.todos.watched().failed_starts.contains_key(&failing_session));
+    // 留着开过的工作树时，目录和工作树改不了。
+    let worktree = dir.join("wt");
+    shared
+        .todos
+        .with_db(|db| db.set_started(&failing, unix_now(), failing_session, Some((&worktree, "b")), false))
+        .unwrap();
+    shared.todos.with_db(|db| db.set_unstarted(&failing)).unwrap();
+    let moved = TodoSpec { dir: std::env::temp_dir(), ..read(&failing).spec };
+    assert!(shared.update_todo(2, &failing, Some(&moved), None).is_err());
+    for (id, session) in [(&fine, fine_session), (&seen, seen_session)] {
+        let todo = read(id);
+        assert_eq!((todo.outcome, todo.session), (None, Some(session)));
+        assert!(shared.running(session));
+        shared.kill(session);
+    }
+
+    // 自己写的命令认不出，不看它的那一行。
+    let HostMsg::TodoAdded { id: custom, .. } = shared
+        .add_todo(
+            1,
+            &TodoSpec { title: "custom".into(), dir: dir.clone(), agent: "true".into(), ..TodoSpec::default() },
+        )
+        .unwrap()
+    else {
+        panic!("no todo")
+    };
+    let session = shared.start_todo(&custom).unwrap();
+    assert!(!shared.todos.watched().starting.contains(&session));
+    shared.kill(session);
+}
+
 /// 排着队的任务按先后、在并发上限内开始；等的任务没做完时等着，没做成时一起记成没做成。
 #[test]
 fn queued_todos_start_within_the_limit_after_their_dependencies() {

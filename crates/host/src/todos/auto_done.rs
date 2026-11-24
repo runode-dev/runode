@@ -1,5 +1,5 @@
-//! 定时的线程收尾任务：带 `TodoSpec::auto_done` 的做完后标完成（`Shared::finish_idle_todos`），卡住的记成
-//! 没做成（`Shared::fail_stuck_todos`）。
+//! 定时的线程收尾任务：带 `TodoSpec::auto_done` 的做完后标完成（`Shared::finish_idle_todos`），卡住的和
+//! agent 没起来的记成没做成（`Shared::fail_stuck_todos`）。
 
 use std::{
     collections::HashMap,
@@ -128,20 +128,21 @@ impl Shared {
         next
     }
 
-    /// 记成没做成：agent 还在干活或者在问、跑过了 `TodoSpec::time_limit` 的任务，和自动完成的任务里停在询问上超过
-    /// `BLOCKED_GIVE_UP` 的。
+    /// 记成没做成：开始打的那一行没起来 agent 就失败了的任务（`Watched::failed_starts`，另记回没开始，没有对话
+    /// 可接，再开始时重新来），agent 还在干活或者在问、
+    /// 跑过了 `TodoSpec::time_limit` 的任务，和自动完成的任务里停在询问上超过 `BLOCKED_GIVE_UP` 的。
     /// 结果写上原因和屏幕底部，没有窗口开着它的终端时结束终端。只管还没报结局、会话还在跑的；不归这个宿主办时
     /// 什么都不做。
     pub(super) fn fail_stuck_todos(&self) {
         if self.todos_writable().is_err() {
             return;
         }
-        let (asking, begun): (Vec<SessionId>, HashMap<SessionId, u64>) = {
+        let (asking, begun, failed): (Vec<SessionId>, HashMap<SessionId, u64>, HashMap<SessionId, i32>) = {
             let watched = self.todos.watched();
             let limit = Duration::from_secs(BLOCKED_GIVE_UP);
             let asking =
                 watched.blocked.iter().filter(|(_, at)| at.elapsed() >= limit).map(|(&session, _)| session).collect();
-            (asking, watched.begun.clone())
+            (asking, watched.begun.clone(), watched.failed_starts.clone())
         };
         let todos = match self.todos.with_db(|db| db.list_todos(unix_now())) {
             Ok(todos) => todos,
@@ -155,6 +156,11 @@ impl Shared {
             else {
                 return None;
             };
+            if let Some(code) = failed.get(&session) {
+                return Some(format!(
+                    "Runode could not start the agent: the command that starts it exited with {code}."
+                ));
+            }
             // 时限只管 agent 还在干活或者在问的：做完了停下来等人看的不算超时。接回的会话从接回时算起。
             // 还没记上这个会话时这一轮不判：可能是刚接回的，不能拿第一次开始的时刻算。
             let since = begun.get(&session).map(|&begun| begun.max(started));
@@ -191,7 +197,15 @@ impl Shared {
             if let Some(screen) = self.screen_tail(session, RESULT_LIMIT.saturating_sub(result.chars().count() + 2)) {
                 result = format!("{result}\n\n{screen}");
             }
-            if let Err(err) = self.todos.with_db(|db| db.set_outcome(&todo.id, Some(Outcome::Failed), Some(&result))) {
+            let unstarted = failed.contains_key(&session);
+            let recorded = self.todos.with_db(|db| {
+                db.set_outcome(&todo.id, Some(Outcome::Failed), Some(&result))?;
+                if unstarted {
+                    db.set_unstarted(&todo.id)?;
+                }
+                Ok(())
+            });
+            if let Err(err) = recorded {
                 tracing::warn!("cannot record that todo {} is stuck: {err}", todo.id);
                 continue;
             }
@@ -200,6 +214,7 @@ impl Shared {
                 let mut watched = self.todos.watched();
                 watched.blocked.remove(&session);
                 watched.worked.remove(&session);
+                watched.failed_starts.remove(&session);
             }
             if self.session_info(session).is_some_and(|info| info.clients == 0) {
                 self.end_unviewed(session);

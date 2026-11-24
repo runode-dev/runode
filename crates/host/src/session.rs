@@ -969,6 +969,7 @@ impl Runner {
             self.emit(Event::msg(HostMsg::ResizeWindow { id: self.id, rows, columns }));
         }
         for command in self.session.take_commands() {
+            self.ui.todo_command_finished(self.id, command.exit);
             self.emit(Event::msg(HostMsg::CommandFinished { id: self.id, command }));
         }
         for request in self.session.take_clipboard() {

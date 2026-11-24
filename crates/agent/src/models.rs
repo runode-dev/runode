@@ -810,6 +810,11 @@ pub fn resume_command(command: &str, session: &str) -> Option<String> {
     Some(format!("{}{resume}{rest}", spec.command))
 }
 
+/// `command` 开头的程序名是 `LAUNCHERS` 里的一家。
+pub fn known(command: &str) -> bool {
+    launcher_of(command).is_some()
+}
+
 /// `command` 开头的程序名是哪家，和后面的参数。
 fn launcher_of(command: &str) -> Option<(&'static Launcher, &str)> {
     let command = command.trim();
