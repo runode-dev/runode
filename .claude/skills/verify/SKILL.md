@@ -30,7 +30,7 @@ description: 提交前把 runode 的改动真正跑起来验证：先做静态�
 
 包名是目录名加 `runode-` 前缀，桌面 app 的包名是 `runode`，`apps/android/tunnel` 是 `runode-android-tunnel`，`--workspace` 已经带上它。推送中转 `apps/push-relay` 是 TypeScript 写的 Worker，改了它在那个目录里跑 `npm run check` 和 `npm test`。
 
-改了命令行的命令或选项时，按 AGENTS.md 的规矩，同一个提交里还要改 `cli` 的 `help` 模块和 `skills/runode/`，后者没有测试守着，自己对一遍。整套 `make test` 输出很长、要几分钟，交给 test-runner 跑，不在这里跑。
+改了命令行的命令或选项时，按 AGENTS.md 的规矩，同一个提交里还要改 `cli` 的 `help` 模块和 `skills/runode/`，后者没有测试守着，自己对一遍。整套 `make test` 输出很长、要几分钟，要跑时在主会话里跑，输出用 `tail`、`grep` 只截取失败项和 warning。
 
 有新的 warning 就当失败处理。
 
