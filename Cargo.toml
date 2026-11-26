@@ -161,7 +161,7 @@ sha2 = "0.11"
 # 读装到 Windows 远端的便携包，算出里面各个文件的摘要；只开发布包用的 deflate，不要别的压缩格式和加密。
 zip = { version = "9", default-features = false, features = ["deflate"] }
 # 配对的二维码：`runode remote pair` 画在终端里，设置页画在界面上；不要默认特性（画成图片、SVG 用不上）。
-qrcode = { version = "0.14", default-features = false }
+qrcode = { version = "0.15", default-features = false }
 # Linux 上远程桌面采集 X11 的屏幕、注入键鼠（MIT 或 Apache-2.0）：纯 Rust 的 X 协议，不开 `allow-unsafe-code`，
 # 不链 libxcb，没装图形库的服务器上可执行文件照样跑。
 x11rb = { version = "0.13", features = ["shm", "xtest", "randr", "xfixes"] }
