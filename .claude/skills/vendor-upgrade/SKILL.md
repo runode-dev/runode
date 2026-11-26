@@ -73,7 +73,7 @@ runode 仓库里照用户的规范（`chore: 同步 ghostty 上游并更新 vend
 
 ## 推送和确认
 
-改写 fork 的历史是对外的、很难撤回的操作：ghostty fork 变基后要 `git push --force-with-lease`，libghostty-rs 跟进 Uzaaft 时也一样。所以本地全部做完、验证完、报告给了用户之后，**等用户确认再推**。推的顺序是 ghostty fork → libghostty-rs fork → runode，保证 runode 的子模块指针只指向已经推上去的提交。推之前给旧的 fork HEAD 留一个本地备份分支（`runode-backup-<日期>`），出了问题能找回来；fork 和 runode 都推上去、核对过远端之后删掉它，步骤见 `references/ghostty.md` 的"推送"。runode 仓库本身只在用户要求时提交和推送。
+改写 fork 的历史是对外的、很难撤回的操作：ghostty fork 变基后要 `git push --force-with-lease`，libghostty-rs 跟进 Uzaaft 时也一样。所以本地全部做完、验证完、报告给了用户之后，**等用户确认再推**。推的顺序是 ghostty fork → libghostty-rs fork → runode，保证 runode 的子模块指针只指向已经推上去的提交。推之前给旧的 fork HEAD 留一个本地备份分支（`runode-backup-<日期>`），出了问题能找回来；fork 和 runode 都推上去、核对过远端之后删掉它，步骤见 `references/ghostty.md` 的"推送"。runode 仓库的改动验证过就直接提交到当前分支，推送同样等用户确认。
 
 ## 报告格式
 

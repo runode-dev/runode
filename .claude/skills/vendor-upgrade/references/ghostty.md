@@ -166,7 +166,7 @@ xcodebuild -project apps/ios/Runode.xcodeproj -scheme Runode -configuration Debu
 - 编译器拦不住的要自己核：`ghostty_*_get`、`ghostty_*_set` 的值经 `void*` 传，某个选项换了值的类型、NULL 的含义或返回码时照样编得过。把 `VTerminal` 用到的每个选项和数据键对照新旧头文件里它的说明看一遍（`git -C vendor/ghostty diff <old> <new> -- include/ghostty`）。
 - 带类型转换的宏 Swift 导不进来，`VTerminal` 里照头文件手抄了一份（`StyleFlag`）；上游动了 `style.h` 时对照着核，`VTerminalTests` 里逐个属性的测试守着它。
 
-runode 的提交照用户的规范，例子见 SKILL.md 的"提交信息"。只在用户要求时提交。
+runode 的提交照用户的规范，例子见 SKILL.md 的"提交信息"。
 
 ## 7. 推送
 
