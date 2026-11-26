@@ -112,7 +112,7 @@ runode schedule add 'Nightly flaky-test hunt' --daily 02:00 --prompt '...'
 runode schedule add 'Weekly report' --daily 09:00 --days mon --prompt '...'
 runode schedule add 'Check the deploy' --every 30 --auto-done --prompt '...'
 runode schedule add 'Standup notes' --cron '30 9 * * 1-5' --prompt '...'
-runode schedule add 'Release notes' --at '2026-11-02 10:00' --prompt '...'
+runode schedule add 'Release notes' --at 'YYYY-MM-DD HH:MM' --prompt '...'
 runode schedule list     # WHEN and NEXT, the next time it fires
 runode schedule pause ID # NEXT shows paused; resume ID counts from then on
 runode schedule fire ID  # fire it once now to try it; NEXT stays
