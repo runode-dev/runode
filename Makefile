@@ -15,7 +15,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device android-vt android-tunnel android-speech android-test run-android app install restart dmg check test test-ssh clippy layers audit fmt fmt-check hooks clean
+.PHONY: help submodules build release run run-release windows-zip run-ios run-ios-device android-vt android-tunnel android-speech android-test run-android app install restart dmg check test test-ssh clippy layers audit fmt fmt-check clean
 
 help: ## 列出所有目标
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -153,9 +153,6 @@ fmt: ## 按 rustfmt.toml 格式化工作区里的 crate（不碰 vendor）
 
 fmt-check: ## 检查格式，有要改的就失败
 	$(CARGO) fmt -- --check
-
-hooks: ## 启用仓库里的 git 钩子（.githooks）：推送前在本机照 CI 查一遍
-	git config core.hooksPath .githooks
 
 clean: ## 清理构建产物
 	$(CARGO) clean
