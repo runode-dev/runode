@@ -71,7 +71,7 @@ jobs:
       - name: 确认有 Metal 编译器
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-deny@0.20.2
       - name: 检查格式
@@ -104,7 +104,7 @@ jobs:
       - name: 确认有 Metal 编译器
         # 新版 Xcode 把 Metal 工具链拆成了单独下载的组件。
         run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-nextest@0.9.146
       # 终端的集成测试要起这几个 shell，runner 上默认没有；RUNODE_REQUIRE_SHELLS 让缺了的直接失败，不悄悄跳过。
@@ -143,7 +143,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-nextest@0.9.146
       - name: 装 GPUI 编译要的库
@@ -192,7 +192,7 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-nextest@0.9.146
       # CARGO_BUILD_WARNINGS 让 cargo 自己的警告也算失败；只有测试用到的依赖在 --all-targets 下算用上了，再不带测试查一遍。
