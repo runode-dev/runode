@@ -5,7 +5,7 @@ description: runode 升级 vendor 依赖的流程：同步 ghostty 上游（vend
 
 # 升级 vendor 依赖
 
-runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io、原样使用。各自的来历和不变量写在 `vendor/AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
+runode 的 vendor 下有两个子模块，另外 GPUI 取自 crates.io，只有 macOS 平台层换成 `vendor/gpui-pre-macos` 里打了补丁的一份。各自的来历和不变量写在 `vendor/AGENTS.md`（"终端仿真用的 libghostty-vt…"、"同步 ghostty 上游时…"、"GPUI 取自…"三段），动手前先读那三段，这里不重复，只讲怎么升、怎么核对。
 
 | 目录 | 是什么 | 上游 | runode 的改动在哪 |
 | --- | --- | --- | --- |

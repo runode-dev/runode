@@ -17,7 +17,7 @@ report file). Give file paths rather than pasting large content.
 ```sh
 runode todo add 'Migrate parser to the new AST' --start --prompt 'In src/parser, ...
 Run cargo test -p parser. Commit on your branch when the tests pass.'
-runode todo add 'Update the CLI docs' --agent codex --model gpt-5 --effort high --prompt '...'
+runode todo add 'Update the CLI docs' --agent codex --effort high --prompt '...'
 ```
 
 - `--cwd DIR` picks the repository or directory (default: the current one).
